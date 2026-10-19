@@ -1,0 +1,35 @@
+    slug    |  entity   | status  | pages_done | pages_total | received | failed | raw_complete | canonical_complete | gold_complete |                                                                            message                                                                             
+------------+-----------+---------+------------+-------------+----------+--------+--------------+--------------------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ mag-matriz | vendors   | FAILED  |          0 |             |        0 |      0 | f            | f                  | f             | Falha na página 1: Credenciais recusadas pelo Omie: A chave de acesso está inválida ou o aplicativo está suspenso [#b5fc6950-cbc5-11f1-8a9c-87a8b21dade3 NDAy]
+ mag-filial | products  | SUCCESS |         16 |          16 |     1587 |      0 | t            | t                  | t             | 
+ mag-filial | customers | WARNING |        159 |         159 |     7916 |      0 | t            | t                  | t             | A conferência de vínculos não foi concluída.
+ mag-filial | vendors   | SUCCESS |          1 |           1 |       33 |      0 | t            | t                  | t             | 
+ expert     | products  | SUCCESS |         16 |          16 |     1592 |      0 | t            | t                  | t             | 
+ expert     | customers | WARNING |        159 |         159 |     7919 |      0 | t            | t                  | t             | A conferência de vínculos não foi concluída.
+ expert     | vendors   | SUCCESS |          1 |           1 |       38 |      0 | t            | t                  | t             | 
+ ergooffice | products  | SUCCESS |         17 |          17 |     1603 |      0 | t            | t                  | t             | 
+ ergooffice | customers | WARNING |        159 |         159 |     7919 |      0 | t            | t                  | t             | A conferência de vínculos não foi concluída.
+ ergooffice | vendors   | SUCCESS |          1 |           1 |       38 |      0 | t            | t                  | t             | 
+(10 rows)
+
+
+PROGRESS ed":5350}
+{"company":"mag-filial","entity":"customers","step":5,"runId":"235b4701-bdcf-4873-b576-b501862f9e40","done":false,"status":"RUNNING","received":6050}
+{"company":"mag-filial","entity":"customers","step":6,"runId":"235b4701-bdcf-4873-b576-b501862f9e40","done":false,"status":"RUNNING","received":7150}
+{"company":"mag-filial","entity":"customers","step":7,"runId":"235b4701-bdcf-4873-b576-b501862f9e40","done":true,"status":"WARNING","received":7916}
+{"company":"mag-filial","entity":"products","step":0,"runId":"6c595df1-03e9-4887-af76-8ab53c34ba78","done":false,"status":"RUNNING","received":500}
+{"company":"mag-filial","entity":"products","step":1,"runId":"6c595df1-03e9-4887-af76-8ab53c34ba78","done":false,"status":"RUNNING","received":1200}
+{"company":"mag-filial","entity":"products","step":2,"runId":"6c595df1-03e9-4887-af76-8ab53c34ba78","done":true,"status":"SUCCESS","received":1587}
+omie sync failed company=febf3354-0ca9-5689-9f4d-8ef49eb702bd entity=vendors page=1: Credenciais recusadas pelo Omie: A chave de acesso está inválida ou o aplicativo está suspenso [#b5fc6950-cbc5-11f1-8a9c-87a8b21dade3 NDAy]
+{"company":"mag-matriz","entity":"vendors","step":0,"runId":"6757d8bf-289d-41dc-8c66-8a7ba9aada24","done":true,"status":"FAILED","received":0}
+file:///app/.output/bootstrap-sync.mjs:13584
+          throw new Error(`Sync failed: ${company.slug}/${entity}`);
+                ^
+
+Error: Sync failed: mag-matriz/vendors
+    at file:///app/.output/bootstrap-sync.mjs:13584:17
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.22.0
+
+

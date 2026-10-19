@@ -1,0 +1,134 @@
+name: biomie-v2
+services:
+  db:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: biomie_v2
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=80, -c, log_min_duration_statement=1000]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d biomie_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    mem_limit: 768m
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  auth:
+    image: supabase/gotrue:v2.197.0
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${PUBLIC_SUPABASE_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${AUTH_DB_PASSWORD}@db:5432/biomie_v2
+      GOTRUE_SITE_URL: ${APP_BASE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${APP_BASE_URL}/**
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_ISSUER: ${PUBLIC_SUPABASE_URL}/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: 10
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-}
+      GOTRUE_SMTP_SENDER_NAME: Biomie
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+    healthcheck:
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://localhost:9999/health]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 256m
+    logging: *logging
+  rest:
+    image: postgrest/postgrest:v14.18
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${REST_DB_PASSWORD}@db:5432/biomie_v2
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
+      PGRST_DB_MAX_ROWS: 10000
+      PGRST_DB_POOL: 15
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: 10
+      PGRST_DB_TX_END: commit
+    mem_limit: 256m
+    logging: *logging
+  gateway:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    depends_on: [auth, rest]
+    ports: [127.0.0.1:3140:8000]
+    volumes:
+      - ${GATEWAY_CONFIG}:/etc/nginx/conf.d/default.conf:ro
+    mem_limit: 64m
+    logging: *logging
+  web:
+    image: biomie-v2-web:${RELEASE_ID}
+    build:
+      context: ${SOURCE_DIR}
+      dockerfile: deploy/vps/Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${PUBLIC_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+    restart: unless-stopped
+    depends_on: [gateway]
+    ports: [127.0.0.1:3130:3000]
+    environment: &app_environment
+      APP_ENV: production
+      APP_BASE_URL: ${APP_BASE_URL}
+      SUPABASE_URL: http://gateway:8000
+      SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      BIOMIE_JOB_TOKEN: ${BIOMIE_JOB_TOKEN}
+      BIOMIE_PROCESS_ROLE: web
+      OMIE_GLOBAL_PER_MINUTE: 120
+      OMIE_KEY_METHOD_PER_MINUTE: 60
+      OMIE_MAX_CONCURRENT: 2
+      NODE_OPTIONS: --max-old-space-size=1024
+    init: true
+    stop_grace_period: 45s
+    mem_limit: 1536m
+    logging: *logging
+  worker:
+    image: biomie-v2-web:${RELEASE_ID}
+    restart: unless-stopped
+    depends_on:
+      web: {condition: service_healthy}
+    environment:
+      <<: *app_environment
+      BIOMIE_PROCESS_ROLE: worker
+      APP_BASE_URL: http://web:3000
+    command: [node, .output/worker.mjs]
+    healthcheck: {disable: true}
+    init: true
+    stop_grace_period: 45s
+    mem_limit: 512m
+    logging: *logging
+volumes:
+  postgres_data:

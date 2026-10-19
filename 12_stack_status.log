@@ -1,0 +1,48 @@
+BUILD_TAIL utput/server/_libs/lodash.mjs                                    161.63 kB │ gzip:  29.39 kB
+#12 16.81 .output/server/_libs/supabase__auth-js.mjs                         319.47 kB │ gzip:  64.73 kB
+#12 16.81 .output/server/_libs/recharts+[...].mjs                            562.23 kB │ gzip: 102.54 kB
+#12 16.81 .output/server/_libs/@tanstack/react-router+[...].mjs              756.69 kB │ gzip: 159.40 kB
+#12 16.81 
+#12 16.81 ✓ built in 2.91s
+#12 16.81 ℹ Generated .output/nitro.json
+#12 16.82 
+#12 16.82 [nitro] ✔ You can preview this build using npx vite preview
+#12 17.02 Bundled 2 modules in 23ms
+#12 17.02 
+#12 17.02   worker.mjs  4.61 KB  (entry point)
+#12 17.02 
+#12 17.07 Bundled 52 modules in 45ms
+#12 17.07 
+#12 17.07   bootstrap-sync.mjs  0.54 MB  (entry point)
+#12 17.07 
+#12 DONE 17.2s
+
+#13 [runtime 3/3] COPY --from=build --chown=node:node /app/.output ./.output
+#13 DONE 0.3s
+
+#14 exporting to image
+#14 exporting layers
+#14 exporting layers 0.5s done
+#14 exporting manifest sha256:fbcce92f9da0651ffbaff343b7cec32051492ac2ae2770b35a1cfc6810d896a1 0.0s done
+#14 exporting config sha256:eff96f687e532cfbe77dfa5951c34a37ddedc318d6bd01b97d53f5c5fc3a8766 0.0s done
+#14 exporting attestation manifest sha256:8206605ed9b4f94b7843d283663498241027784d102a0ac4fe59726605fc30fc 0.0s done
+#14 exporting manifest list sha256:8c6fad90917e8940bb0db1fcd4ba83349758c4ba57ed93736f71f04d3baff912
+#14 exporting manifest list sha256:8c6fad90917e8940bb0db1fcd4ba83349758c4ba57ed93736f71f04d3baff912 0.0s done
+#14 naming to docker.io/library/biomie-v2-web:20261019 done
+#14 unpacking to docker.io/library/biomie-v2-web:20261019
+#14 unpacking to docker.io/library/biomie-v2-web:20261019 0.2s done
+#14 DONE 0.9s
+
+#15 resolving provenance for metadata file
+#15 DONE 0.0s
+ Image biomie-v2-web:20261019 Built 
+
+SERVICES auth running healthy
+db running healthy
+gateway running 
+rest running 
+web running healthy
+
+HTTP 3130 200
+HTTP 3140 200
+

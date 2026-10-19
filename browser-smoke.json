@@ -1,0 +1,45 @@
+{
+  "login": "passed",
+  "routes": [
+    {
+      "route": "/plano-de-voo",
+      "heading": "Plano de Voo — Outubro de 2026"
+    },
+    {
+      "route": "/vendas",
+      "heading": "Vendas — Outubro / 2026"
+    },
+    {
+      "route": "/vendedores",
+      "heading": "Vendedores — Outubro / 2026"
+    },
+    {
+      "route": "/clientes",
+      "heading": "Clientes"
+    },
+    {
+      "route": "/produtos",
+      "heading": "Produtos"
+    },
+    {
+      "route": "/financeiro",
+      "heading": "Financeiro"
+    },
+    {
+      "route": "/qualidade-dos-dados",
+      "heading": "Qualidade dos Dados"
+    },
+    {
+      "route": "/integracoes",
+      "heading": "Integrações"
+    },
+    {
+      "route": "/admin",
+      "heading": "Administração"
+    }
+  ],
+  "errors": [],
+  "serverFailures": [],
+  "desktop": true,
+  "mobile": true
+}

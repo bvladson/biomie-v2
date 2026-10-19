@@ -1,0 +1,2 @@
+{"companies": 5, "credentials": 5, "users": 4, "users_without_email": 1, "password_formats": ["$2y$"], "legacy_roles": {"viewer": 1, "manager": 2, "admin": 1}, "targets": 46, "privacy": "Private export remains on VPS, mode 0600; no credentials or user records printed"}
+

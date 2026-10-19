@@ -1,0 +1,13 @@
+biomie_sales_targets_monthly count 46 columns ['id', 'company_id', 'vendor_id', 'vendor_name', 'year_month', 'target_amount', 'tiers_json', 'currency', 'source', 'notes', 'created_at', 'created_by', 'updated_at', 'updated_by']
+NUMERIC_TARGET_EXAMPLE {'year_month': '2026-03', 'target_amount': '181000.00'}
+biomie_sales_target_levels count 79 columns ['id', 'company_id', 'vendor_id', 'year_month', 'level_number', 'level_name', 'target_amount', 'active', 'created_by', 'updated_by', 'created_at', 'updated_at']
+NUMERIC_TARGET_EXAMPLE {'year_month': '2026-03', 'level_number': 1, 'level_name': 'Compromisso', 'target_amount': '181000.00'}
+biomie_company_targets count 12 columns ['id', 'company_id', 'canal', 'competencia', 'meta_valor', 'ativo', 'created_at', 'updated_at']
+NUMERIC_TARGET_EXAMPLE {'competencia': '2026-01', 'meta_valor': '350000.00'}
+biomie_user_seller_scope count 0 columns []
+NUMERIC_TARGET_EXAMPLE {}
+biomie_user_visible_sellers count 0 columns []
+NUMERIC_TARGET_EXAMPLE {}
+RPC_SIGNATURE p_company uuid, p_entity text
+
+

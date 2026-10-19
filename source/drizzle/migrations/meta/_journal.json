@@ -1,0 +1,223 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790949801112,
+      "tag": "0000_migration",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790950985451,
+      "tag": "0001_flight_plan",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790957452517,
+      "tag": "0002_hardening_sales_360",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790958169373,
+      "tag": "0003_schedule_snapshot_job",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790958888997,
+      "tag": "0004_teams_target_level_customers_products",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790962716257,
+      "tag": "0005_document_access_customer_last_purchase",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790962843325,
+      "tag": "0006_fast_seller_scope_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790962903121,
+      "tag": "0007_fast_company_customer_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790965792171,
+      "tag": "0008_finance_and_data_quality",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790966436523,
+      "tag": "0009_finance_service_role_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790966488256,
+      "tag": "0010_reconciliation_safe_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790966662909,
+      "tag": "0011_freshness_flight_plan_job_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790967553138,
+      "tag": "0012_omie_integration_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790967624838,
+      "tag": "0013_omie_integration_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792411472039,
+      "tag": "0014_omie_pipeline_hardening_and_transactional",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792411778991,
+      "tag": "0015_app_base_url_setting",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792412100000,
+      "tag": "0016_vps_security_and_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792412200000,
+      "tag": "0017_finance_capability_boundary",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792412300000,
+      "tag": "0018_rpc_grants_readiness_and_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792412400000,
+      "tag": "0019_finance_direct_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792412500000,
+      "tag": "0020_atomic_canonical_item_replacement",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792412600000,
+      "tag": "0021_legacy_commercial_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792412700000,
+      "tag": "0022_settlement_readiness",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792412800000,
+      "tag": "0023_private_legacy_login_aliases",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792412900000,
+      "tag": "0024_preserve_legacy_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792413000000,
+      "tag": "0025_private_legacy_classification_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792413100000,
+      "tag": "0026_legacy_canonical_channel_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792413200000,
+      "tag": "0027_scope_access_administration",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792413300000,
+      "tag": "0028_refresh_classification_directories",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792413400000,
+      "tag": "0029_legacy_order_pipeline_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792413500000,
+      "tag": "0030_identity_first_omie_matching",
+      "breakpoints": true
+    }
+  ]
+}

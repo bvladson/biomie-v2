@@ -1,0 +1,150 @@
+OLD_CRON # /etc/cron.d/biomie — agendamento do BIomie na VPS.
+# Instale com: bash tools/deploy/vps/install_cron.sh
+#
+# ORIGEM: os 13 jobs do BIomie que estavam no PAINEL da Hostinger (host antigo).
+#
+# ATENÇÃO AO FUSO: o host antigo rodava em UTC; esta VPS roda em -03.
+# Os horários abaixo foram CONVERTIDOS para preservar o horário real de execução
+# (ex.: o digest saía 11:00 UTC = 08:00 no Ceará; aqui está 08:00 direto).
+# Os jobs de intervalo (*/5, */15, */30) não precisam de conversão.
+#
+# Roda como www-data — o MESMO usuário do php-fpm. Se rodar como outro usuário,
+# os arquivos criados em storage/ ficam com dono trocado e a web para de escrever.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+BIOMIE_PROJECT_ROOT=/var/www/biomie/live
+BIOMIE_PHP_BIN=/usr/bin/php
+
+# --- tempo real -------------------------------------------------------------
+*/5  * * * *   www-data /bin/sh /var/www/biomie/live/cron/hostinger/worker.sh
+*/15 * * * *   www-data /bin/sh /var/www/biomie/live/cron/hostinger/sync_commercial.sh
+*/15 * * * *   www-data /bin/sh /var/www/biomie/live/cron/hostinger/sync_finance.sh
+*/15 * * * *   www-data /bin/sh /var/www/biomie/live/cron/hostinger/ops_sentinel.sh
+0,30 * * * *   www-data /bin/sh /var/www/biomie/live/cron/hostinger/materialize.sh
+
+# --- agenda de orçamentos ---------------------------------------------------
+7,22,37,52 * * * *  www-data /bin/sh /var/www/biomie/live/cron/hostinger/quote_agenda_scan.sh
+*/30 * * * *        www-data /bin/sh /var/www/biomie/live/cron/hostinger/quote_agenda_notify.sh stale
+0 8  * * 1-5        www-data /bin/sh /var/www/biomie/live/cron/hostinger/quote_agenda_notify.sh digest
+
+# --- inteligência -----------------------------------------------------------
+# De 2 em 2 horas: o score depende de datas (atraso de follow-up, previsão), que
+# mudam por DIA — rodar de 15 em 15 minutos gastaria CPU sem mudar resultado.
+20 */2 * * *   www-data /bin/sh /var/www/biomie/live/cron/hostinger/intelligence_score.sh
+# Insights varrem 90 dias de NF: 4x/dia basta e nao concorre com o score.
+50 */6 * * *   www-data /bin/sh /var/www/biomie/live/cron/hostinger/intelligence_insights.sh
+# Previsao mensal PERSISTIDA. 1x/dia as 05:10 UTC (02:10 em Fortaleza): depois do
+# sync comercial da madrugada e antes do primeiro insights do dia (05:50), para a
+# frase da home e a linha da tabela sairem da mesma leitura do banco.
+# O limite de "parado" no health e 30h — cobre uma execucao perdida.
+10 5 * * *     www-data /bin/sh /var/www/biomie/live/cron/hostinger/intelligence_forecast.sh
+# Score e forecast territorial persistidos; roda depois do forecast mensal e
+# antes dos insights, sem competir com a materializacao da madrugada.
+30 5 * * *     www-data /bin/sh /var/www/biomie/live/cron/hostinger/intelligence_geo.sh
+# Backtest territorial: SEMANAL. Ele observa o mes seguinte a cada competencia
+# de referencia — rodar diariamente reprocessaria as mesmas janelas fechadas.
+# Segunda 04:20 UTC, antes do geo do dia. Dead-man switch de 8 dias.
+20 4 * * 1     www-data /bin/sh /var/www/biomie/live/cron/hostinger/geo_backtest.sh
+# Reconstrói o mart fiscal por empresa e, somente após sucesso, persiste a prova
+# fonte x mart. O dead-man switch fiscal_mart admite uma execução perdida (30h).
+45 1 * * *     www-data /bin/sh /var/www/biomie/live/cron/hostinger/fiscal_mart.sh
+# Risco de atraso dos títulos em aberto (R$ 6,29 mi de exposição). Depois do
+# forecast mensal (05:10) e sem concorrer com a materialização da madrugada.
+40 5 * * *     www-data /bin/sh /var/www/biomie/live/cron/hostinger/intelligence_receivables.sh
+# Faixa normal por dia da semana — o que torna a evolução diária legível.
+# 05:55 e não 05:50: o insights roda `50 */6`, ou seja TAMBÉM às 05:50. Os dois
+# no mesmo minuto disputam banco sem necessidade (nada aqui depende do outro).
+55 5 * * *     www-data /bin/sh /var/www/biomie/live/cron/hostinger/intelligence_baseline.sh
+# Anomalias na telemetria operacional. 06:15: com a madrugada inteira já
+# fechada, para a janela de 7 dias não terminar no meio de um lote.
+15 6 * * *     www-data /bin/sh /var/www/biomie/live/cron/hostinger/intelligence_ops_anomaly.sh
+
+# --- backup do banco ---------------------------------------------------------
+# Ate 2026-08-07 a VPS nao tinha backup automatizado NENHUM: so tres dumps
+# soltos em /root, todos do dia do corte da migracao. Este projeto ja perdeu
+# producao uma vez (2026-07-10, aplicacao apagada do servidor).
+#
+# 03:00: depois do fiscal_mart (01:45) e antes do geo_backtest (04:20) — a
+# janela mais quieta da madrugada. Roda como ROOT, nao www-data: o dump usa o
+# socket unix com autenticacao por unix_socket, entao nao precisa de senha em
+# arquivo nenhum. Retencao de 14 dias em /var/backups/biomie (0700).
+# 23/09/2026: retencao EXTERNA elevada de 7 para 30 dias. Backup diario de
+# ~177 MB crescendo ~1,2 MB/dia: 30 dias custam ~5,7 GB dos 9,5 TB livres
+# no destino (0,06%). Variavel inline para sobreviver aos deploys do app.
+0 3 * * *      root     BIOMIE_OFFSITE_RETENCAO=30 /bin/sh /var/www/biomie/live/cron/hostinger/db_backup.sh
+
+# --- retenção ----------------------------------------------------------------
+# `cron/retention_cleanup.php` existia desde sempre e NUNCA foi agendado: spans
+# (463 mil linhas / 440 MB), métricas (538 mil / 210 MB) e a trilha de sync
+# (57 mil, 677/dia) cresciam para sempre com a política escrita e parada.
+# Semanal, domingo 04:40 — a janela mais quieta, sem concorrer com nada.
+40 4 * * 0     www-data /bin/sh /var/www/biomie/live/cron/hostinger/retention_cleanup.sh
+
+# --- noturnos (eram 01:30/02:00/02:30/02:45/03:15 UTC) ----------------------
+30 22 * * *    www-data /bin/sh /var/www/biomie/live/cron/hostinger/enrich_clients_governance.sh
+0  23 * * *    www-data /bin/sh /var/www/biomie/live/cron/hostinger/compute_forecasts.sh
+30 23 * * *    www-data /bin/sh /var/www/biomie/live/cron/hostinger/compute_opportunities.sh
+45 23 * * *    www-data /bin/sh /var/www/biomie/live/cron/hostinger/enrich_finance_titulos.sh
+15 0  * * *    www-data /bin/sh /var/www/biomie/live/cron/hostinger/finance_future_receivables.sh
+
+# --- NUNCA foram agendados no host antigo ------------------------------------
+# Os scripts existem e estão prontos, mas nunca entraram no painel. Deixados
+# desligados de propósito: ligar é decisão de operação, não do deploy.
+# 0 */6 * * *  www-data /bin/sh /var/www/biomie/live/cron/hostinger/notifications_digest.sh
+# 10 4  * * *  www-data /bin/sh /var/www/biomie/live/cron/hostinger/geo_enrich.sh
+# 0 9   * * *  www-data /bin/sh /var/www/biomie/live/cron/hostinger/management_alerts.sh
+# 0 5   * * *  www-data /bin/sh /var/www/biomie/live/cron/hostinger/daily_integrity.sh
+#
+# NÃO migrado: o cron de /public_html/logistica (schedule-run.sh) é de OUTRO
+# sistema que continua no host antigo.
+
+RUNTIME # /etc/systemd/system/biomie-python.service
+[Unit]
+Description=BIomie Python API
+After=network.target
+
+[Service]
+Type=simple
+User=biomie
+Group=biomie
+WorkingDirectory=/opt/biomie-python
+Environment="PATH=/opt/biomie-python/.venv/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/opt/biomie-python/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+
+RUNTIME enabled
+
+RUNTIME biomie-v2-web-1 183.4MiB / 1.5GiB 19.15%
+biomie-v2-gateway-1 3.395MiB / 64MiB 0.00%
+biomie-v2-auth-1 11.95MiB / 256MiB 0.02%
+biomie-v2-rest-1 26.31MiB / 256MiB 0.15%
+biomie-v2-db-1 364.7MiB / 768MiB 103.73%
+mag-site-web-1 149.4MiB / 768MiB 0.00%
+mag-site-omie-consulta-1 39.82MiB / 128MiB 0.00%
+mag-site-omie-pedidos-1 51.8MiB / 128MiB 0.00%
+vsb-n8n-runners-1 12.16MiB / 512MiB 0.00%
+vsb-n8n-n8n-1 374.3MiB / 1GiB 0.35%
+vsb-n8n-postgres-1 61.74MiB / 512MiB 0.27%
+vsb-erpnext-frontend-1 4.938MiB / 7.755GiB 0.00%
+vsb-erpnext-queue-long-1 89.75MiB / 7.755GiB 0.00%
+vsb-erpnext-queue-short-1 54.66MiB / 7.755GiB 0.00%
+vsb-erpnext-websocket-1 74.77MiB / 7.755GiB 0.00%
+vsb-erpnext-backend-1 202MiB / 7.755GiB 0.01%
+vsb-erpnext-scheduler-1 133.1MiB / 7.755GiB 0.00%
+vsb-erpnext-redis-queue-1 30.32MiB / 7.755GiB 0.34%
+vsb-erpnext-redis-cache-1 20.4MiB / 7.755GiB 0.30%
+vsb-erpnext-db-1 203.4MiB / 7.755GiB 0.03%
+vsb-site-neto 104.8MiB / 7.755GiB 0.03%
+vsb-site-mobile-r8 11.75MiB / 7.755GiB 0.01%
+vsb-cms-wordpress-1 355.6MiB / 2GiB 0.00%
+vsb-cms-database-1 167.4MiB / 1GiB 0.01%
+
+

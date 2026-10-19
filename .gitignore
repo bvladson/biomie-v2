@@ -1,0 +1,36 @@
+# --- Segredos e dados sensíveis: nunca versionar ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+stack.env
+**/secrets/
+**/*test-context*.json
+**/smoke-account*.json
+**/legacy-export*.json
+**/legacy-canonical*.json
+**/legacy-map*.json
+**/omie-validation*.json
+**/*credentials*.json
+*.dump
+*.sql.gz
+*.age
+
+# --- Dependências e saídas de build ---
+node_modules/
+**/node_modules/
+source/.output/
+source/.tanstack/
+source/.nitro/
+source/.vinxi/
+source/.wrangler/
+source/dist/
+**/__pycache__/
+*.tsbuildinfo
+
+# --- Artefatos derivados (reprodutíveis a partir do git) ---
+*.tar.gz
+ops/operational-preview/
+.local-pg/
