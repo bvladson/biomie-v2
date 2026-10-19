@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
+import { httpJobsDisabled } from "@/lib/jobs/job-auth.server";
 
 /** Daily scheduled call (pg_cron). Requires the cron bearer secret. */
 export const Route = createFileRoute("/api/public/jobs/flight-plan-snapshots")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        // Production runs the daily snapshot inside the worker process.
+        if (httpJobsDisabled()) return new Response("Not Found", { status: 404 });
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const denied = await authenticateCronRequest(request);
         if (denied) {

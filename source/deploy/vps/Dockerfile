@@ -10,10 +10,16 @@ ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
     VITE_SUPABASE_PUBLISHABLE_KEY=$VITE_SUPABASE_PUBLISHABLE_KEY \
     VITE_GOOGLE_AUTH_ENABLED=false \
     NODE_OPTIONS=--max-old-space-size=2560
-RUN bun run build && bun build scripts/worker.ts --target=node --format=esm --outfile=.output/worker.mjs && bun build scripts/bootstrap-sync.ts --target=node --format=esm --outfile=.output/bootstrap-sync.mjs
+RUN bun run build \
+ && for entry in worker bootstrap-sync worker-ctl credentials-ctl omie-probe; do \
+      bun build scripts/$entry.ts --target=node --format=esm --outfile=.output/$entry.mjs || exit 1; \
+    done
 
 FROM node:24-bookworm-slim AS runtime
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000
+ARG GIT_COMMIT=unknown
+LABEL org.opencontainers.image.revision=$GIT_COMMIT \
+      org.opencontainers.image.title="biomie-v2-web"
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 BIOMIE_GIT_COMMIT=$GIT_COMMIT
 WORKDIR /app
 COPY --from=build --chown=node:node /app/.output ./.output
 USER node

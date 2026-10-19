@@ -16,6 +16,7 @@ services:
       timeout: 5s
       retries: 12
     mem_limit: 768m
+    cpus: 1.5
     logging: &logging
       driver: json-file
       options:
@@ -45,6 +46,7 @@ services:
       GOTRUE_MAILER_AUTOCONFIRM: "false"
       GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
       GOTRUE_RATE_LIMIT_EMAIL_SENT: 10
+      GOTRUE_RATE_LIMIT_HEADER: X-Real-IP
       GOTRUE_SMTP_HOST: ${SMTP_HOST:-}
       GOTRUE_SMTP_PORT: ${SMTP_PORT:-587}
       GOTRUE_SMTP_USER: ${SMTP_USER:-}
@@ -83,7 +85,9 @@ services:
     image: nginx:stable-alpine
     restart: unless-stopped
     depends_on: [auth, rest]
-    ports: [127.0.0.1:3140:8000]
+    # 3140 = public server (only the host nginx /supabase/ location points here).
+    # 3141 = internal server for host-side operations; never routed by the host nginx.
+    ports: ["127.0.0.1:3140:8001", "127.0.0.1:3141:8000"]
     volumes:
       - ${GATEWAY_CONFIG}:/etc/nginx/conf.d/default.conf:ro
     mem_limit: 64m
@@ -96,6 +100,7 @@ services:
       args:
         VITE_SUPABASE_URL: ${PUBLIC_SUPABASE_URL}
         VITE_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+        GIT_COMMIT: ${BIOMIE_GIT_COMMIT:-unknown}
     restart: unless-stopped
     depends_on: [gateway]
     ports: [127.0.0.1:3130:3000]
@@ -106,14 +111,18 @@ services:
       SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       BIOMIE_JOB_TOKEN: ${BIOMIE_JOB_TOKEN}
+      BIOMIE_CREDENTIALS_KEY: ${BIOMIE_CREDENTIALS_KEY:-}
       BIOMIE_PROCESS_ROLE: web
-      OMIE_GLOBAL_PER_MINUTE: 120
-      OMIE_KEY_METHOD_PER_MINUTE: 60
-      OMIE_MAX_CONCURRENT: 2
+      BIOMIE_ALLOW_HTTP_JOBS: "0"
+      OMIE_GLOBAL_PER_MINUTE: 30
+      OMIE_KEY_METHOD_PER_MINUTE: 10
+      OMIE_MAX_CONCURRENT: 1
+      OMIE_CIRCUIT_OPEN_MS: 1800000
       NODE_OPTIONS: --max-old-space-size=1024
     init: true
     stop_grace_period: 45s
     mem_limit: 1536m
+    cpus: 1.0
     logging: *logging
   worker:
     image: biomie-v2-web:${RELEASE_ID}
@@ -123,12 +132,27 @@ services:
     environment:
       <<: *app_environment
       BIOMIE_PROCESS_ROLE: worker
-      APP_BASE_URL: http://web:3000
+      # Conservative: the legacy BIomie shares the same IP and Omie applications.
+      OMIE_GLOBAL_PER_MINUTE: ${OMIE_WORKER_GLOBAL_PER_MINUTE:-90}
+      OMIE_KEY_METHOD_PER_MINUTE: ${OMIE_WORKER_KEY_METHOD_PER_MINUTE:-30}
+      OMIE_MAX_CONCURRENT: 1
+      BIOMIE_WORKER_INTERVAL_MS: ${BIOMIE_WORKER_INTERVAL_MS:-30000}
+      BIOMIE_WORKER_MAX_LOAD_PER_CPU: ${BIOMIE_WORKER_MAX_LOAD_PER_CPU:-0.75}
+      BIOMIE_WORKER_TICK_BUDGET_MS: ${BIOMIE_WORKER_TICK_BUDGET_MS:-25000}
+      BIOMIE_SNAPSHOT_TIME_ZONE: America/Fortaleza
+      BIOMIE_SNAPSHOT_HOUR: "8"
+      NODE_OPTIONS: --max-old-space-size=384
     command: [node, .output/worker.mjs]
-    healthcheck: {disable: true}
+    healthcheck:
+      test: [CMD, node, -e, "const f=require('fs');const t=Number(f.readFileSync('/tmp/biomie-worker-heartbeat','utf8'));process.exit(Date.now()-t<180000?0:1)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     init: true
-    stop_grace_period: 45s
+    stop_grace_period: 60s
     mem_limit: 512m
+    cpus: 0.75
     logging: *logging
 volumes:
   postgres_data:
