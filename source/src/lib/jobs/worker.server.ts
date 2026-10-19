@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { availableParallelism, loadavg } from "node:os";
+import { cpus, loadavg } from "node:os";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { bootstrapDependencies, runBootstrap } from "@/lib/omie/bootstrap.server";
@@ -60,7 +60,9 @@ export function workerDependencies(admin: Admin, signal: AbortSignal): WorkerDep
     now: () => new Date(),
     log,
     heartbeat,
-    loadAverage: () => ({ load1: loadavg()[0] ?? 0, cpus: availableParallelism() }),
+    // Host-wide ratio: loadavg is the host's, so divide by the host CPU count
+    // (availableParallelism() reflects the container quota and inflates the ratio).
+    loadAverage: () => ({ load1: loadavg()[0] ?? 0, cpus: Math.max(1, cpus().length) }),
 
     async readControl(): Promise<WorkerControl> {
       const { data, error } = await db.rpc("get_worker_control");
