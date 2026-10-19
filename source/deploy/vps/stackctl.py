@@ -33,7 +33,11 @@ SECRET_NAMES = {
     "SERVICE_ROLE_KEY", "BIOMIE_JOB_TOKEN", "BIOMIE_CREDENTIALS_KEY", "SMTP_PASS",
 }
 NON_SECRET_SETTABLE = {"RELEASE_ID", "SOURCE_DIR", "BIOMIE_GIT_COMMIT", "APP_BASE_URL",
-                       "PUBLIC_SUPABASE_URL", "GATEWAY_CONFIG", "APP_ENV"}
+                       "PUBLIC_SUPABASE_URL", "GATEWAY_CONFIG", "APP_ENV",
+                       # Worker tuning (read by compose for the worker service only).
+                       "BIOMIE_WORKER_TICK_BUDGET_MS", "BIOMIE_WORKER_INTERVAL_MS",
+                       "BIOMIE_WORKER_MAX_LOAD_PER_CPU", "BIOMIE_WORKER_BLACKOUTS",
+                       "OMIE_WORKER_GLOBAL_PER_MINUTE", "OMIE_WORKER_KEY_METHOD_PER_MINUTE"}
 KEY_LIFETIME_SECONDS = 2 * 365 * 24 * 3600
 
 

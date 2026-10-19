@@ -139,6 +139,8 @@ services:
       BIOMIE_WORKER_INTERVAL_MS: ${BIOMIE_WORKER_INTERVAL_MS:-30000}
       BIOMIE_WORKER_MAX_LOAD_PER_CPU: ${BIOMIE_WORKER_MAX_LOAD_PER_CPU:-0.75}
       BIOMIE_WORKER_TICK_BUDGET_MS: ${BIOMIE_WORKER_TICK_BUDGET_MS:-25000}
+      # Windows when the worker never runs (e.g. VSB maintenance), explicit offsets.
+      BIOMIE_WORKER_BLACKOUTS: ${BIOMIE_WORKER_BLACKOUTS:-}
       BIOMIE_SNAPSHOT_TIME_ZONE: America/Fortaleza
       BIOMIE_SNAPSHOT_HOUR: "8"
       NODE_OPTIONS: --max-old-space-size=384
