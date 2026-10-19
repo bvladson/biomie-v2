@@ -100,7 +100,7 @@ if command == 'harden':
     admin = http('https://biomie.magmoveiscorporativos.com.br/supabase/auth/v1/admin/users')[0]
     legacy = http('https://biomie.magmoveiscorporativos.com.br/biomie/login.php')[0]
     print(json.dumps({'hardened': True, 'auth_settings': status, 'admin_blocked': admin,
-                      'legacy_login_page': legacy, 'csp_on_api': 'Content-Security-Policy' in headers,
+                      'legacy_login_page': legacy, 'csp_on_api': any(k.lower() == 'content-security-policy' for k in headers),
                       'rollback_site_saved': str(ROLLBACK_SITE)}, indent=1))
 elif command == 'cutover':
     src = release_dir()
@@ -116,7 +116,7 @@ elif command == 'cutover':
     api = http('https://biomie.magmoveiscorporativos.com.br/supabase/auth/v1/settings')[0]
     jobs = http('https://biomie.magmoveiscorporativos.com.br/api/public/jobs/omie-backfill')[0]
     print(json.dumps({'cutover': True, 'login_page': status, 'is_v2': 'BIOMIE' in body or 'Entrar' in body,
-                      'api': api, 'jobs_hidden': jobs, 'csp': headers.get('Content-Security-Policy', '')[:60],
+                      'api': api, 'jobs_hidden': jobs, 'csp': next((v for k, v in headers.items() if k.lower() == 'content-security-policy'), '')[:60],
                       'rollback_site': str(ROLLBACK_SITE)}, indent=1))
 elif command == 'rollback':
     if not ROLLBACK_SITE.exists():
