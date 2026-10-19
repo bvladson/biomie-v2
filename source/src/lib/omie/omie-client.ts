@@ -58,6 +58,11 @@ const RATE_LIMIT = /(consumo redundante|redundant|bloquead|limite de requisi|too
 const AUTH = /(app_key|app_secret|chave de acesso|n[aã]o autorizad|invalid.*key|acesso negado)/i;
 
 const REDUNDANT = /(consumo redundante|redundant)/i;
+// "Já existe uma requisição desse método sendo executada e você pode tentar
+// novamente em alguns instantes": Omie still holds the previous call of this
+// method for this application (seen right after a fast empty page, 19/10/2026).
+const BUSY = /j[aá] existe uma requisi[cç][aã]o desse m[eé]todo/i;
+export const OMIE_BUSY_RETRY_MS = 20_000;
 
 /** Stable identity of one exact request; never contains the credentials themselves. */
 export function requestFingerprint(
@@ -243,6 +248,13 @@ export class OmieClient {
         "blocked",
         `Omie bloqueou temporariamente este método (425): ${msg}`,
         false,
+      );
+    if (fault && BUSY.test(fault))
+      throw new OmieError(
+        "rate_limit",
+        `Omie ainda processa outra requisição deste método: ${msg}`,
+        true,
+        OMIE_BUSY_RETRY_MS,
       );
     if (res.status === 429 || (fault && RATE_LIMIT.test(fault))) {
       const retry = res.headers.get("retry-after");

@@ -598,7 +598,7 @@ defs.push(
   FIN(
     "accounts_receivable",
     "A receber",
-    "Valor dos títulos (original + juros + multa − desconto) com vencimento no período. Títulos cancelados ficam fora.",
+    "Valor dos títulos (original + juros + multa − desconto − impostos retidos pelo cliente) com vencimento no período. Títulos cancelados ficam fora.",
     "SUM(original + ajustes) WHERE due_date IN período AND NOT cancelado",
     "currency",
     "neutral",
@@ -607,7 +607,7 @@ defs.push(
   FIN(
     "amount_received",
     "Recebido",
-    "Liquidações com data de liquidação no período (até a data de referência). Recebimento ≠ faturamento.",
+    "Valor efetivamente recebido nas liquidações com data no período (até a data de referência), por baixa: um depósito que quita vários títulos conta uma vez. Recebimento ≠ faturamento.",
     "SUM(settlements.amount) WHERE settlement_date IN período",
     "currency",
     "up",
@@ -622,7 +622,7 @@ defs.push(
     "neutral",
     "data_as_of",
     [],
-    "Posição na data de referência = menor entre fim do período e data_as_of.",
+    "Posição na data de referência = menor entre fim do período e data_as_of. Ajustes = juros, multa e desconto do título e das baixas (na data da baixa), menos impostos retidos pelo cliente.",
   ),
   FIN(
     "amount_overdue",

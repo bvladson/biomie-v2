@@ -5,6 +5,7 @@ import {
   productsAdapter,
   receivablesAdapter,
   settlementsAdapter,
+  withheldTaxes,
 } from "./adapters";
 
 // Structure observed in ListarNF; all identifiers/amounts below are synthetic.
@@ -131,26 +132,107 @@ describe("settlement amounts", () => {
       dDtPagamento: "19/10/2026",
       cNatureza: "R",
       nValorMovCC: 100,
-    },
-    resumo: { nValPago: 500 },
+    } as Record<string, unknown>,
+    resumo: { nValPago: 100 } as Record<string, unknown>,
   });
-  it("uses the amount of this movement instead of the cumulative paid title amount", () => {
+  it("uses the paid amount of this settlement", () => {
     const payload = movement();
     expect(settlementsAdapter.toRaw(payload)?.external_id).toBe("7");
+    expect(settlementsAdapter.toCanonical(payload)?.header).toMatchObject({
+      amount: 100,
+      discount_amount: 0,
+      interest_amount: 0,
+      fine_amount: 0,
+    });
+  });
+  it("does not repeat the whole bank movement of a batch receipt on every title", () => {
+    // Real Ergooffice batch: one deposit of 55,830.95 settled three titles.
+    const payload = movement();
+    payload.detalhes["nValorMovCC"] = 55830.95;
+    payload.resumo["nValPago"] = 8002.75;
+    expect(settlementsAdapter.toCanonical(payload)?.header["amount"]).toBe(8002.75);
+  });
+  it("keeps a settlement made only by discount, without cash", () => {
+    const payload = {
+      detalhes: { nCodBaixa: 7, nCodTitulo: 8, dDtPagamento: "04/08/2026", nDesconto: 18000 },
+      resumo: { nValPago: 0 },
+    };
+    expect(settlementsAdapter.toCanonical(payload)?.header).toMatchObject({
+      amount: 0,
+      discount_amount: 18000,
+    });
+  });
+  it("records interest and fine paid with the settlement", () => {
+    const payload = movement();
+    payload.detalhes["nJuros"] = 3.5;
+    payload.detalhes["nMulta"] = 2;
+    payload.resumo["nValPago"] = 105.5;
+    expect(settlementsAdapter.toCanonical(payload)?.header).toMatchObject({
+      amount: 105.5,
+      interest_amount: 3.5,
+      fine_amount: 2,
+    });
+  });
+  it("falls back to the bank movement only when the paid amount is absent", () => {
+    const payload = movement();
+    delete payload.resumo["nValPago"];
     expect(settlementsAdapter.toCanonical(payload)?.header["amount"]).toBe(100);
   });
-  it("does not invent the receipt amount when only a cumulative title summary exists", () => {
+  it("does not invent an amount when there is neither a paid amount nor a discount", () => {
     const payload = {
       detalhes: { nCodBaixa: 7, nCodTitulo: 8, dDtPagamento: "19/10/2026" },
-      resumo: { nValPago: 500 },
+      resumo: {},
     };
     expect(settlementsAdapter.toCanonical(payload)).toBeNull();
+    const zero = { ...payload, resumo: { nValPago: 0 } };
+    expect(settlementsAdapter.toCanonical(zero)).toBeNull();
+  });
+  it("rejects negative amounts and cancelled settlements", () => {
+    const negative = movement();
+    negative.resumo["nValPago"] = -1;
+    expect(settlementsAdapter.toCanonical(negative)).toBeNull();
+    const cancelled = movement();
+    cancelled.detalhes["cStatus"] = "CANCELADO";
+    expect(settlementsAdapter.toCanonical(cancelled)).toBeNull();
   });
   it("does not use a zero baixa identifier as a receipt identity", () => {
     const payload = movement();
-    payload.detalhes.nCodBaixa = 0;
+    payload.detalhes["nCodBaixa"] = 0;
     expect(settlementsAdapter.toRaw(payload)).toBeNull();
     expect(settlementsAdapter.toCanonical(payload)).toBeNull();
+  });
+});
+
+describe("taxes withheld by the customer", () => {
+  it("adds only the taxes flagged as withheld (real Ergooffice title, 5.85%)", () => {
+    const payload = {
+      codigo_lancamento_omie: 7528493746,
+      data_vencimento: "20/03/2026",
+      valor_documento: 8500,
+      retem_ir: "S",
+      valor_ir: 102,
+      retem_pis: "S",
+      valor_pis: 55.25,
+      retem_cofins: "S",
+      valor_cofins: 255,
+      retem_csll: "S",
+      valor_csll: 85,
+      retem_iss: "N",
+      valor_iss: 40,
+      retem_inss: "N",
+    };
+    expect(withheldTaxes(payload)).toBe(497.25);
+    expect(receivablesAdapter.toCanonical(payload)?.header["tax_withheld_amount"]).toBe(497.25);
+  });
+  it("is zero when nothing is withheld", () => {
+    const payload = {
+      codigo_lancamento_omie: 1,
+      data_vencimento: "20/03/2026",
+      valor_documento: 100,
+      retem_ir: "N",
+      valor_ir: 1.2,
+    };
+    expect(receivablesAdapter.toCanonical(payload)?.header["tax_withheld_amount"]).toBe(0);
   });
 });
 

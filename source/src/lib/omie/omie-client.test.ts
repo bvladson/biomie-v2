@@ -96,6 +96,31 @@ describe("OmieClient", () => {
     expect(Math.max(...waits)).toBeGreaterThanOrEqual(61_000);
   });
 
+  it("retries a busy-method fault after at least 20 s instead of failing the load", async () => {
+    const waits: number[] = [];
+    let i = 0;
+    const responses = [
+      () =>
+        json(
+          {
+            faultstring:
+              "ERROR: Já existe uma requisição desse método sendo executada e você pode tentar novamente em alguns instantes. (1)",
+          },
+          500,
+        ),
+      () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 1 }] }),
+    ];
+    const client = new OmieClient(creds, {
+      fetchImpl: (async () => responses[Math.min(i++, 1)]!()) as unknown as typeof fetch,
+      sleep: async (ms) => void waits.push(ms),
+      limiter: new OmieRateLimiter({}, { sleep: async () => {} }),
+      maxRetries: 2,
+    });
+    const page = await client.listPage("x/", "ListarContasReceber", { pagina: 1 }, ["lista"]);
+    expect(page.records).toHaveLength(1);
+    expect(Math.max(...waits)).toBeGreaterThanOrEqual(20_000);
+  });
+
   it("redacts credentials", () => {
     const m = redact('erro KEY123 / SECRET456 "app_key":"zzz"', creds);
     expect(m).not.toContain("KEY123");
@@ -128,7 +153,7 @@ describe("OmieRateLimiter", () => {
     let t = 0;
     const waits: number[] = [];
     const l = new OmieRateLimiter(
-      {},
+      { minMethodGapMs: 0 },
       {
         now: () => t,
         sleep: async (ms) => {
@@ -142,6 +167,30 @@ describe("OmieRateLimiter", () => {
     expect(waits).toEqual([]);
     await l.run("k", "ListarNF", async () => 1, undefined, "page-1");
     expect(waits.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(61_000);
+  });
+
+  it("pauses between consecutive calls of the same method and key only", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarContasReceber", async () => 1, undefined, "k-crr-1");
+    await l.run("k", "ListarContasReceber", async () => 1, undefined, "k-crr-2");
+    expect(waits).toEqual([2_000]);
+    await l.run("k", "ListarMovimentos", async () => 1, undefined, "k-mov-1");
+    await l.run("other", "ListarContasReceber", async () => 1, undefined, "other-crr-1");
+    expect(waits).toEqual([2_000]);
+    t += 5_000;
+    await l.run("k", "ListarContasReceber", async () => 1, undefined, "k-crr-3");
+    expect(waits).toEqual([2_000]);
   });
 
   it("opens a 30-minute circuit by default", () => {

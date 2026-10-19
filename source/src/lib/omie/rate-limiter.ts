@@ -26,6 +26,12 @@ export interface RateLimitConfig {
   circuitOpenMs: number;
   /** Minimum interval between two identical requests. */
   redundantSpacingMs: number;
+  /**
+   * Minimum pause between the end of one call and the start of the next call of
+   * the same method with the same App Key (Omie answers "já existe uma requisição
+   * desse método sendo executada" to back-to-back calls).
+   */
+  minMethodGapMs: number;
   /** Errors per App Key inside the window that pause the whole key. */
   keyErrorBudget: number;
   keyErrorWindowMs: number;
@@ -38,6 +44,7 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   methodOverrides: {},
   circuitOpenMs: 30 * 60_000,
   redundantSpacingMs: 61_000,
+  minMethodGapMs: 2_000,
   keyErrorBudget: 5,
   keyErrorWindowMs: 30 * 60_000,
 };
@@ -68,6 +75,7 @@ export class OmieRateLimiter {
   private active = new Map<string, number>();
   private circuits = new Map<string, number>();
   private lastRequest = new Map<string, number>();
+  private lastMethodCall = new Map<string, number>();
   private keyErrors = new Map<string, number[]>();
 
   constructor(
@@ -87,8 +95,9 @@ export class OmieRateLimiter {
       if (!Number.isFinite(value) || value <= 0)
         throw new Error("Configuração inválida dos limites Omie.");
     }
-    if (!Number.isFinite(this.cfg.redundantSpacingMs) || this.cfg.redundantSpacingMs < 0)
-      throw new Error("Configuração inválida dos limites Omie.");
+    for (const value of [this.cfg.redundantSpacingMs, this.cfg.minMethodGapMs])
+      if (!Number.isFinite(value) || value < 0)
+        throw new Error("Configuração inválida dos limites Omie.");
     this.now = deps.now ?? Date.now;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
@@ -180,6 +189,10 @@ export class OmieRateLimiter {
       const wait = last === undefined ? 0 : last + this.cfg.redundantSpacingMs - this.now();
       if (wait > 0) await abortableWait(this.sleep, wait, signal);
     }
+    // One wait (not a loop) so injected clocks in tests never spin.
+    const lastCall = this.lastMethodCall.get(k);
+    const gap = lastCall === undefined ? 0 : lastCall + this.cfg.minMethodGapMs - this.now();
+    if (gap > 0) await abortableWait(this.sleep, gap, signal);
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       this.throwIfOpen(appKey, method);
@@ -209,6 +222,7 @@ export class OmieRateLimiter {
       return await fn();
     } finally {
       this.active.set(k, (this.active.get(k) ?? 1) - 1);
+      this.lastMethodCall.set(k, this.now());
       if (fingerprint) {
         this.pruneRequests();
         this.lastRequest.set(fingerprint, this.now());
@@ -273,6 +287,7 @@ export function getSharedOmieLimiter(): OmieRateLimiter {
         DEFAULT_RATE_LIMIT.redundantSpacingMs,
       ),
       keyErrorBudget: envNumber(env, "OMIE_KEY_ERROR_BUDGET", DEFAULT_RATE_LIMIT.keyErrorBudget),
+      minMethodGapMs: envNumber(env, "OMIE_MIN_METHOD_GAP_MS", DEFAULT_RATE_LIMIT.minMethodGapMs),
     });
   }
   return sharedOmieLimiter;

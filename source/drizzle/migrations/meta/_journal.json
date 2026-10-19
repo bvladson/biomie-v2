@@ -267,6 +267,13 @@
       "when": 1792414200000,
       "tag": "0037_revoke_anon_public_execute",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792414300000,
+      "tag": "0038_settlement_adjustments_withholding",
+      "breakpoints": true
     }
   ]
 }

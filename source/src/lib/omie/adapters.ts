@@ -226,6 +226,26 @@ const num = (v: unknown) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
+/** A present, finite amount; null when the field is absent or not a number. */
+const amountOf = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const cents = (v: number) => Math.round(v * 100) / 100;
+
+const WITHHOLDING_TAXES = ["ir", "pis", "cofins", "csll", "iss", "inss"];
+/**
+ * Taxes withheld by the customer (retem_X = "S"). Public buyers pay the title net
+ * of IR/PIS/COFINS/CSLL (5.85% observed on Ergooffice, 19/10/2026), so the
+ * withheld part is never received in cash and must not stay as an open balance.
+ */
+export function withheldTaxes(p: Payload): number {
+  let total = 0;
+  for (const tax of WITHHOLDING_TAXES)
+    if (flagS(p[`retem_${tax}`])) total += Math.max(0, amountOf(p[`valor_${tax}`]) ?? 0);
+  return cents(total);
+}
 
 export interface CanonicalItem {
   item_sequence: number;
@@ -511,6 +531,7 @@ export const receivablesAdapter: OmieTxAdapter = {
         due_date: due,
         expected_date: day(p["data_previsao"]),
         original_amount: num(p["valor_documento"]),
+        tax_withheld_amount: withheldTaxes(p),
         source_status: status,
         cancelled_at:
           status?.toUpperCase() === "CANCELADO" ? (day(p["data_emissao"]) ?? due) : null,
@@ -546,18 +567,26 @@ export const settlementsAdapter: OmieTxAdapter = {
     const det = obj(p["detalhes"]);
     const date = day(det["dDtPagamento"]);
     const title = str(det["nCodTitulo"]);
-    const movementAmount = det["nValorMovCC"];
-    // resumo.nValPago is cumulative per title. It cannot be repeated for every
-    // nCodBaixa without double-counting partial receipts.
+    // Observed on all 8,705 real settlements (19/10/2026): resumo.nValPago is the
+    // amount of THIS settlement. It equals nValorMovCC on every single settlement,
+    // adds up to nValorMovCC on batch receipts (one bank movement shared by several
+    // titles, where nValorMovCC repeats the whole deposit on each title) and adds
+    // up per title on partial receipts. nValorMovCC is only a fallback.
+    const paid = amountOf(obj(p["resumo"])["nValPago"]) ?? amountOf(det["nValorMovCC"]);
+    const discount = amountOf(det["nDesconto"]) ?? 0;
+    const interest = amountOf(det["nJuros"]) ?? 0;
+    const fine = amountOf(det["nMulta"]) ?? 0;
     if (
       !date ||
       !title ||
       !settlementsAdapter.toRaw(p) ||
-      movementAmount === null ||
-      movementAmount === undefined ||
-      movementAmount === "" ||
-      !Number.isFinite(Number(movementAmount)) ||
-      Number(movementAmount) <= 0 ||
+      paid === null ||
+      paid < 0 ||
+      discount < 0 ||
+      interest < 0 ||
+      fine < 0 ||
+      // A settlement made only by discount (no cash) still closes the title.
+      paid + discount <= 0 ||
       (str(det["cNatureza"]) !== null && str(det["cNatureza"]) !== "R") ||
       str(det["cStatus"])?.toUpperCase() === "CANCELADO"
     )
@@ -566,7 +595,10 @@ export const settlementsAdapter: OmieTxAdapter = {
       header: {
         receivable_external_id: title,
         settlement_date: date,
-        amount: Number(movementAmount),
+        amount: cents(paid),
+        discount_amount: cents(discount),
+        interest_amount: cents(interest),
+        fine_amount: cents(fine),
         account_external_id: str(det["nCodCC"]),
       },
     };
