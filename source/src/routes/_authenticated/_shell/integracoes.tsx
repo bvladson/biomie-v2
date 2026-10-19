@@ -20,8 +20,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  controlWorker,
   fetchIntegrationOverview,
   fetchOmieComparison,
+  fetchWorkerStatus,
   resolveOmieMatch,
   saveOmieCredentials,
   setDataSource,
@@ -60,7 +62,7 @@ const fmtDate = (s: string | null | undefined) => (s ? new Date(s).toLocaleStrin
 
 function statusVariant(s: string): "default" | "secondary" | "destructive" | "outline" {
   if (["CONNECTED", "SUCCESS", "READY", "MATCHED", "MANUAL"].includes(s)) return "default";
-  if (["ERROR", "FAILED", "CONFLICT"].includes(s)) return "destructive";
+  if (["ERROR", "FAILED", "CONFLICT", "INVALID_CREDENTIALS"].includes(s)) return "destructive";
   if (["RUNNING", "WARNING"].includes(s)) return "secondary";
   return "outline";
 }
@@ -97,6 +99,7 @@ function IntegrationsPage() {
         <p className="text-sm text-muted-foreground">Carregando…</p>
       ) : (
         <>
+          <WorkerStatusCard />
           <div className="grid gap-6 lg:grid-cols-2">
             <ConnectionCard company={company} data={overview.data} onChange={refresh} />
             <DataSourceCard
@@ -115,6 +118,71 @@ function IntegrationsPage() {
 }
 
 type Overview = Awaited<ReturnType<typeof fetchIntegrationOverview>>;
+
+const WORKER_STATE_LABEL: Record<string, string> = {
+  RUNNING: "Processando",
+  IDLE: "Ocioso",
+  PAUSED: "Pausado",
+  THROTTLED: "Aguardando a máquina aliviar",
+  BLACKOUT: "Janela bloqueada",
+  ERROR: "Erro no último ciclo",
+};
+
+/** Worker owns every Omie load; SUPER_ADMIN can pause/resume it here. */
+function WorkerStatusCard() {
+  const getStatus = useServerFn(fetchWorkerStatus);
+  const control = useServerFn(controlWorker);
+  const status = useQuery({
+    queryKey: ["worker-status"],
+    queryFn: () => getStatus(),
+    refetchInterval: 30_000,
+  });
+  const [busy, setBusy] = useState(false);
+  if (!status.data) return null;
+  const w = status.data;
+  const heartbeat = w.heartbeatAt;
+  const stale = !heartbeat || Date.now() - new Date(heartbeat).getTime() > 5 * 60_000;
+  const state = stale ? "SEM SINAL" : (w.state ?? "—");
+  const act = async (action: "pause" | "resume") => {
+    setBusy(true);
+    try {
+      await control({ data: { action } });
+      toast.success(action === "pause" ? "Worker pausado." : "Worker retomado.");
+      await status.refetch();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <RefreshCw className="h-4 w-4" /> Worker de integração
+          <Badge variant={stale || state === "ERROR" ? "destructive" : "outline"}>
+            {WORKER_STATE_LABEL[state] ?? state}
+          </Badge>
+          {w.recurring && <Badge variant="secondary">Recorrência ligada</Badge>}
+        </CardTitle>
+        <CardDescription>
+          Todas as cargas do Omie rodam no worker, com limite de chamadas e pausa automática quando
+          a máquina está carregada. Último sinal: {fmtDate(heartbeat)}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => act(w.paused ? "resume" : "pause")}
+        >
+          {w.paused ? "Retomar" : "Pausar"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 function ConnectionCard({
   company,

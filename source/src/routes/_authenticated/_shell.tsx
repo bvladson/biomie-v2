@@ -3,6 +3,7 @@ import { FlaskConical } from "lucide-react";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { FilterBar } from "@/components/layout/FilterBar";
+import { CoverageBanner } from "@/components/layout/CoverageBanner";
 import { globalFiltersSchema } from "@/domain/filters";
 import { appContextQuery } from "@/lib/queries";
 import { useGlobalFilters } from "@/hooks/use-filters";
@@ -71,6 +72,7 @@ function ShellLayout() {
               <FilterBar />
             </div>
           )}
+          {resolved && <CoverageBanner />}
         </header>
         {resolved ? <Outlet /> : <NoCompany />}
       </SidebarInset>

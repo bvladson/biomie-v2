@@ -189,6 +189,52 @@ export const syncOmieStep = createServerFn({ method: "POST" })
     });
   });
 
+export interface WorkerStatusDTO {
+  paused: boolean;
+  recurring: boolean;
+  reason: string | null;
+  state: string | null;
+  heartbeatAt: string | null;
+  lastJob: string | null;
+}
+
+export const fetchWorkerStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<WorkerStatusDTO> => {
+    await assertAdmin(context.supabase, context.userId);
+    const { data, error } = await context.supabase.rpc("worker_status" as never);
+    if (error) throw new Error("Não foi possível carregar o status do worker.");
+    const value = (data ?? {}) as {
+      control?: Record<string, unknown>;
+      status?: Record<string, unknown>;
+    };
+    const text = (v: unknown) => (typeof v === "string" && v ? v : null);
+    return {
+      paused: value.control?.["paused"] === true,
+      recurring: value.control?.["recurring"] === true,
+      reason: text(value.control?.["reason"]),
+      state: text(value.status?.["state"]),
+      heartbeatAt: text(value.status?.["heartbeat_at"]),
+      lastJob: text(value.status?.["lastJob"]),
+    };
+  });
+
+/** Pause/resume is restricted to SUPER_ADMIN inside set_worker_control. */
+export const controlWorker = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i) => z.object({ action: z.enum(["pause", "resume"]) }).parse(i))
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase.rpc(
+      "set_worker_control" as never,
+      {
+        p_paused: data.action === "pause",
+        p_reason: data.action === "pause" ? "pausa pela tela" : "retomada pela tela",
+      } as never,
+    );
+    if (error) throw new Error(error.message || "Não foi possível alterar o worker.");
+    return { ok: true };
+  });
+
 export const fetchOmieComparison = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) => companySchema.extend({ entity: entitySchema }).parse(i))
