@@ -305,6 +305,26 @@ describe("authority of the official rule over legacy snapshots", () => {
   });
 });
 
+describe("fiscal patterns found in the real 2026 data", () => {
+  const nf = (...cfops: string[]) => ({ det: cfops.map((CFOP) => ({ prod: { CFOP } })) });
+  it("counts a future-delivery sale once: billing is the sale, delivery is a remittance", () => {
+    expect(classifyOperation("invoices", nf("5.922"), {})).toBe("commercial");
+    expect(classifyOperation("invoices", nf("6.922"), {})).toBe("commercial");
+    for (const cfop of ["5.116", "5.117", "6.116", "6.117"])
+      expect(classifyOperation("invoices", nf(cfop), {})).toBe("remittance");
+    expect(classifyOperation("invoices", nf("5.116", "5.916"), {})).toBe("remittance");
+  });
+  it("treats shipments on behalf of third parties and transfers as remittances", () => {
+    for (const cfop of ["5.923", "6.923", "5.409", "5.152", "6.152"])
+      expect(classifyOperation("invoices", nf(cfop), {})).toBe("remittance");
+  });
+  it("keeps a sale with bonus items as a sale, and unknown operations pending", () => {
+    expect(classifyOperation("invoices", nf("5.101", "5.910"), {})).toBe("commercial");
+    expect(classifyOperation("invoices", nf("5.949"), {})).toBe("unconfirmed");
+    expect(classifyOperation("invoices", nf("5.102", "5.904"), {})).toBe("unconfirmed");
+  });
+});
+
 describe("order operation scope from real Omie payload fields", () => {
   it("uses item CFOPs when nome_tipo_atividade is absent", () => {
     const order = (cfops: string[]) => ({
@@ -313,7 +333,8 @@ describe("order operation scope from real Omie payload fields", () => {
     });
     expect(classifyOperation("orders", order(["5.102", "5.102"]), {})).toBe("commercial");
     expect(classifyOperation("orders", order(["5.910"]), {})).toBe("remittance");
-    expect(classifyOperation("orders", order(["5.102", "5.910"]), {})).toBe("unconfirmed");
+    expect(classifyOperation("orders", order(["5.102", "5.910"]), {})).toBe("commercial");
+    expect(classifyOperation("orders", order(["5.102", "5.904"]), {})).toBe("unconfirmed");
     expect(classifyOperation("orders", order(["5.949"]), {})).toBe("unconfirmed");
     expect(classifyOperation("orders", { cabecalho: {} }, {})).toBe("unconfirmed");
   });

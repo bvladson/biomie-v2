@@ -110,7 +110,25 @@ const REMITTANCE_NAMES = [
   "demonstracao",
 ];
 // Exact allowlists from legacy OmieOperationScope; no broad 5.xxx/6.xxx assumption.
+// Additions validated against the real 2026 data (19/10/2026), see GO_LIVE_RUNBOOK:
+// - future delivery sale: the billing leg (5922/6922, simples faturamento) is the
+//   sale; the delivery leg (5116/5117/6116/6117) is a remittance of the same sale.
+//   Counting both doubled MAG Filial sales (e.g. NF 964 + NF 2009, R$ 292.500).
+//   The legacy had already overridden NFs 1285/1286 (CFOP 6116) to remittance.
+// - 5923/6923: shipment on behalf of third parties (venda à ordem), not a sale.
+// - 5151/5152/5409/6151/6152/6409: transfers between establishments.
+const FUTURE_DELIVERY_CFOPS = new Set(["5116", "5117", "6116", "6117"]);
+const BONUS_CFOPS = new Set(["5910", "6910"]);
 const REMITTANCE_CFOPS = new Set([
+  ...FUTURE_DELIVERY_CFOPS,
+  "5923",
+  "6923",
+  "5151",
+  "5152",
+  "5409",
+  "6151",
+  "6152",
+  "6409",
   "5904",
   "5905",
   "5907",
@@ -154,12 +172,11 @@ const COMMERCIAL_CFOPS = new Set([
   "5113",
   "5114",
   "5115",
-  "5116",
-  "5117",
   "5118",
   "5119",
   "5403",
   "5922",
+  "6922",
   "6101",
   "6102",
   "6103",
@@ -175,8 +192,6 @@ const COMMERCIAL_CFOPS = new Set([
   "6113",
   "6114",
   "6115",
-  "6116",
-  "6117",
   "6118",
   "6119",
 ]);
@@ -202,9 +217,18 @@ function scopeByName(name: unknown, config: LegacyClassificationConfig): Operati
   return sale ? "commercial" : remittance ? "remittance" : "unconfirmed";
 }
 
-/** Every item must agree; one unknown or conflicting CFOP keeps the document pending. */
+/**
+ * Every item must agree; one unknown or conflicting CFOP keeps the document
+ * pending. Exception kept from the legacy: bonus items (5910/6910) shipped with
+ * sale items do not turn a sale into a remittance.
+ */
 function scopeByCfops(codes: string[]): OperationScope {
   if (!codes.length) return "unconfirmed";
+  if (
+    codes.some((code) => COMMERCIAL_CFOPS.has(code)) &&
+    codes.every((code) => COMMERCIAL_CFOPS.has(code) || BONUS_CFOPS.has(code))
+  )
+    return "commercial";
   const classifications = new Set(
     codes.map((code) =>
       REMITTANCE_CFOPS.has(code)

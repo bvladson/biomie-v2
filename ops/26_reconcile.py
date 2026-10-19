@@ -30,8 +30,9 @@ def pg(query):
                        capture_output=True, text=True, timeout=600)
     if p.returncode:
         raise SystemExit('postgres: ' + p.stderr[-800:])
+    # json_agg separates elements with newlines: keep every line except the transaction markers.
     lines = [l for l in p.stdout.splitlines() if l not in ('BEGIN', 'COMMIT')]
-    return json.loads(lines[-1] or 'null')
+    return json.loads('\n'.join(lines) or 'null')
 
 
 def my(query):

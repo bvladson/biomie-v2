@@ -11,7 +11,7 @@ ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
     VITE_GOOGLE_AUTH_ENABLED=false \
     NODE_OPTIONS=--max-old-space-size=2560
 RUN bun run build \
- && for entry in worker bootstrap-sync worker-ctl credentials-ctl omie-probe; do \
+ && for entry in worker bootstrap-sync worker-ctl credentials-ctl omie-probe reprocess-raw; do \
       bun build scripts/$entry.ts --target=node --format=esm --outfile=.output/$entry.mjs || exit 1; \
     done
 
