@@ -64,6 +64,8 @@ begin
   -- A real overpayment is still detected.
   insert into public.canonical_settlements(company_id,source,external_id,receivable_external_id,settlement_date,amount)
     values (c,'omie','b5','t4','2026-02-02',700);
+  -- run_integrity_checks drops its temp table on commit; this suite is one transaction.
+  drop table if exists pg_temp._iss;
   perform public.run_integrity_checks(c);
   if not exists(select 1 from public.integrity_issues where company_id=c and check_key='overpaid_title' and external_id='t4' and status='OPEN') then
     raise exception 'overpaid_title must fire for t4'; end if;
