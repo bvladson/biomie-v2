@@ -187,9 +187,14 @@ async function runTxSyncStepUnlocked(
       })
       .select("*")
       .single();
-    // The unique "one RUNNING per company+entity" index is the concurrency lock.
+    // The unique "one RUNNING per company+entity" index is the concurrency lock
+    // (23505). Any other code is a real failure and must not be disguised as it.
     if (error || !data)
-      throw new Error("Já existe uma sincronização em andamento para esta entidade.");
+      throw new Error(
+        error?.code === "23505"
+          ? "Já existe uma sincronização em andamento para esta entidade."
+          : `Não foi possível registrar a execução (código ${error?.code ?? "desconhecido"}).`,
+      );
     run = data;
   }
 

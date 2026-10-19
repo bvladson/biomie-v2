@@ -63,6 +63,12 @@ elif command == 'enqueue':
             for slug in slugs:
                 created += json.loads(ctl('enqueue', slug, entity, start, end))
     print(json.dumps({'connected': slugs, 'created': created}, indent=1))
+elif command == 'retry-failed':
+    # Failed jobs go back to the queue in their original order (dimensions keep
+    # vendors -> customers -> products because of created_at).
+    print(sql("with r as (update public.integration_backfill_jobs set status='PENDING', last_error=null, "
+              "updated_at=now() where status='FAILED' and created_at > now() - interval '2 days' returning entity) "
+              "select coalesce(json_agg(entity), '[]') from r"))
 elif command in ('pause', 'resume'):
     print(ctl(command, *(sys.argv[2:] or [])))
 elif command == 'status':
