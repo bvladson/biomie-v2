@@ -90,8 +90,8 @@ function IntegrationsPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Integrações</h1>
         <p className="text-sm text-muted-foreground">
-          Omie em modo sombra: os dados entram em RAW e Canonical e são comparados ao BIOMIE. As
-          telas continuam usando a fonte atual até a ativação.
+          Os dados do Omie entram em RAW, Canonical e Gold, e as telas mostram o Gold. Documentos
+          com classificação indeterminada ficam preservados na Central de Integridade.
           {companyInfo?.name ? ` Empresa: ${companyInfo.name}.` : ""}
         </p>
       </header>
@@ -323,8 +323,9 @@ function DataSourceCard({
           <Badge variant="outline">{current}</Badge>
         </CardTitle>
         <CardDescription>
-          DEMO: dados de demonstração. OMIE_SHADOW: sincroniza e compara sem mudar as telas. OMIE:
-          exige Super Admin, todas as entidades prontas e a frase "ATIVAR OMIE".
+          DEMO: dados de demonstração. OMIE_SHADOW: sincroniza e publica no Gold, com pendências
+          visíveis na Central de Integridade. OMIE: certificação formal; exige Super Admin, todas as
+          entidades prontas e a frase "ATIVAR OMIE".
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

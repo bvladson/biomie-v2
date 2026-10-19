@@ -51,6 +51,11 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
   proibidas em `BIOMIE_WORKER_BLACKOUTS` (ex.: manutenção VSB 20/10 19h30–21h);
   limitador do Omie com 61 s entre consultas idênticas, circuito de 30 min no 425,
   pausa da chave em erro de autenticação ou após 5 erros em 30 min.
+- "Já existe uma requisição desse método sendo executada": nova tentativa após
+  20 s (conta no orçamento de erros) e pausa mínima de 2 s entre o fim de uma
+  chamada e a próxima do mesmo método na mesma chave (`OMIE_MIN_METHOD_GAP_MS`).
+  O legado usa os mesmos aplicativos: sincronização comercial a cada 15 min e
+  financeira 7 min depois.
 - Ajuste fino: `python ops/remote.py ops/25_load.py tune CHAVE=VALOR` (só chaves
   não secretas listadas no stackctl).
 
@@ -69,6 +74,19 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
   entram na receita (mesma regra do legado `FiscalSupport`).
 - **Pedidos**: operação pelo CFOP dos itens; sem CFOP reconhecido o pedido é
   preservado, fica fora da carteira e aparece na Central de Integridade.
+- **Operação pelo CFOP** (padrões da carga real de 2026, mesma decisão do override
+  manual do legado nas NFs 1285/1286): venda para entrega futura conta uma vez,
+  no faturamento (5922/6922); a remessa da entrega (5116/5117/6116/6117) é
+  remessa. Remessa por conta e ordem (5923/6923), transferências
+  (5151/5152/5409/6151/6152/6409) e 5904 são remessa. Venda com itens de
+  bonificação (5910/6910) segue venda. Outras saídas (5949/6949) e notas que
+  misturam venda com remessa ficam pendentes, preservadas e visíveis.
+- **Financeiro** (carga real de 19/10/2026): o Recebido é o valor de cada baixa
+  (`resumo.nValPago`); um depósito que quita vários títulos conta uma vez.
+  Desconto, juros e multa da baixa ajustam o saldo na data da baixa, e a baixa só
+  de desconto fecha o título. Impostos retidos pelo cliente (`retem_X = S`: IR,
+  PIS, COFINS, CSLL, ISS, INSS) não ficam em aberto. Título RECEBIDO no Omie sem
+  baixa importada mantém o saldo e aparece como pendência MEDIUM.
 - **Metas**: Compromisso do legado = meta Ativa; Superação = Desafio; Excelência e
   Nível 4 ficam arquivados. A meta do Cockpit é a soma das metas por vendedor; as
   metas mensais por empresa do legado (MAG Filial varejo R$ 350 mil) estão
@@ -111,3 +129,19 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
 do Omie × legado por empresa e mês, nota a nota, e categoriza diferenças
 (`only_v2_licitacao`, `scope_diff`, `channel_split_diff`, `base_diff`, ...).
 Relatório completo root-only em `/opt/biomie-v2/ops/reconciliation-*.json`.
+Títulos são comparados pela mesma base do legado: mês de emissão, posição de hoje.
+
+## 8. Reprocessamento a partir do RAW (sem chamar o Omie)
+
+Quando uma regra muda, reaplique-a ao RAW guardado em vez de baixar de novo:
+
+1. `python ops/remote.py ops/25_load.py pause` e aguarde o estado `PAUSED` em
+   `25_load.py status` (o passo em andamento termina antes);
+2. `python ops/remote.py ops/31_reprocess.py <empresa|all> <invoices|orders|receivables|settlements|all>`
+3. `python ops/remote.py ops/25_load.py resume`
+
+O script recusa rodar com o worker ativo ou com sincronização em andamento. Cada
+entidade é recanonicalizada, promovida ao Gold e verificada. Cada período cujo RAW
+já tinha paginação comprovada ganha uma execução `REPROCESS`, que atualiza
+prontidão e cobertura. Registros que a regra atual não converte não são
+certificados (status WARNING).

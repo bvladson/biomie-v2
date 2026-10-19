@@ -75,9 +75,12 @@ v2_orders = pg("""select coalesce(json_agg(x), '[]') from (select c.slug, to_cha
   coalesce(sum(o.total) filter (where o.operation_scope='commercial' and o.status='open' and o.stage_code is not null and o.stage_code<>'10'),0)::text portfolio,
   count(*) filter (where o.operation_scope in ('unconfirmed','unknown')) pending
   from public.canonical_orders o join public.companies c on c.id=o.company_id where not c.is_demo group by 1,2) x;""")
-v2_titles = pg("""select coalesce(json_agg(x), '[]') from (select c.slug, to_char(r.issue_date,'YYYY-MM') m, count(*) n,
-  sum(r.original_amount)::text total, count(*) filter (where r.cancelled_at is not null) cancelled
-  from public.canonical_receivables r join public.companies c on c.id=r.company_id where not c.is_demo group by 1,2) x;""")
+# Same basis as the legacy titles: by issue month, position today (paid = cash, open = balance).
+v2_titles = pg("""select coalesce(json_agg(x), '[]') from (select c.slug, to_char(f.issue_date,'YYYY-MM') m, count(*) n,
+  sum(f.original)::text total, sum(f.paid)::text paid, sum(f.open)::text open, sum(f.adjustments)::text adj,
+  count(*) filter (where f.cancelled) cancelled
+  from public.companies c cross join lateral public.finance_title_facts(c.id, current_date) f
+  where not c.is_demo group by 1,2) x;""")
 v2_settlements = pg("""select coalesce(json_agg(x), '[]') from (select c.slug, to_char(s.settlement_date,'YYYY-MM') m,
   count(*) n, sum(s.amount)::text total,
   count(*) filter (where not exists(select 1 from public.canonical_receivables r where r.company_id=s.company_id
@@ -215,7 +218,7 @@ for slug, c in report['companies'].items():
         'diffs': {k: [v['n'], v['amount']] for k, v in c['document_differences'].items()},
         'orders_v2_vs_old': [[x['m'], x['n'], x['total'], x['portfolio_n'], x['pending']] for x in c['orders']['v2']],
         'orders_old': [[x['m'], x['n'], x['total']] for x in c['orders']['old']],
-        'titles_v2': [[x['m'], x['n'], x['total']] for x in c['titles']['v2']],
+        'titles_v2': [[x['m'], x['n'], x['total'], x['open'], x['paid'], x['adj'], x['cancelled']] for x in c['titles']['v2']],
         'titles_old': [[x['m'], x['n'], x['total'], x['open'], x['paid']] for x in c['titles']['old']],
         'settlements_v2': [[x['m'], x['n'], x['total'], x['orphan']] for x in c['settlements_v2']],
         'open_v2': c['open_balance_v2'], 'dims': c['dimensions'],
