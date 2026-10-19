@@ -51,6 +51,28 @@ describe("OmieClient", () => {
     const p = await client.listPage("x/", "L", { pagina: 3 }, ["lista"]);
     expect(p.records).toEqual([]);
   });
+  it("accepts Omie's real empty answer (pagina 0, no records) as an empty first page", async () => {
+    const { client } = mk([
+      () =>
+        json({
+          pagina: 0,
+          total_de_paginas: 0,
+          registros: 0,
+          total_de_registros: 0,
+          nfCadastro: [],
+        }),
+    ]);
+    const p = await client.listPage("x/", "ListarNF", { pagina: 1 }, ["nfCadastro"]);
+    expect(p).toEqual({ page: 1, totalPages: 0, totalRecords: 0, records: [] });
+  });
+  it("still rejects a wrong page number when there are records", async () => {
+    const { client } = mk([
+      () => json({ pagina: 0, total_de_paginas: 1, registros: 1, nfCadastro: [{ a: 1 }] }),
+    ]);
+    await expect(
+      client.listPage("x/", "ListarNF", { pagina: 1 }, ["nfCadastro"]),
+    ).rejects.toMatchObject({ kind: "incomplete" });
+  });
   it("incomplete page fails", async () => {
     const { client } = mk([() => json({ total_de_paginas: 1, registros: 5, lista: [{}] })]);
     await expect(client.listPage("x/", "L", { pagina: 1 }, ["lista"])).rejects.toMatchObject({

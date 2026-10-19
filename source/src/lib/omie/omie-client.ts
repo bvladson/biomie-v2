@@ -281,6 +281,17 @@ export class OmieClient {
     const key = listKeys.find((k) => Array.isArray(body[k]));
     const totalPages = Number(body["total_de_paginas"] ?? body["nTotPaginas"]);
     const reportedPage = body["pagina"] ?? body["nPagina"];
+    const declaredTotal = Number(body["total_de_registros"] ?? body["nTotRegistros"]);
+    // Omie answers an empty period with pagina=0, total_de_paginas=0 and an empty
+    // list (observed on ListarNF, ListarContasReceber and ListarMovimentos).
+    if (
+      page === 1 &&
+      totalPages === 0 &&
+      declaredTotal === 0 &&
+      (!key || (body[key] as unknown[]).length === 0) &&
+      (reportedPage === undefined || Number(reportedPage) === 0 || Number(reportedPage) === 1)
+    )
+      return { page, totalPages: 0, totalRecords: 0, records: [] };
     if (
       !Number.isInteger(page) ||
       page < 1 ||
