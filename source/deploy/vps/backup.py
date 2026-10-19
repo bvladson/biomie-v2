@@ -252,11 +252,17 @@ def cmd_restore_test(from_offsite=False):
             run(['docker', 'run', '-d', '--name', name, '--network', 'none', '--memory', '512m', '--cpus', '0.5',
                  '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', '-e', 'POSTGRES_DB=restore_test',
                  '-v', volume + ':/var/lib/postgresql/data', image, '-c', 'shared_buffers=64MB'], timeout=120)
-            for _ in range(60):
-                if subprocess.run(['docker', 'exec', name, 'pg_isready', '-U', 'postgres'],
-                                  capture_output=True).returncode == 0:
+            # The official image first starts a temporary server for initdb and shuts it
+            # down; only after "init process complete" is the final server up.
+            for _ in range(90):
+                logs = subprocess.run(['docker', 'logs', name], capture_output=True, text=True)
+                ready = 'init process complete' in (logs.stdout + logs.stderr)
+                if ready and subprocess.run(['docker', 'exec', name, 'pg_isready', '-U', 'postgres'],
+                                            capture_output=True).returncode == 0:
                     break
                 time.sleep(2)
+            else:
+                raise RuntimeError('temporary PostgreSQL did not become ready')
             roles = re.sub(r'^CREATE ROLE postgres;\s*$', '', (bundle / 'globals.sql').read_text(), flags=re.M)
             run(['docker', 'exec', '-i', name, 'psql', '-X', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'],
                 input=roles, timeout=300)
