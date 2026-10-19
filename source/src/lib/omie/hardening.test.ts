@@ -13,8 +13,9 @@ const invoice = (status?: string) => ({
 
 describe("fiscal evidence", () => {
   it("does not turn missing or unknown authorization into revenue", () => {
-    expect(invoicesAdapter.toCanonical(invoice())).toBeNull();
-    expect(invoicesAdapter.toCanonical(invoice("999"))).toBeNull();
+    // Kept as a visible non-revenue document (legacy "nao_autorizada").
+    expect(invoicesAdapter.toCanonical(invoice())?.header["status"]).toBe("not_authorized");
+    expect(invoicesAdapter.toCanonical(invoice("999"))?.header["status"]).toBe("not_authorized");
     expect(invoicesAdapter.toRaw(invoice())).not.toBeNull();
   });
   it("keeps authorization, cancellation and denial distinct", () => {

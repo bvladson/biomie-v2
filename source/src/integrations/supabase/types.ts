@@ -3545,7 +3545,7 @@ export type Database = {
         | "ANALISTA"
         | "VIEWER";
       fp_action_status: "OPEN" | "IN_PROGRESS" | "RESOLVED";
-      invoice_status: "authorized" | "cancelled" | "denied";
+      invoice_status: "authorized" | "cancelled" | "denied" | "not_authorized";
       order_status: "open" | "invoiced" | "cancelled";
       target_level: "BASE" | "ACTIVE" | "CHALLENGE";
     };
@@ -3680,7 +3680,7 @@ export const Constants = {
         "VIEWER",
       ],
       fp_action_status: ["OPEN", "IN_PROGRESS", "RESOLVED"],
-      invoice_status: ["authorized", "cancelled", "denied"],
+      invoice_status: ["authorized", "cancelled", "denied", "not_authorized"],
       order_status: ["open", "invoiced", "cancelled"],
       target_level: ["BASE", "ACTIVE", "CHALLENGE"],
     },

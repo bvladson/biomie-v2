@@ -38,10 +38,12 @@ begin
       customer_external_id,seller_external_id,gross_amount,goods_amount,freight_amount,insurance_amount,other_expenses_amount,discount_amount,
       operation_scope,business_channel,channel_reason,is_biomie_commercial_visible,commercial_base_amount)
     values(c,'omie','nf1',run_inv,run_inv,'1','authorized','2026-01-10','2026-01-10','1','100',1150,1000,100,20,40,0,'commercial','varejo','default_varejo',true,990),
-          (c,'omie','nf2',run_inv,run_inv,'2','authorized','2026-01-11','2026-01-11','1','900',500,500,0,0,0,0,'commercial','licitacao','licitacao_seller_code',false,500);
+          (c,'omie','nf2',run_inv,run_inv,'2','authorized','2026-01-11','2026-01-11','1','900',500,500,0,0,0,0,'commercial','licitacao','licitacao_seller_code',false,500),
+          (c,'omie','nf3',run_inv,run_inv,'3','not_authorized','2026-01-12','2026-01-12','1','100',700,700,0,0,0,0,'commercial','varejo','default_varejo',true,700);
   n:=public.replace_omie_canonical_items(c,'invoices',run_inv,
     '[{"external_id":"nf1","items":[{"item_sequence":1,"product_external_id":"p1","description":"x","quantity":1,"unit_price":1000,"total":1000}]},
-      {"external_id":"nf2","items":[{"item_sequence":1,"product_external_id":"p1","description":"y","quantity":1,"unit_price":500,"total":500}]}]');
+      {"external_id":"nf2","items":[{"item_sequence":1,"product_external_id":"p1","description":"y","quantity":1,"unit_price":500,"total":500}]},
+      {"external_id":"nf3","items":[{"item_sequence":1,"product_external_id":"p1","description":"w","quantity":1,"unit_price":700,"total":700}]}]');
   insert into public.canonical_orders(company_id,source,external_id,sync_run_id,last_seen_run_id,number,status,order_date,expected_date,
       customer_external_id,seller_external_id,total,operation_scope,stage_code,business_channel,channel_reason)
     values(c,'omie','o1',run_ord,run_ord,'P1','open','2026-01-05',null,'1','100',300,'commercial','50','varejo','default_varejo');
@@ -61,6 +63,9 @@ begin
   select sum(amount) into v from public.fact_sales(c,'2026-01-01','2026-01-31');
   if v is distinct from 1490::numeric then raise exception 'Revenue expected 990+500, got %',v; end if;
   if exists(select 1 from public.invoices where company_id=c and channel_id is null) then raise exception 'Gold invoice without channel_id'; end if;
+  if (select status::text from public.invoices where company_id=c and external_id='nf3') is distinct from 'not_authorized' then
+    raise exception 'Not-authorized document lost or promoted as another status';
+  end if;
   select count(*) into n from public.fact_orders(c) where order_date between '2026-01-01' and '2026-01-31';
   if n<>1 then raise exception 'Commercial order missing from portfolio: %',n; end if;
   select paid into v from public.finance_title_facts(c,'2026-01-31') limit 1;

@@ -268,10 +268,17 @@ export function mapItems(
   return out;
 }
 
-/** Matches the proven ListarNF evidence policy in the legacy FiscalSupport.
- * An invoiced order or an access key alone never proves SEFAZ authorization.
+/** Matches the proven ListarNF evidence policy in the legacy FiscalSupport
+ * (classifyInvoiceFiscalStatus). An invoiced order or an access key alone never
+ * proves SEFAZ authorization. Documents without positive evidence, with an
+ * inutilization date or a cancelled/returned order are kept as
+ * "not_authorized" (legacy "nao_autorizada"): visible, never revenue, and they
+ * no longer block the whole load. Only sandbox and incoming documents are
+ * excluded from the sales canonical.
  */
-function invoiceStatus(p: Payload): "authorized" | "cancelled" | "denied" | null {
+export type InvoiceStatus = "authorized" | "cancelled" | "denied" | "not_authorized";
+
+function invoiceStatus(p: Payload): InvoiceStatus | null {
   const ide = obj(p["ide"]);
   const compl = obj(p["compl"]);
   const protocol = obj(obj(p["protNFe"])["infProt"]);
@@ -301,7 +308,7 @@ function invoiceStatus(p: Payload): "authorized" | "cancelled" | "denied" | null
     ["101", "151", "155", "CANCELADA", "CANCELADO", "C"].includes(code ?? "")
   )
     return "cancelled";
-  if (str(ide["dInut"])) return null; // Keep in RAW; there is no canonical inutilized status.
+  if (str(ide["dInut"])) return "not_authorized";
   if (
     flagS(ide["cDeneg"]) ||
     ["110", "301", "302", "303", "DENEGADA", "DENEGADO", "D"].includes(code ?? "")
@@ -309,8 +316,11 @@ function invoiceStatus(p: Payload): "authorized" | "cancelled" | "denied" | null
     return "denied";
   const order = obj(p["pedido"]);
   if (flagS(order["cCancelado"]) || flagS(order["cDevolvido"]) || flagS(order["cDevParcial"]))
-    return null;
-  if (code) return ["100", "150", "AUTORIZADA", "AUTORIZADO"].includes(code) ? "authorized" : null;
+    return "not_authorized";
+  if (code)
+    return ["100", "150", "AUTORIZADA", "AUTORIZADO"].includes(code)
+      ? "authorized"
+      : "not_authorized";
   const key = str(compl["cChaveNFe"]);
   const authorizationProtocol = [
     protocol["nProt"],
@@ -326,7 +336,7 @@ function invoiceStatus(p: Payload): "authorized" | "cancelled" | "denied" | null
     (str(ide["cDeneg"])?.toUpperCase() === "N" ||
       Boolean(authorizationProtocol && /^\d{15}$/.test(authorizationProtocol)))
     ? "authorized"
-    : null;
+    : "not_authorized";
 }
 
 /** A single seller shared by all installment titles; ambiguity stays explicit. */
@@ -447,7 +457,9 @@ export const ordersAdapter: OmieTxAdapter = {
       items: mapItems(p["det"], (d, i) => {
         const prod = obj(d["produto"]);
         return {
-          item_sequence: Number(str(obj(d["ide"])["codigo_item"]) ?? i + 1) || i + 1,
+          // det[].ide.codigo_item is Omie's internal item id (e.g. 7470859144), not
+          // a sequence; the position in the order is the stable sequence.
+          item_sequence: i + 1,
           product_external_id: str(prod["codigo_produto"]),
           description: str(prod["descricao"]),
           quantity: num(prod["quantidade"]),

@@ -358,7 +358,7 @@ export interface InvoiceRow {
   sellerId: string | null;
   city: string;
   state: string;
-  status: "authorized" | "cancelled" | "denied";
+  status: "authorized" | "cancelled" | "denied" | "not_authorized";
   total: number;
   items: number;
   counted: boolean;

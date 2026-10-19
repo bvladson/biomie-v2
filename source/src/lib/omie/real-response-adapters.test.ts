@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   invoicesAdapter,
+  ordersAdapter,
   productsAdapter,
   receivablesAdapter,
   settlementsAdapter,
@@ -44,16 +45,16 @@ describe("observed ListarNF payload", () => {
   it("never treats a key or non-denegated flag alone as authorization", () => {
     const missingFlag = invoice();
     missingFlag.ide.cDeneg = "";
-    expect(invoicesAdapter.toCanonical(missingFlag)).toBeNull();
+    expect(invoicesAdapter.toCanonical(missingFlag)?.header["status"]).toBe("not_authorized");
     const shortKey = invoice();
     shortKey.compl.cChaveNFe = "123";
-    expect(invoicesAdapter.toCanonical(shortKey)).toBeNull();
+    expect(invoicesAdapter.toCanonical(shortKey)?.header["status"]).toBe("not_authorized");
     expect(
       invoicesAdapter.toCanonical({
         ide: { nNF: "123", dEmi: "19/10/2026" },
         pedido: { faturado: "S" },
-      }),
-    ).toBeNull();
+      })?.header["status"],
+    ).toBe("not_authorized");
   });
 
   it("gives cancellation, denial and inutilization precedence over positive evidence", () => {
@@ -63,9 +64,26 @@ describe("observed ListarNF payload", () => {
     const denied = invoice();
     denied.ide.cDeneg = "S";
     expect(invoicesAdapter.toCanonical(denied)?.header["status"]).toBe("denied");
+    // Real MAG Filial/Uni Design payloads: dInut filled on documents with a 44-digit key.
     const invalidated = invoice();
     invalidated.ide.dInut = "20/10/2026";
-    expect(invoicesAdapter.toCanonical(invalidated)).toBeNull();
+    expect(invoicesAdapter.toCanonical(invalidated)?.header["status"]).toBe("not_authorized");
+    const returned = { ...invoice(), pedido: { cDevolvido: "S" } };
+    expect(invoicesAdapter.toCanonical(returned)?.header["status"]).toBe("not_authorized");
+  });
+
+  it("numbers order items by position, never by Omie's internal item id", () => {
+    const order = {
+      cabecalho: { numero_pedido: "1", codigo_pedido: 9, etapa: "50" },
+      infoCadastro: { dInc: "19/10/2026" },
+      det: [
+        { ide: { codigo_item: 7470859144 }, produto: { codigo_produto: 1, valor_total: 10 } },
+        { ide: { codigo_item: 7470859145 }, produto: { codigo_produto: 2, valor_total: 20 } },
+      ],
+    };
+    expect(ordersAdapter.toCanonical(order)?.items?.map((item) => item.item_sequence)).toEqual([
+      1, 2,
+    ]);
   });
 
   it("does not assign an arbitrary seller when installments disagree", () => {

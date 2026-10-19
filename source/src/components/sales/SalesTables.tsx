@@ -32,6 +32,7 @@ const STATUS: Record<string, string> = {
   authorized: "Autorizada",
   cancelled: "Cancelada",
   denied: "Denegada",
+  not_authorized: "Não autorizada",
   open: "Em aberto",
   invoiced: "Faturado",
 };
@@ -133,6 +134,7 @@ export function InvoicesTab({ q }: { q: AnalyticsQuery }) {
                 <SelectItem value="authorized">Autorizadas</SelectItem>
                 <SelectItem value="cancelled">Canceladas</SelectItem>
                 <SelectItem value="denied">Denegadas</SelectItem>
+                <SelectItem value="not_authorized">Não autorizadas</SelectItem>
               </SelectContent>
             </Select>
             <ExportMenu rows={rows} columns={invoiceExport} name={exportName("notas", q)} />

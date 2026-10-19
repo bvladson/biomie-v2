@@ -246,6 +246,20 @@
       "when": 1792413900000,
       "tag": "0034_sync_run_modes_entities",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792414000000,
+      "tag": "0035_invoice_status_not_authorized",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792414100000,
+      "tag": "0036_promote_not_authorized",
+      "breakpoints": true
     }
   ]
 }
