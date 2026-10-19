@@ -612,6 +612,29 @@ export const TX_ADAPTERS: Record<OmieTxEntity, OmieTxAdapter> = {
   settlements: settlementsAdapter,
 };
 
+/**
+ * Omie registers installment series with future issue dates (Ergooffice and Uni
+ * Design, 19/10/2026), so loading receivables only up to today hides open
+ * titles. One extra partition after the period catches them in a single call.
+ */
+export const FUTURE_RECEIVABLES_DAYS = 730;
+
+const shiftDays = (iso: string, days: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+/** Partitions of one transactional load; indexes stay stable for checkpoints. */
+export function txPartitions(entity: OmieTxEntity, period: Period): Period[] {
+  const parts = monthPartitions(period);
+  if (entity !== "receivables") return parts;
+  return [
+    ...parts,
+    { from: shiftDays(period.to, 1), to: shiftDays(period.to, FUTURE_RECEIVABLES_DAYS) },
+  ];
+}
+
 /** Splits a from/to range into month partitions (month is a strategy, not a limit). */
 export function monthPartitions(period: Period): Period[] {
   const validDate = (iso: string) => {

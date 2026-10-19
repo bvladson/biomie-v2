@@ -155,9 +155,12 @@ for slug in companies:
             c['examples'].append(example)
 
     for nid, r in nf_v2.items():
-        if r['status'] != 'authorized':
-            continue
         o = nf_old.get(nid)
+        if r['status'] != 'authorized':
+            # Authorized and counted by the legacy, not authorized/cancelled in Omie now.
+            if o and o['status'] == 'autorizada' and o['scope'] == 'commercial' and o['ch'] in ('varejo', 'licitacao'):
+                add('status_diff', -num(o['base']), {'nf': r['number'], 'm': r['m'], 'v2': r['status'], 'old': o['status']})
+            continue
         v2_counts = r['scope'] == 'commercial' and r['ch'] in ('varejo', 'licitacao')
         if not o:
             if v2_counts:
@@ -166,7 +169,10 @@ for slug in companies:
             continue
         old_counts = o['status'] == 'autorizada' and o['scope'] == 'commercial' and o['ch'] in ('varejo', 'licitacao')
         if v2_counts != old_counts:
-            if o['scope'] != r['scope']:
+            if o['status'] != 'autorizada':
+                add('status_diff', num(r['base']) if v2_counts else D('0'),
+                    {'nf': r['number'], 'm': r['m'], 'v2': r['status'], 'old': o['status']})
+            elif o['scope'] != r['scope']:
                 add('scope_diff', num(r['base']) if v2_counts else -num(o['base']),
                     {'nf': r['number'], 'm': r['m'], 'v2': r['scope'], 'old': o['scope'], 'old_classified': o['classified'] not in ('', 'NULL')})
             else:

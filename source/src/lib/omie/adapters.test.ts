@@ -5,6 +5,7 @@ import {
   monthPartitions,
   ordersAdapter,
   receivablesAdapter,
+  txPartitions,
   vendorsAdapter,
 } from "./adapters";
 
@@ -21,6 +22,22 @@ describe("monthPartitions", () => {
     expect(monthPartitions({ from: "2024-05-05", to: "2024-05-05" })).toEqual([
       { from: "2024-05-05", to: "2024-05-05" },
     ]);
+  });
+});
+
+describe("txPartitions", () => {
+  it("adds one future partition to receivables (installments issued with future dates)", () => {
+    const period = { from: "2026-09-15", to: "2026-10-19" };
+    expect(txPartitions("receivables", period)).toEqual([
+      { from: "2026-09-15", to: "2026-09-30" },
+      { from: "2026-10-01", to: "2026-10-19" },
+      { from: "2026-10-20", to: "2028-10-18" },
+    ]);
+  });
+  it("keeps month partitions only for the other entities", () => {
+    const period = { from: "2026-09-15", to: "2026-10-19" };
+    for (const entity of ["invoices", "orders", "settlements"] as const)
+      expect(txPartitions(entity, period)).toEqual(monthPartitions(period));
   });
 });
 

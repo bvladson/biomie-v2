@@ -1,11 +1,12 @@
 """Controlled Omie load through the worker.
 
     python ops/remote.py ops/25_load.py tune KEY=VALUE [...]      set worker tuning and recreate the worker
-    python ops/remote.py ops/25_load.py enqueue <from> <to> <phase> phase: dimensions|facts|finance
+    python ops/remote.py ops/25_load.py enqueue <from> <to> <phase> phase: dimensions|facts|finance|receivables
     python ops/remote.py ops/25_load.py pause|resume [reason]
     python ops/remote.py ops/25_load.py status
 
-facts = invoices + orders; finance = receivables + settlements (needs facts done).
+facts = invoices + orders; finance = receivables + settlements (needs facts done);
+receivables = only receivables (also loads titles issued with future dates).
 Only companies proven CONNECTED are enqueued.
 """
 import json
@@ -58,7 +59,8 @@ elif command == 'enqueue':
             if slug in slugs:
                 created += json.loads(ctl('enqueue', slug, entity))
     else:
-        entities = ['invoices', 'orders'] if phase == 'facts' else ['receivables', 'settlements']
+        entities = {'facts': ['invoices', 'orders'], 'finance': ['receivables', 'settlements'],
+                    'receivables': ['receivables']}[phase]
         for entity in entities:
             for slug in slugs:
                 created += json.loads(ctl('enqueue', slug, entity, start, end))

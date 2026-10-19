@@ -3,7 +3,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { OmieClient, OmieError, redact, type OmieCredentials } from "./omie-client";
 import {
   TX_ADAPTERS,
-  monthPartitions,
+  txPartitions,
   type OmieTxEntity,
   type Period,
   type TxCanonical,
@@ -137,7 +137,7 @@ async function runTxSyncStepUnlocked(
   const budget = input.budgetMs ?? 20_000;
   const t0 = Date.now();
   const adapter = TX_ADAPTERS[input.entity];
-  const parts = monthPartitions(input.period);
+  const parts = txPartitions(input.entity, input.period);
   type Run = Database["public"]["Tables"]["integration_sync_runs"]["Row"];
   let run: Run;
 
