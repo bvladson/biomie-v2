@@ -10,6 +10,7 @@ prove that channel no longer hides data.
 """
 import json
 import os
+import re
 import pathlib
 import secrets
 import shlex
@@ -64,6 +65,13 @@ print(json.dumps(out))
 '''
 
 
+def redact(text):
+    """Tokens, cookies and keys never reach the output (Playwright errors embed request headers)."""
+    text = re.sub(r"(?i)(authorization|cookie|apikey|x-api-key)\s*:\s*[^\n']+", r'\1: [redacted]', text)
+    text = re.sub(r'Bearer\s+[A-Za-z0-9._~+/=-]+', 'Bearer [redacted]', text)
+    return re.sub(r'eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+', '[jwt]', text)
+
+
 def remote(payload):
     p = subprocess.run(SSH + ['python3 -c ' + shlex.quote(REMOTE)], input=json.dumps(payload),
                        capture_output=True, text=True, timeout=300)
@@ -94,9 +102,9 @@ try:
     p = subprocess.run(['node', str(BASE / 'ops/browser/smoke.cjs')], cwd=BASE / 'ops/browser', env=env,
                        capture_output=True, text=True, timeout=900)
     try:
-        report['browser'] = json.loads(p.stdout[p.stdout.index('['):])
+        report['browser'] = json.loads(redact(p.stdout[p.stdout.index('['):]))
     except ValueError:
-        report['browser_error'] = (p.stderr or p.stdout)[-1500:]
+        report['browser_error'] = redact((p.stderr or p.stdout)[-1500:])
     report['browser_exit'] = p.returncode
 finally:
     if tunnel:
