@@ -3,6 +3,7 @@
     python ops/remote.py ops/25_load.py tune KEY=VALUE [...]      set worker tuning and recreate the worker
     python ops/remote.py ops/25_load.py enqueue <from> <to> <phase> phase: dimensions|facts|finance|receivables
     python ops/remote.py ops/25_load.py pause|resume [reason]
+    python ops/remote.py ops/25_load.py recurring on|off               recurring loads (fixed slots, see runbook)
     python ops/remote.py ops/25_load.py status
 
 facts = invoices + orders; finance = receivables + settlements (needs facts done);
@@ -71,6 +72,10 @@ elif command == 'retry-failed':
     print(sql("with r as (update public.integration_backfill_jobs set status='PENDING', last_error=null, "
               "updated_at=now() where status='FAILED' and created_at > now() - interval '2 days' returning entity) "
               "select coalesce(json_agg(entity), '[]') from r"))
+elif command == 'recurring':
+    if sys.argv[2:] not in (['on'], ['off']):
+        raise SystemExit('recurring on|off')
+    print(ctl('recurring', sys.argv[2]))
 elif command in ('pause', 'resume'):
     print(ctl(command, *(sys.argv[2:] or [])))
 elif command == 'status':
