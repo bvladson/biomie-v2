@@ -35,7 +35,9 @@ describe("finance ratios (pure)", () => {
 });
 
 run("Financeiro invariants (demo data)", () => {
-  const sb = createClient<Database>(url!, key!, { auth: { persistSession: false } });
+  const sb = createClient<Database>(url ?? "http://127.0.0.1:9", key ?? "skipped", {
+    auth: { persistSession: false },
+  });
   let company = "";
   beforeAll(async () => {
     const { data } = await sb.from("companies").select("id").eq("slug", "mag-moveis").single();
@@ -126,7 +128,9 @@ run("Financeiro invariants (demo data)", () => {
 });
 
 runE2E("finance permissions are enforced server-side", () => {
-  const admin = createClient<Database>(url!, key!, { auth: { persistSession: false } });
+  const admin = createClient<Database>(url ?? "http://127.0.0.1:9", key ?? "skipped", {
+    auth: { persistSession: false },
+  });
   const email = `fin-e2e-${Date.now()}@biomie-test.dev`;
   const password = `T${crypto.randomUUID()}!`;
   let userId = "";

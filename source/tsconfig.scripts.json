@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts"],
+  "compilerOptions": {
+    "types": ["node", "vite/client", "vitest/globals"]
+  }
+}

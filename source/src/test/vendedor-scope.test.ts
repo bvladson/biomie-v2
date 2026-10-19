@@ -16,7 +16,9 @@ const anon = process.env["SUPABASE_PUBLISHABLE_KEY"];
 const run = url && key && anon && process.env["BIOMIE_RLS_E2E"] === "1" ? describe : describe.skip;
 
 run("VENDEDOR sees only its own data (server-side)", () => {
-  const admin = createClient<Database>(url!, key!, { auth: { persistSession: false } });
+  const admin = createClient<Database>(url ?? "http://127.0.0.1:9", key ?? "skipped", {
+    auth: { persistSession: false },
+  });
   const email = `vendedor-e2e-${Date.now()}@biomie-test.dev`;
   const password = `T${crypto.randomUUID()}!`;
   let userId = "";

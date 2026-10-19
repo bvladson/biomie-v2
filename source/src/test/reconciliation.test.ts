@@ -20,7 +20,9 @@ const key = process.env["SUPABASE_SERVICE_ROLE_KEY"];
 const run = url && key ? describe : describe.skip;
 
 run("Revenue reconciliation (Cockpit = Plano de Voo = Vendas = Vendedor 360)", () => {
-  const sb = createClient<Database>(url!, key!, { auth: { persistSession: false } });
+  const sb = createClient<Database>(url ?? "http://127.0.0.1:9", key ?? "skipped", {
+    auth: { persistSession: false },
+  });
   const cents = (v: number) => Math.round(v * 100);
 
   async function ctx() {
@@ -80,7 +82,9 @@ run("Revenue reconciliation (Cockpit = Plano de Voo = Vendas = Vendedor 360)", (
 });
 
 run("Customers / Products reconciliation and central target level", () => {
-  const sb = createClient<Database>(url!, key!, { auth: { persistSession: false } });
+  const sb = createClient<Database>(url ?? "http://127.0.0.1:9", key ?? "skipped", {
+    auth: { persistSession: false },
+  });
   const cents = (v: number) => Math.round(v * 100);
 
   for (const extra of [
