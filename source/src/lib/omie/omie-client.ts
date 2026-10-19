@@ -175,6 +175,10 @@ export class OmieClient {
           // Up to 25% jitter so retries from several jobs do not align.
           const delay = Math.max(err.retryAfterMs, base + Math.floor(Math.random() * base * 0.25));
           attempt++;
+          // Every retried fault is visible in the logs (messages are already redacted).
+          console.warn(
+            `omie retry call=${call} kind=${err.kind} attempt=${attempt} wait_ms=${delay}: ${err.message.slice(0, 160)}`,
+          );
           await abortableWait(this.sleep, delay, controller.signal);
         }
       }

@@ -152,6 +152,24 @@ export function workerDependencies(admin: Admin, signal: AbortSignal): WorkerDep
     },
 
     async enqueueRecurring(kind, today) {
+      // Daily dimensions and the weekly replay run once per local day even when
+      // the worker restarts (its in-memory state starts empty after a release).
+      if (kind !== "transactions") {
+        const base = db
+          .from("integration_backfill_jobs")
+          .select("id", { count: "exact", head: true });
+        const { count, error } =
+          kind === "dimensions"
+            ? await base.in("entity", [...DIMENSIONS]).eq("period_from", today)
+            : await base
+                .in("entity", [...TRANSACTIONS])
+                .eq("period_to", today)
+                .eq("priority", 250);
+        if (!error && count) {
+          log({ event: "recurring_skipped", kind, reason: "already enqueued today" });
+          return 0;
+        }
+      }
       const companies = await connectedCompanies(admin);
       const entities = kind === "dimensions" ? DIMENSIONS : [...TRANSACTIONS];
       const from =
