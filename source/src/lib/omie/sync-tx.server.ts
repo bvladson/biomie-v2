@@ -12,6 +12,7 @@ import { promoteGoldIfAllowed } from "./sync.server";
 import { acquireWorkerLease } from "@/lib/jobs/worker-lease.server";
 import { emptyTxCheckpoint, parseTxCheckpoint, partitionProven } from "./checkpoint";
 import { classifyCanonicalHeader, loadLegacyClassificationConfig } from "./classification.server";
+import { loadOmieCredentials } from "./credentials.server";
 
 type Admin = SupabaseClient<Database>;
 // Generated types don't know dynamic table names; the tables are fixed below.
@@ -25,16 +26,8 @@ const REQUIRES: Record<OmieTxEntity, string[]> = {
   settlements: ["receivables"],
 };
 
-async function loadCredentials(admin: Admin, company: string): Promise<OmieCredentials> {
-  const { data, error } = await admin.rpc("get_integration_credentials", {
-    p_company: company,
-    p_provider: "omie",
-  });
-  const row = Array.isArray(data) ? data[0] : null;
-  if (error || !row)
-    throw new OmieError("auth", "Credenciais Omie não configuradas para esta empresa.", false);
-  return { appKey: row.app_key, appSecret: row.app_secret };
-}
+const loadCredentials = (admin: Admin, company: string): Promise<OmieCredentials> =>
+  loadOmieCredentials(admin, company);
 
 /** Writes canonical header + items idempotently (unique keys in SQL). */
 export async function upsertTxCanonical(
@@ -419,6 +412,8 @@ async function runBackfillTickUnlocked(
     .from("integration_backfill_jobs")
     .select("*")
     .in("status", ["PENDING", "RUNNING"])
+    // Dimension requests share the queue but are executed by the worker loop.
+    .in("entity", Object.keys(TX_ADAPTERS))
     .order("priority")
     .order("created_at")
     .limit(20);

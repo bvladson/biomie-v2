@@ -1,9 +1,19 @@
 /**
- * OmieRateLimiter — in-process throttle for the Omie API.
- * Enforces at the same time: a global per-IP ceiling, a per App Key + method
- * ceiling, max concurrency per App Key + method, and a circuit breaker per
- * App Key + method (opened on HTTP 425). Limits are configurable and default
- * below Omie's published caps (960/min IP, 240/min key+method, 4 concurrent).
+ * OmieRateLimiter — in-process throttle for the Omie API (the worker is the
+ * only production process that loads data, so this is the effective v2 limit).
+ *
+ * Enforces at the same time:
+ * - a global per-IP ceiling and a per App Key + method ceiling;
+ * - max concurrency per App Key + method;
+ * - a minimum spacing between IDENTICAL requests (Omie rejects the same query
+ *   repeated within 60 s as "consumo redundante" and every repetition extends
+ *   the block);
+ * - a circuit breaker per App Key + method (HTTP 425 / blocked);
+ * - an error budget per App Key: Omie blocks an application for 30 minutes
+ *   after ~10 errors, so the key is paused well before that, and an invalid
+ *   key (auth error) is paused immediately.
+ * Defaults stay below Omie's published caps (960/min IP, 240/min key+method,
+ * 4 concurrent); production values come from the environment.
  */
 
 export interface RateLimitConfig {
@@ -12,7 +22,13 @@ export interface RateLimitConfig {
   maxConcurrentPerKeyMethod: number;
   /** Stricter caps for specific methods (e.g. { ListarNF: 60 }). */
   methodOverrides: Record<string, number>;
+  /** How long a blocked method/key stays closed (Omie blocks for 30 minutes). */
   circuitOpenMs: number;
+  /** Minimum interval between two identical requests. */
+  redundantSpacingMs: number;
+  /** Errors per App Key inside the window that pause the whole key. */
+  keyErrorBudget: number;
+  keyErrorWindowMs: number;
 }
 
 export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
@@ -20,10 +36,14 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   perKeyMethodPerMinute: 200,
   maxConcurrentPerKeyMethod: 3,
   methodOverrides: {},
-  circuitOpenMs: 5 * 60_000,
+  circuitOpenMs: 30 * 60_000,
+  redundantSpacingMs: 61_000,
+  keyErrorBudget: 5,
+  keyErrorWindowMs: 30 * 60_000,
 };
 
 const WINDOW = 60_000;
+const KEY_SCOPE = "*";
 
 export class CircuitOpenError extends Error {
   constructor(
@@ -31,11 +51,13 @@ export class CircuitOpenError extends Error {
     public retryAt: number,
   ) {
     super(
-      `Omie bloqueou temporariamente este método (425). Nova tentativa após ${new Date(retryAt).toISOString()}.`,
+      `Omie bloqueado temporariamente para esta chave/método. Nova tentativa após ${new Date(retryAt).toISOString()}.`,
     );
     this.name = "CircuitOpenError";
   }
 }
+
+export type FailureKind = "auth" | "blocked" | "rate_limit" | "client" | "server";
 
 export class OmieRateLimiter {
   private cfg: RateLimitConfig;
@@ -45,6 +67,8 @@ export class OmieRateLimiter {
   private perKey = new Map<string, number[]>();
   private active = new Map<string, number>();
   private circuits = new Map<string, number>();
+  private lastRequest = new Map<string, number>();
+  private keyErrors = new Map<string, number[]>();
 
   constructor(
     cfg: Partial<RateLimitConfig> = {},
@@ -56,11 +80,15 @@ export class OmieRateLimiter {
       this.cfg.perKeyMethodPerMinute,
       this.cfg.maxConcurrentPerKeyMethod,
       this.cfg.circuitOpenMs,
+      this.cfg.keyErrorBudget,
+      this.cfg.keyErrorWindowMs,
       ...Object.values(this.cfg.methodOverrides),
     ]) {
       if (!Number.isFinite(value) || value <= 0)
         throw new Error("Configuração inválida dos limites Omie.");
     }
+    if (!Number.isFinite(this.cfg.redundantSpacingMs) || this.cfg.redundantSpacingMs < 0)
+      throw new Error("Configuração inválida dos limites Omie.");
     this.now = deps.now ?? Date.now;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
@@ -73,13 +101,43 @@ export class OmieRateLimiter {
     return Math.min(this.cfg.perKeyMethodPerMinute, this.cfg.methodOverrides[method] ?? Infinity);
   }
 
-  openCircuit(appKey: string, method: string) {
-    this.circuits.set(OmieRateLimiter.key(appKey, method), this.now() + this.cfg.circuitOpenMs);
+  get circuitOpenMs() {
+    return this.cfg.circuitOpenMs;
+  }
+
+  openCircuit(appKey: string, method: string, ms = this.cfg.circuitOpenMs) {
+    const key = OmieRateLimiter.key(appKey, method);
+    this.circuits.set(key, Math.max(this.circuits.get(key) ?? 0, this.now() + ms));
+  }
+
+  /** Pauses every method of an App Key (invalid credentials, error budget exhausted). */
+  openKeyCircuit(appKey: string, ms = this.cfg.circuitOpenMs) {
+    this.openCircuit(appKey, KEY_SCOPE, ms);
   }
 
   circuitState(appKey: string, method: string): "open" | "closed" {
-    const until = this.circuits.get(OmieRateLimiter.key(appKey, method));
-    return until && until > this.now() ? "open" : "closed";
+    const now = this.now();
+    const until = Math.max(
+      this.circuits.get(OmieRateLimiter.key(appKey, method)) ?? 0,
+      this.circuits.get(OmieRateLimiter.key(appKey, KEY_SCOPE)) ?? 0,
+    );
+    return until > now ? "open" : "closed";
+  }
+
+  /** Counts an Omie-side error; opens the key circuit before Omie's own block. */
+  recordFailure(appKey: string, kind: FailureKind) {
+    if (kind === "auth") {
+      this.openKeyCircuit(appKey);
+      return;
+    }
+    const cutoff = this.now() - this.cfg.keyErrorWindowMs;
+    const list = (this.keyErrors.get(appKey) ?? []).filter((t) => t > cutoff);
+    list.push(this.now());
+    this.keyErrors.set(appKey, list);
+    if (list.length >= this.cfg.keyErrorBudget) {
+      this.openKeyCircuit(appKey);
+      this.keyErrors.set(appKey, []);
+    }
   }
 
   private prune(arr: number[]) {
@@ -87,18 +145,44 @@ export class OmieRateLimiter {
     while (arr.length && arr[0]! <= cutoff) arr.shift();
   }
 
-  /** Waits for a slot, runs fn, releases. Throws CircuitOpenError when open. */
+  private pruneRequests() {
+    if (this.lastRequest.size < 5_000) return;
+    const cutoff = this.now() - this.cfg.redundantSpacingMs;
+    for (const [fingerprint, at] of this.lastRequest)
+      if (at < cutoff) this.lastRequest.delete(fingerprint);
+  }
+
+  private throwIfOpen(appKey: string, method: string) {
+    const now = this.now();
+    for (const scope of [method, KEY_SCOPE]) {
+      const key = OmieRateLimiter.key(appKey, scope);
+      const until = this.circuits.get(key);
+      if (until && until > now) throw new CircuitOpenError(key, until);
+    }
+  }
+
+  /**
+   * Waits for a slot, runs fn, releases. Throws CircuitOpenError when open.
+   * `fingerprint` identifies the exact request (method + params) so an identical
+   * request is never sent twice inside the redundancy interval.
+   */
   async run<T>(
     appKey: string,
     method: string,
     fn: () => Promise<T>,
     signal?: AbortSignal,
+    fingerprint?: string,
   ): Promise<T> {
     const k = OmieRateLimiter.key(appKey, method);
+    this.throwIfOpen(appKey, method);
+    if (fingerprint) {
+      const last = this.lastRequest.get(fingerprint);
+      const wait = last === undefined ? 0 : last + this.cfg.redundantSpacingMs - this.now();
+      if (wait > 0) await abortableWait(this.sleep, wait, signal);
+    }
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const until = this.circuits.get(k);
-      if (until && until > this.now()) throw new CircuitOpenError(k, until);
+      this.throwIfOpen(appKey, method);
       const list = this.perKey.get(k) ?? [];
       this.perKey.set(k, list);
       this.prune(list);
@@ -125,6 +209,10 @@ export class OmieRateLimiter {
       return await fn();
     } finally {
       this.active.set(k, (this.active.get(k) ?? 1) - 1);
+      if (fingerprint) {
+        this.pruneRequests();
+        this.lastRequest.set(fingerprint, this.now());
+      }
     }
   }
 }
@@ -156,19 +244,35 @@ export async function abortableWait(
   });
 }
 
+const envNumber = (env: Record<string, string | undefined>, name: string, fallback: number) => {
+  const value = env[name];
+  return value === undefined || value === "" ? fallback : Number(value);
+};
+
 /** One shared limiter per process; configure at first use, when server env is available. */
 let sharedOmieLimiter: OmieRateLimiter | undefined;
 export function getSharedOmieLimiter(): OmieRateLimiter {
   if (!sharedOmieLimiter) {
     const env = typeof process === "undefined" ? {} : process.env;
     sharedOmieLimiter = new OmieRateLimiter({
-      globalPerMinute: Number(env["OMIE_GLOBAL_PER_MINUTE"] ?? DEFAULT_RATE_LIMIT.globalPerMinute),
-      perKeyMethodPerMinute: Number(
-        env["OMIE_KEY_METHOD_PER_MINUTE"] ?? DEFAULT_RATE_LIMIT.perKeyMethodPerMinute,
+      globalPerMinute: envNumber(env, "OMIE_GLOBAL_PER_MINUTE", DEFAULT_RATE_LIMIT.globalPerMinute),
+      perKeyMethodPerMinute: envNumber(
+        env,
+        "OMIE_KEY_METHOD_PER_MINUTE",
+        DEFAULT_RATE_LIMIT.perKeyMethodPerMinute,
       ),
-      maxConcurrentPerKeyMethod: Number(
-        env["OMIE_MAX_CONCURRENT"] ?? DEFAULT_RATE_LIMIT.maxConcurrentPerKeyMethod,
+      maxConcurrentPerKeyMethod: envNumber(
+        env,
+        "OMIE_MAX_CONCURRENT",
+        DEFAULT_RATE_LIMIT.maxConcurrentPerKeyMethod,
       ),
+      circuitOpenMs: envNumber(env, "OMIE_CIRCUIT_OPEN_MS", DEFAULT_RATE_LIMIT.circuitOpenMs),
+      redundantSpacingMs: envNumber(
+        env,
+        "OMIE_REDUNDANT_SPACING_MS",
+        DEFAULT_RATE_LIMIT.redundantSpacingMs,
+      ),
+      keyErrorBudget: envNumber(env, "OMIE_KEY_ERROR_BUDGET", DEFAULT_RATE_LIMIT.keyErrorBudget),
     });
   }
   return sharedOmieLimiter;

@@ -57,6 +57,23 @@ describe("OmieClient", () => {
       kind: "incomplete",
     });
   });
+  it("waits at least 61 s before retrying a redundant-consumption fault", async () => {
+    const waits: number[] = [];
+    let i = 0;
+    const responses = [
+      () => json({ faultstring: "ERROR: Consumo redundante detectado. Aguarde 60 segundos." }, 500),
+      () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 1 }] }),
+    ];
+    const client = new OmieClient(creds, {
+      fetchImpl: (async () => responses[Math.min(i++, 1)]!()) as unknown as typeof fetch,
+      sleep: async (ms) => void waits.push(ms),
+      limiter: new OmieRateLimiter({}, { sleep: async () => {} }),
+      maxRetries: 2,
+    });
+    await client.listPage("x/", "ListarNF", { pagina: 1 }, ["lista"]);
+    expect(Math.max(...waits)).toBeGreaterThanOrEqual(61_000);
+  });
+
   it("redacts credentials", () => {
     const m = redact('erro KEY123 / SECRET456 "app_key":"zzz"', creds);
     expect(m).not.toContain("KEY123");
@@ -85,6 +102,49 @@ describe("OmieRateLimiter", () => {
     expect(t).toBeGreaterThanOrEqual(60_000);
     expect(l.limitFor("Slow")).toBe(1);
   });
+  it("spaces identical requests by at least 61 s and never delays different ones", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarNF", async () => 1, undefined, "page-1");
+    await l.run("k", "ListarNF", async () => 1, undefined, "page-2");
+    expect(waits).toEqual([]);
+    await l.run("k", "ListarNF", async () => 1, undefined, "page-1");
+    expect(waits.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(61_000);
+  });
+
+  it("opens a 30-minute circuit by default", () => {
+    let t = 0;
+    const l = new OmieRateLimiter({}, { now: () => t });
+    l.openCircuit("k", "ListarNF");
+    t += 29 * 60_000;
+    expect(l.circuitState("k", "ListarNF")).toBe("open");
+    t += 2 * 60_000;
+    expect(l.circuitState("k", "ListarNF")).toBe("closed");
+  });
+
+  it("pauses the whole App Key on invalid credentials and after the error budget", async () => {
+    const t = 0;
+    const l = new OmieRateLimiter({ keyErrorBudget: 3 }, { now: () => t });
+    l.recordFailure("bad", "auth");
+    expect(l.circuitState("bad", "ListarClientes")).toBe("open");
+    await expect(l.run("bad", "ListarPedidos", async () => 1)).rejects.toThrow(/bloqueado/);
+    l.recordFailure("k", "client");
+    l.recordFailure("k", "client");
+    expect(l.circuitState("k", "Any")).toBe("closed");
+    l.recordFailure("k", "client");
+    expect(l.circuitState("k", "Any")).toBe("open");
+  });
+
   it("respects global cap across keys", async () => {
     let t = 0;
     const l = new OmieRateLimiter(

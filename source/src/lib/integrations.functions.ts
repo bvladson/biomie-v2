@@ -30,6 +30,33 @@ async function admin() {
   return supabaseAdmin;
 }
 
+/**
+ * In production every Omie load runs in the separate worker process, which owns
+ * the shared rate limiter. The web process only enqueues the request.
+ */
+function inlineSyncAllowed() {
+  return process.env["APP_ENV"] !== "production" || process.env["BIOMIE_ALLOW_WEB_SYNC"] === "1";
+}
+
+const QUEUED_MESSAGE =
+  "Sincronização enviada para o worker. Acompanhe o andamento em Qualidade dos Dados / Integrações.";
+
+async function enqueue(
+  supabase: SupabaseClient<Database>,
+  company: string,
+  entity: string,
+  period?: { from: string; to: string },
+) {
+  const { error } = await supabase.rpc("manage_backfill", {
+    p_company: company,
+    p_action: "create",
+    p_entity: entity,
+    ...(period ? { p_from: period.from, p_to: period.to } : {}),
+    p_priority: 50,
+  });
+  if (error) throw new Error(error.message || "Não foi possível agendar a sincronização.");
+}
+
 export interface MigrationRow {
   entity: string;
   label: string;
@@ -107,13 +134,20 @@ export const saveOmieCredentials = createServerFn({ method: "POST" })
       .parse(i),
   )
   .handler(async ({ data, context }) => {
-    await assertAdmin(context.supabase, context.userId);
-    const { error } = await context.supabase.rpc("set_integration_credentials", {
-      p_company: data.company,
-      p_provider: "omie",
-      p_app_key: data.appKey,
-      p_app_secret: data.appSecret,
-    });
+    await assertAdminCompany(context.supabase, context.userId, data.company);
+    // Encrypted here, server-side; the database only ever receives ciphertext.
+    const { encryptOmieCredentials } = await import("./omie/credentials.server");
+    const encrypted = encryptOmieCredentials(data.company, data.appKey, data.appSecret);
+    const { error } = await context.supabase.rpc(
+      "set_integration_credentials_encrypted" as never,
+      {
+        p_company: data.company,
+        p_provider: "omie",
+        p_app_key_enc: encrypted.appKeyEnc,
+        p_app_secret_enc: encrypted.appSecretEnc,
+        p_app_key_hint: encrypted.hint,
+      } as never,
+    );
     if (error) throw new Error("Não foi possível salvar as credenciais.");
     return { ok: true };
   });
@@ -134,6 +168,18 @@ export const syncOmieStep = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdminCompany(context.supabase, context.userId, data.company);
+    if (!inlineSyncAllowed()) {
+      await enqueue(context.supabase, data.company, data.entity);
+      return {
+        runId: "",
+        done: true,
+        status: "SUCCESS" as const,
+        pagesDone: 0,
+        pagesTotal: null,
+        received: 0,
+        message: QUEUED_MESSAGE,
+      };
+    }
     const { runSyncStep } = await import("./omie/sync.server");
     return runSyncStep(await admin(), {
       company: data.company,
@@ -216,6 +262,16 @@ export const syncOmieTxStep = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await assertAdminCompany(context.supabase, context.userId, data.company);
+    if (!inlineSyncAllowed()) {
+      await enqueue(context.supabase, data.company, data.entity, { from: data.from, to: data.to });
+      return {
+        runId: "",
+        done: true,
+        status: "SUCCESS" as const,
+        received: 0,
+        message: QUEUED_MESSAGE,
+      };
+    }
     const { runTxSyncStep } = await import("./omie/sync-tx.server");
     return runTxSyncStep(await admin(), {
       company: data.company,
@@ -316,7 +372,7 @@ export const manageBackfill = createServerFn({ method: "POST" })
     companySchema
       .extend({
         action: z.enum(["create", "pause", "resume", "cancel", "retry"]),
-        entity: z.enum(["invoices", "orders", "receivables"]).optional(),
+        entity: z.enum(["invoices", "orders", "receivables", "settlements"]).optional(),
         from: isoDate.optional(),
         to: isoDate.optional(),
         jobId: z.string().uuid().optional(),

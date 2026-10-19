@@ -57,6 +57,34 @@ const EMPTY_PAGE = /n[aã]o existem registros/i;
 const RATE_LIMIT = /(consumo redundante|redundant|bloquead|limite de requisi|too many|aguarde)/i;
 const AUTH = /(app_key|app_secret|chave de acesso|n[aã]o autorizad|invalid.*key|acesso negado)/i;
 
+const REDUNDANT = /(consumo redundante|redundant)/i;
+
+/** Stable identity of one exact request; never contains the credentials themselves. */
+export function requestFingerprint(
+  appKey: string,
+  path: string,
+  call: string,
+  param: Record<string, unknown>,
+): string {
+  const stable = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(stable)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.keys(value as Record<string, unknown>)
+              .sort()
+              .map((key) => [key, stable((value as Record<string, unknown>)[key])]),
+          )
+        : value;
+  // FNV-1a of the App Key keeps applications apart without storing the key itself.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < appKey.length; i++) {
+    hash ^= appKey.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${hash.toString(16)}|${path}|${call}|${JSON.stringify(stable(param))}`;
+}
+
 /** Strips anything that looks like a credential from a message. */
 export function redact(message: string, creds?: OmieCredentials): string {
   let m = message;
@@ -103,6 +131,8 @@ export class OmieClient {
     let attempt = 0;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.maxElapsedMs);
+    // Identical requests (same method + params) are spaced by the limiter.
+    const fingerprint = requestFingerprint(this.creds.appKey, path, call, param);
     try {
       for (;;) {
         try {
@@ -111,6 +141,7 @@ export class OmieClient {
             call,
             () => this.once(path, call, param, controller.signal),
             controller.signal,
+            fingerprint,
           );
         } catch (e) {
           if (controller.signal.aborted)
@@ -124,19 +155,20 @@ export class OmieClient {
             e instanceof OmieError
               ? e
               : new OmieError("network", "Falha de rede ao chamar o Omie.", true);
+          if (["auth", "blocked", "rate_limit", "client", "server"].includes(err.kind))
+            this.limiter.recordFailure(
+              this.creds.appKey,
+              err.kind as "auth" | "blocked" | "rate_limit" | "client" | "server",
+            );
           if (err.kind === "blocked") {
             this.limiter.openCircuit(this.creds.appKey, call);
             throw err;
           }
           if (!err.retriable || attempt >= this.maxRetries) throw err;
           const factor = err.kind === "rate_limit" ? 4 : 1;
-          const delay = Math.max(
-            err.retryAfterMs,
-            Math.min(
-              60_000,
-              this.baseDelayMs * factor * 2 ** attempt + Math.floor(Math.random() * 250),
-            ),
-          );
+          const base = Math.min(60_000, this.baseDelayMs * factor * 2 ** attempt);
+          // Up to 25% jitter so retries from several jobs do not align.
+          const delay = Math.max(err.retryAfterMs, base + Math.floor(Math.random() * base * 0.25));
           attempt++;
           await abortableWait(this.sleep, delay, controller.signal);
         }
@@ -219,11 +251,13 @@ export class OmieClient {
           ? Number(retry) * 1000
           : Date.parse(retry) - Date.now()
         : 0;
+      // "Consumo redundante": repeating the same query inside 60 s extends the block.
+      const minimum = fault && REDUNDANT.test(fault) ? 61_000 : 0;
       throw new OmieError(
         "rate_limit",
         `Limite de requisições do Omie: ${msg}`,
         true,
-        Number.isFinite(retryMs) ? Math.max(0, Math.min(300_000, retryMs)) : 0,
+        Math.max(minimum, Number.isFinite(retryMs) ? Math.max(0, Math.min(300_000, retryMs)) : 0),
       );
     }
     if (res.status === 401 || res.status === 403 || (fault && AUTH.test(fault)))

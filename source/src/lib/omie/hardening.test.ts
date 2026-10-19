@@ -91,7 +91,8 @@ describe("Omie HTTP bounds", () => {
       sleep: async (ms) => {
         waits.push(ms);
       },
-      limiter: new OmieRateLimiter(),
+      // Simulated clock: the identical retry is also spaced by the limiter (61 s).
+      limiter: new OmieRateLimiter({}, { sleep: async () => {} }),
     });
     await client.call("x/", "Listar", {});
     expect(waits[0]).toBeGreaterThanOrEqual(10_000);

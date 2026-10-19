@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { acquireWorkerLease } from "@/lib/jobs/worker-lease.server";
 import { OmieClient, OmieError, redact, type OmieCredentials } from "./omie-client";
+import { loadOmieCredentials } from "./credentials.server";
 import {
   ADAPTERS,
   ENTITY_ORDER,
@@ -14,54 +15,55 @@ import {
 
 type Admin = SupabaseClient<Database>;
 
-/** Service-role only. Credentials never leave this module. */
-async function loadCredentials(admin: Admin, company: string): Promise<OmieCredentials> {
-  const { data, error } = await admin.rpc("get_integration_credentials", {
-    p_company: company,
-    p_provider: "omie",
-  });
-  const row = Array.isArray(data) ? data[0] : null;
-  if (error || !row)
-    throw new OmieError("auth", "Credenciais Omie não configuradas para esta empresa.", false);
-  return { appKey: row.app_key, appSecret: row.app_secret };
-}
+/** Service-role only. Credentials are decrypted here and never leave this module. */
+const loadCredentials = (admin: Admin, company: string): Promise<OmieCredentials> =>
+  loadOmieCredentials(admin, company);
+
+export type IntegrationStatus = "CONNECTED" | "ERROR" | "INVALID_CREDENTIALS";
 
 export interface ConnectionResult {
   ok: boolean;
+  status: IntegrationStatus;
   message: string;
   testedAt: string;
 }
 
+/** CONNECTED means an accepted Omie call, never just a stored credential. */
 export async function testOmieConnection(admin: Admin, company: string): Promise<ConnectionResult> {
   const testedAt = new Date().toISOString();
   let result: ConnectionResult;
   let creds: OmieCredentials | undefined;
   try {
     creds = await loadCredentials(admin, company);
-    const client = new OmieClient(creds, { maxRetries: 1, timeoutMs: 20_000 });
+    const client = new OmieClient(creds, { maxRetries: 0, timeoutMs: 20_000 });
     const a = ADAPTERS.vendors;
     const page = await client.listPage(a.path, a.call, a.pageParams(1, 1), a.listKeys);
     result = {
       ok: true,
+      status: "CONNECTED",
       message: `Conexão estabelecida. ${page.totalRecords ?? page.records.length} vendedor(es) visível(is) na conta.`,
       testedAt,
     };
   } catch (e) {
     const msg = e instanceof OmieError ? e.message : "Falha inesperada ao testar a conexão.";
-    result = { ok: false, message: redact(msg, creds), testedAt };
+    result = {
+      ok: false,
+      status: e instanceof OmieError && e.kind === "auth" ? "INVALID_CREDENTIALS" : "ERROR",
+      message: redact(msg, creds),
+      testedAt,
+    };
   }
-  await admin
-    .from("company_integrations")
-    .update({
-      status: result.ok ? "CONNECTED" : "ERROR",
-      last_test_at: testedAt,
-      last_test_ok: result.ok,
-      last_test_message: result.message,
-      ...(result.ok ? { last_success_at: testedAt } : { last_failure_at: testedAt }),
-      updated_at: testedAt,
-    })
-    .eq("company_id", company)
-    .eq("provider", "omie");
+  const { error } = await admin.rpc(
+    "record_integration_test" as never,
+    {
+      p_company: company,
+      p_provider: "omie",
+      p_status: result.status,
+      p_ok: result.ok,
+      p_message: result.message,
+    } as never,
+  );
+  if (error) throw new Error("Não foi possível registrar o resultado do teste de conexão.");
   return result;
 }
 

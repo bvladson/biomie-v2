@@ -9,6 +9,10 @@ vi.mock("@/lib/jobs/worker-lease.server", () => ({
 vi.mock("./sync.server", () => ({
   promoteGoldIfAllowed: (...args: unknown[]) => mocks.promote(...args),
 }));
+// Decryption is covered by credentials.test.ts; this suite tests checkpoints.
+vi.mock("./credentials.server", () => ({
+  loadOmieCredentials: async () => ({ appKey: "test", appSecret: "test" }),
+}));
 vi.mock("./omie-client", async (original) => {
   const module = await original<typeof import("./omie-client")>();
   return {
