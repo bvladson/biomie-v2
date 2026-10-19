@@ -24,6 +24,11 @@ export interface WorkerConfig {
   snapshotTimeZone: string;
   recurringTransactionsEveryMs: number;
   recurringTransactionsDays: number;
+  /**
+   * Fixed local minutes (e.g. [21, 51]) at which recurring transactions start.
+   * Empty = every recurringTransactionsEveryMs since the last enqueue.
+   */
+  recurringTransactionsMinutes: number[];
   recurringDimensionsHour: number;
   weeklyReplayWeekday: number;
   weeklyReplayHour: number;
@@ -56,6 +61,7 @@ export interface WorkerDeps {
 
 export interface WorkerState {
   lastTransactionsEnqueue: number;
+  lastTransactionsSlot: string | null;
   lastDimensionsDay: string | null;
   lastReplayDay: string | null;
   lastSnapshotDay: string | null;
@@ -63,6 +69,7 @@ export interface WorkerState {
 
 export const initialWorkerState = (): WorkerState => ({
   lastTransactionsEnqueue: 0,
+  lastTransactionsSlot: null,
   lastDimensionsDay: null,
   lastReplayDay: null,
   lastSnapshotDay: null,
@@ -94,6 +101,29 @@ export function parseBlackouts(value: string | undefined): BlackoutWindow[] {
       throw new Error("Janela de bloqueio inválida em BIOMIE_WORKER_BLACKOUTS.");
     return window;
   });
+}
+
+/** "21,51" -> [21, 51]: local minutes at which recurring transactions start. */
+export function parseSlotMinutes(value: string | undefined): number[] {
+  if (!value?.trim()) return [];
+  const minutes = value.split(",").map((part) => Number(part.trim()));
+  if (minutes.some((m) => !Number.isInteger(m) || m < 0 || m > 59))
+    throw new Error("BIOMIE_RECURRING_TX_MINUTES inválido.");
+  return [...new Set(minutes)].sort((a, b) => a - b);
+}
+
+/** Slots open for this many minutes; a worker that missed the window waits for the next slot. */
+export const SLOT_WINDOW_MINUTES = 5;
+
+/** The slot active now ("YYYY-MM-DD HH:mm", local), or null outside every slot window. */
+export function transactionSlot(
+  local: { day: string; hour: number; minute: number },
+  minutes: number[],
+): string | null {
+  const start = minutes.find((m) => local.minute >= m && local.minute < m + SLOT_WINDOW_MINUTES);
+  if (start === undefined) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${local.day} ${pad(local.hour)}:${pad(start)}`;
 }
 
 export function workerConfig(env: Record<string, string | undefined>): WorkerConfig {
@@ -138,6 +168,7 @@ export function workerConfig(env: Record<string, string | undefined>): WorkerCon
       400,
       "BIOMIE_RECURRING_TX_DAYS",
     ),
+    recurringTransactionsMinutes: parseSlotMinutes(env["BIOMIE_RECURRING_TX_MINUTES"]),
     recurringDimensionsHour: integer(
       env["BIOMIE_RECURRING_DIMENSIONS_HOUR"],
       6,
@@ -170,6 +201,7 @@ export function localParts(now: Date, timeZone: string) {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
+    minute: "2-digit",
     weekday: "short",
     hourCycle: "h23",
   }).formatToParts(now);
@@ -178,6 +210,7 @@ export function localParts(now: Date, timeZone: string) {
   return {
     day: `${get("year")}-${get("month")}-${get("day")}`,
     hour: Number(get("hour")),
+    minute: Number(get("minute")),
     weekday,
   };
 }
@@ -226,9 +259,16 @@ export async function workerTick(
   const local = localParts(deps.now(), cfg.snapshotTimeZone);
   let enqueued = 0;
   if (control.recurring) {
-    if (started - state.lastTransactionsEnqueue >= cfg.recurringTransactionsEveryMs) {
+    // Fixed local slots keep Omie calls in the quiet minutes of the legacy
+    // BIomie, which shares the same Omie applications (sync every 15 min).
+    const slot = transactionSlot(local, cfg.recurringTransactionsMinutes);
+    const due = cfg.recurringTransactionsMinutes.length
+      ? slot !== null && slot !== state.lastTransactionsSlot
+      : started - state.lastTransactionsEnqueue >= cfg.recurringTransactionsEveryMs;
+    if (due) {
       enqueued += await deps.enqueueRecurring("transactions", local.day);
       state.lastTransactionsEnqueue = started;
+      state.lastTransactionsSlot = slot;
     }
     if (local.hour >= cfg.recurringDimensionsHour && state.lastDimensionsDay !== local.day) {
       enqueued += await deps.enqueueRecurring("dimensions", local.day);

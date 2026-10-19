@@ -141,6 +141,9 @@ services:
       BIOMIE_WORKER_TICK_BUDGET_MS: ${BIOMIE_WORKER_TICK_BUDGET_MS:-25000}
       # Windows when the worker never runs (e.g. VSB maintenance), explicit offsets.
       BIOMIE_WORKER_BLACKOUTS: ${BIOMIE_WORKER_BLACKOUTS:-}
+      # Legacy BIomie syncs the same Omie apps at :00/:15/:30/:45 (commercial) and
+      # 7 min later (finance); the longest quiet windows start at :21 and :51.
+      BIOMIE_RECURRING_TX_MINUTES: "${BIOMIE_RECURRING_TX_MINUTES:-21,51}"
       BIOMIE_SNAPSHOT_TIME_ZONE: America/Fortaleza
       BIOMIE_SNAPSHOT_HOUR: "8"
       NODE_OPTIONS: --max-old-space-size=384

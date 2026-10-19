@@ -45,7 +45,8 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
 - Controle: `python ops/remote.py ops/25_load.py pause|resume|status`, ou na tela
   Integrações (SUPER_ADMIN). Recorrência: `node .output/worker-ctl.mjs recurring on|off`.
 - Recorrência (quando ligada): notas, pedidos, títulos e liquidações dos últimos
-  62 dias a cada 30 min; cadastros diários às 06h; reprocessamento do ano aos
+  62 dias nos minutos 21 e 51 de cada hora (`BIOMIE_RECURRING_TX_MINUTES`, as
+  janelas livres do legado; um horário perdido espera o próximo); cadastros diários às 06h; reprocessamento do ano aos
   domingos às 05h; fotografia do Plano de Voo às 08h (America/Fortaleza).
 - Proteções: cede quando a carga por CPU da máquina passa de 0,75; janelas
   proibidas em `BIOMIE_WORKER_BLACKOUTS` (ex.: manutenção VSB 20/10 19h30–21h);

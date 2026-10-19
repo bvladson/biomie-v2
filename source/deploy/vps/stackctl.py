@@ -37,7 +37,8 @@ NON_SECRET_SETTABLE = {"RELEASE_ID", "SOURCE_DIR", "BIOMIE_GIT_COMMIT", "APP_BAS
                        # Worker tuning (read by compose for the worker service only).
                        "BIOMIE_WORKER_TICK_BUDGET_MS", "BIOMIE_WORKER_INTERVAL_MS",
                        "BIOMIE_WORKER_MAX_LOAD_PER_CPU", "BIOMIE_WORKER_BLACKOUTS",
-                       "OMIE_WORKER_GLOBAL_PER_MINUTE", "OMIE_WORKER_KEY_METHOD_PER_MINUTE"}
+                       "OMIE_WORKER_GLOBAL_PER_MINUTE", "OMIE_WORKER_KEY_METHOD_PER_MINUTE",
+                       "BIOMIE_RECURRING_TX_MINUTES"}
 KEY_LIFETIME_SECONDS = 2 * 365 * 24 * 3600
 
 

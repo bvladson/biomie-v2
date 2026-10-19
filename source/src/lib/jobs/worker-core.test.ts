@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   initialWorkerState,
   parseBlackouts,
+  parseSlotMinutes,
   workerConfig,
   workerTick,
   type WorkerDeps,
@@ -14,6 +15,7 @@ function harness(options: {
   jobs?: number;
   at?: string;
   blackouts?: string;
+  txMinutes?: string;
 }) {
   let clock = Date.parse(options.at ?? "2026-10-21T13:00:00Z");
   let pending = options.jobs ?? 0;
@@ -53,6 +55,7 @@ function harness(options: {
   const config = workerConfig({
     BIOMIE_WORKER_TICK_BUDGET_MS: "20000",
     BIOMIE_WORKER_BLACKOUTS: options.blackouts,
+    BIOMIE_RECURRING_TX_MINUTES: options.txMinutes,
   });
   return { deps, calls, config, advance: (ms: number) => (clock += ms) };
 }
@@ -107,6 +110,32 @@ describe("worker tick", () => {
     expect(on.calls.enqueue).toEqual(["transactions", "dimensions", "transactions"]);
   });
 
+  it("starts recurring transactions only inside fixed local slots (legacy quiet minutes)", async () => {
+    // 20:20Z = 17:20 in America/Fortaleza.
+    const on = harness({ recurring: true, txMinutes: "21,51", at: "2026-10-21T20:20:00Z" });
+    const state = initialWorkerState();
+    const tx = () => on.calls.enqueue.filter((kind) => kind === "transactions").length;
+    await workerTick(on.config, on.deps, state);
+    expect(tx()).toBe(0);
+    on.advance(60_000); // 17:21
+    await workerTick(on.config, on.deps, state);
+    expect(tx()).toBe(1);
+    on.advance(2 * 60_000); // 17:23, same slot
+    await workerTick(on.config, on.deps, state);
+    expect(tx()).toBe(1);
+    on.advance(10 * 60_000); // 17:33
+    await workerTick(on.config, on.deps, state);
+    expect(tx()).toBe(1);
+    on.advance(18 * 60_000); // 17:51
+    await workerTick(on.config, on.deps, state);
+    expect(tx()).toBe(2);
+
+    // A restart outside a slot window waits for the next slot.
+    const restarted = harness({ recurring: true, txMinutes: "21,51", at: "2026-10-21T21:05:00Z" });
+    await workerTick(restarted.config, restarted.deps, initialWorkerState());
+    expect(restarted.calls.enqueue.filter((kind) => kind === "transactions")).toEqual([]);
+  });
+
   it("runs the Flight Plan snapshot once per local day after the configured hour", async () => {
     const { deps, calls, config, advance } = harness({ at: "2026-10-21T13:00:00Z" });
     const state = initialWorkerState();
@@ -122,6 +151,12 @@ describe("worker configuration", () => {
     expect(() => parseBlackouts("2026-10-20T19:30/2026-10-20T21:00")).toThrow();
     expect(parseBlackouts("2026-10-20T19:30-03:00/2026-10-20T21:00-03:00")).toHaveLength(1);
     expect(parseBlackouts(undefined)).toEqual([]);
+  });
+  it("parses recurring slot minutes", () => {
+    expect(parseSlotMinutes("51, 21,21")).toEqual([21, 51]);
+    expect(parseSlotMinutes(undefined)).toEqual([]);
+    expect(() => parseSlotMinutes("60")).toThrow();
+    expect(() => parseSlotMinutes("a")).toThrow();
   });
   it("rejects invalid numeric settings", () => {
     expect(() => workerConfig({ BIOMIE_WORKER_MAX_LOAD_PER_CPU: "-1" })).toThrow();
