@@ -34,3 +34,6 @@ source/dist/
 *.tar.gz
 ops/operational-preview/
 .local-pg/
+
+# --- Logs de operacao (podem conter nomes de vendedores/clientes) ---
+ops/logs/
