@@ -260,6 +260,13 @@
       "when": 1792414100000,
       "tag": "0036_promote_not_authorized",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792414200000,
+      "tag": "0037_revoke_anon_public_execute",
+      "breakpoints": true
     }
   ]
 }

@@ -56,21 +56,9 @@ for user in legacy['biomie_users']:
     for access in accesses:q+="INSERT INTO public.user_company_access(user_id,company_id) VALUES("+lit(uid)+','+lit(company_map[str(access['company_id'])])+") ON CONFLICT DO NOTHING;"
     q+="INSERT INTO public.audit_log(actor_id,action,entity,entity_id,payload) VALUES(NULL,'legacy.identity_import','profiles',"+lit(uid)+",'{\"password_reset\":false}'::jsonb);"
     sql(q)
-# Independent proof that this GoTrue build accepts PHP bcrypt ($2y$) imports.
-test_email='deploy-smoke-20261019@biomie.invalid'
-test_password=secrets.token_urlsafe(26)
-php="$pass=stream_get_contents(STDIN); echo password_hash($pass,PASSWORD_BCRYPT);"
-test_hash=subprocess.run(['php','-r',php],input=test_password,capture_output=True,text=True,check=True).stdout
-test=by_email.get(test_email)
-if test:
-    auth('DELETE','/admin/users/'+test['id'])
-test=auth('POST','/admin/users',{'email':test_email,'password_hash':test_hash,'email_confirm':True})
-request=urllib.request.Request('http://127.0.0.1:3140/auth/v1/token?grant_type=password',data=json.dumps({'email':test_email,'password':test_password}).encode(),headers={'apikey':env['ANON_KEY'],'Content-Type':'application/json'})
-with urllib.request.urlopen(request,timeout=30) as r:session=json.loads(r.read())
-if not session.get('access_token'):raise RuntimeError('Bcrypt login proof failed')
-smoke={'email':test_email,'password':test_password,'user_id':test['id'],'company_id':company_map['1']}
-path=base/'shared/smoke-account.json';path.write_text(json.dumps(smoke));os.chmod(path,0o600)
-sql("INSERT INTO public.profiles(id,email,full_name,default_company_id) VALUES("+','.join(map(lit,[test['id'],test_email,'Deployment smoke test',company_map['1']]))+"); INSERT INTO public.user_roles(user_id,role) VALUES("+lit(test['id'])+",'SUPER_ADMIN'); INSERT INTO public.user_company_access(user_id,company_id) SELECT "+lit(test['id'])+",id FROM public.companies ON CONFLICT DO NOTHING;")
+# REMOVED 19/10/2026: this block created a SUPER_ADMIN smoke account and wrote its
+# password to shared/smoke-account.json. Smoke tests now use ops/29_smoke.py
+# (short-lived accounts, password only in memory, deleted at the end).
 maps={'companies':company_map,'users':user_map}
 path=base/'shared/legacy-map.json';path.write_text(json.dumps(maps));os.chmod(path,0o600)
-print(json.dumps({'companies':len(company_map),'credentials':len(legacy['credentials']),'users':len(user_map),'password_hashes_preserved':passwords_preserved,'role_counts':role_counts,'bcrypt_2y_login_test':'passed','smoke_account':'temporary; removed after acceptance','legacy_import':'identities and own configurations only; no passwords disclosed'}))
+print(json.dumps({'companies':len(company_map),'credentials':len(legacy['credentials']),'users':len(user_map),'password_hashes_preserved':passwords_preserved,'role_counts':role_counts,'legacy_import':'identities and own configurations only; no passwords disclosed'}))
