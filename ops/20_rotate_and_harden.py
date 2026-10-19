@@ -103,12 +103,13 @@ checks = {
 status, body = http('GET', 'http://127.0.0.1:3140/rest/v1/companies?select=id&limit=1', {'apikey': new['ANON_KEY']})
 checks['public_rest_with_new_anon_reaches_postgrest'] = status == 401 and '42501' in body
 checks['public_domain_admin'] = http('GET', 'https://biomie.magmoveiscorporativos.com.br/supabase/auth/v1/admin/users', svc_new)[0]
-expected = {'old_service_internal_admin': 401, 'old_service_internal_rest': 401, 'new_service_internal_admin': 200,
-            'public_admin_with_new_service': 403, 'public_rest_with_new_service': 401,
-            'public_rest_with_old_anon': 401, 'public_rest_with_new_anon_reaches_postgrest': True,
-            'public_domain_admin': 403}
+expected = {'old_service_internal_admin': {401, 403}, 'old_service_internal_rest': {401},
+            'new_service_internal_admin': {200}, 'public_admin_with_new_service': {403},
+            'public_rest_with_new_service': {401}, 'public_rest_with_old_anon': {401},
+            'public_rest_with_new_anon_reaches_postgrest': {True}, 'public_domain_admin': {403}}
 report['checks'] = checks
-report['checks_ok'] = all(checks[k] == v for k, v in expected.items())
+# GoTrue answers 403 (bad_jwt) for an invalid admin token; both mean "rejected".
+report['checks_ok'] = all(checks[k] in v for k, v in expected.items())
 
 # Smoke SUPER_ADMIN account: delete through GoTrue (removes sessions and refresh tokens).
 status, body = http('GET', 'http://127.0.0.1:3141/auth/v1/admin/users?per_page=1000', svc_new)
