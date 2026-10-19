@@ -218,6 +218,27 @@
       "when": 1792413500000,
       "tag": "0030_identity_first_omie_matching",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792413600000,
+      "tag": "0031_channel_filter_official_rule",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792413700000,
+      "tag": "0032_integration_security_worker",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792413800000,
+      "tag": "0033_demo_visibility_and_coverage",
+      "breakpoints": true
     }
   ]
 }

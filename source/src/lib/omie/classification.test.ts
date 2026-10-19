@@ -2,163 +2,351 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyCanonicalHeader,
-  classifyChannel,
   classifyOperation,
+  commercialBase,
+  decideChannel,
   loadLegacyClassificationConfig,
+  normalizeSellerName,
   type LegacyClassificationConfig,
 } from "./classification.server";
 
-const fiscalHeader = {
+const GROUP_CNPJ = "11222333000181"; // fictitious group company
+const PUBLIC_BODY_CNPJ = "44555666000199"; // fictitious public customer
+
+/** Mirrors the real legacy rule set: substring/observation rules + intra-group + default. */
+function legacyRules(defaultTarget: string) {
+  return [
+    {
+      id: 49,
+      rule_type: "cliente_cnpj_list",
+      target_channel: "outros",
+      priority: 1,
+      ativo: 1,
+      match_value: `${GROUP_CNPJ},00.111.222/0001-33`,
+    },
+    {
+      id: 35,
+      rule_type: "vendedor_nome_like",
+      target_channel: "licitacao",
+      priority: 10,
+      ativo: 1,
+      match_value: "%LICITAC%",
+    },
+    {
+      id: 37,
+      rule_type: "vendedor_nome_like",
+      target_channel: "licitacao",
+      priority: 12,
+      ativo: 1,
+      match_value: "%LICITA%",
+    },
+    {
+      id: 38,
+      rule_type: "pedido_obs_like",
+      target_channel: "licitacao",
+      priority: 20,
+      ativo: 1,
+      match_value: "%pregao%",
+    },
+    {
+      id: 40,
+      rule_type: "pedido_obs_like",
+      target_channel: "licitacao",
+      priority: 22,
+      ativo: 1,
+      match_value: "%edital%",
+    },
+    {
+      id: 41,
+      rule_type: "pedido_obs_like",
+      target_channel: "licitacao",
+      priority: 23,
+      ativo: 1,
+      match_value: "%empenho%",
+    },
+    {
+      id: 50,
+      rule_type: "projeto_id_list",
+      target_channel: "licitacao",
+      priority: 30,
+      ativo: 1,
+      match_value: "123",
+    },
+    {
+      id: 44,
+      rule_type: "default",
+      target_channel: defaultTarget,
+      priority: 999,
+      ativo: 1,
+      match_value: "",
+    },
+  ];
+}
+
+const COMPANIES: Record<string, { defaultChannel: string; licitacaoCode: string | null }> = {
+  expert: { defaultChannel: "licitacao", licitacaoCode: "8766069241" },
+  "uni-design": { defaultChannel: "licitacao", licitacaoCode: "10118842872" },
+  "mag-matriz": { defaultChannel: "licitacao", licitacaoCode: null },
+  ergooffice: { defaultChannel: "licitacao", licitacaoCode: "7467611512" },
+  "mag-filial": { defaultChannel: "varejo", licitacaoCode: "8766069381" },
+};
+
+function companyConfig(slug: string): LegacyClassificationConfig {
+  const company = COMPANIES[slug]!;
+  return {
+    company_slug: slug,
+    default_channel: company.defaultChannel,
+    licitacao_seller_codes: company.licitacaoCode ? [company.licitacaoCode] : [],
+    channel_rules: legacyRules(company.defaultChannel),
+    vendors: [
+      { external_id: "100", name: "ROBERTO SIQ." },
+      { external_id: "200", name: "Equipe LICITAÇÃO" },
+      { external_id: "300", name: "Ex-licitação João" },
+      ...(company.licitacaoCode ? [{ external_id: company.licitacaoCode, name: "Licitação" }] : []),
+      { external_id: "999", name: "LICITAÇÃO" },
+    ],
+    customers: [
+      { external_id: "1", document_original: PUBLIC_BODY_CNPJ },
+      { external_id: "2", document_original: GROUP_CNPJ },
+      {
+        external_id: "3",
+        document_hash: createHash("sha256").update(GROUP_CNPJ).digest("hex"),
+      },
+    ],
+  };
+}
+
+const baseHeader = {
   status: "authorized",
   gross_amount: "1150.00",
   goods_amount: 1000,
   freight_amount: "100.00",
   insurance_amount: "20.00",
   other_expenses_amount: "40.00",
-  seller_external_id: "5",
-  customer_external_id: "77",
-};
-const retail: LegacyClassificationConfig = {
-  default_channel: "varejo",
-  vendors: [{ external_id: "5", name: "Vendedor comercial" }],
+  customer_external_id: "1",
 };
 
-describe("approved classification overrides", () => {
-  it("preserves validated external-ID classification, visibility, base and seller", () => {
+const invoiceRaw = (extra: Record<string, unknown> = {}) => ({
+  det: [{ prod: { CFOP: "5.102" } }],
+  ...extra,
+});
+
+describe.each(Object.keys(COMPANIES))("official channel rule — %s", (slug) => {
+  const config = companyConfig(slug);
+  const classify = (seller: string, raw: Record<string, unknown> = invoiceRaw(), customer = "1") =>
+    classifyCanonicalHeader(
+      "invoices",
+      "nf-1",
+      raw,
+      { ...baseHeader, seller_external_id: seller, customer_external_id: customer },
+      config,
+    );
+
+  it("common seller selling to a public body is VAREJO", () => {
+    expect(classify("100")).toMatchObject({
+      business_channel: "varejo",
+      channel_reason: "default_varejo",
+      is_biomie_commercial_visible: true,
+    });
+  });
+
+  it("the seller named Licitação is LICITAÇÃO, by code when configured and by exact name", () => {
+    const code = COMPANIES[slug]!.licitacaoCode;
+    if (code)
+      expect(classify(code)).toMatchObject({
+        business_channel: "licitacao",
+        channel_reason: "licitacao_seller_code",
+        is_biomie_commercial_visible: false,
+      });
+    expect(classify("999")).toMatchObject({
+      business_channel: "licitacao",
+      channel_reason: "licitacao_seller_name",
+    });
+  });
+
+  it("a name that only contains 'licita' is not the Licitação seller", () => {
+    expect(classify("200")["business_channel"]).toBe("varejo");
+    expect(classify("300")["business_channel"]).toBe("varejo");
+  });
+
+  it("observation words (pregão, edital, empenho) never classify", () => {
+    const raw = invoiceRaw({
+      infAdic: { infCpl: "Pregão eletrônico 12/2026 - edital 45 - empenho 2026NE0001" },
+    });
+    expect(classify("100", raw)["business_channel"]).toBe("varejo");
+  });
+
+  it("project lists never classify", () => {
+    const raw = invoiceRaw({ pedido: { nIdProjeto: 123 }, compl: { nIdProjeto: 123 } });
+    expect(classify("100", raw)["business_channel"]).toBe("varejo");
+  });
+
+  it("intra-group customers are OUTROS (outside the numbers), by document or document hash", () => {
+    expect(classify("100", invoiceRaw(), "2")).toMatchObject({
+      business_channel: "outros",
+      channel_reason: "intra_group",
+      is_biomie_commercial_visible: false,
+    });
+    expect(classify("100", invoiceRaw(), "3")["business_channel"]).toBe("outros");
+    const raw = invoiceRaw({ nfDestInt: { cnpj_cpf: "11.222.333/0001-81" } });
+    expect(classify("100", raw, "unknown-customer")["business_channel"]).toBe("outros");
+  });
+
+  it("missing seller and customer falls back to VAREJO; the company default channel never classifies", () => {
+    const actual = classifyCanonicalHeader(
+      "invoices",
+      "nf-2",
+      invoiceRaw(),
+      { ...baseHeader, customer_external_id: null },
+      config,
+    );
+    expect(actual).toMatchObject({ business_channel: "varejo", channel_reason: "default_varejo" });
+  });
+});
+
+describe("authority of the official rule over legacy snapshots", () => {
+  it("ignores legacy channel, visibility, scope and base; keeps only a missing seller", () => {
     const config: LegacyClassificationConfig = {
-      ...retail,
+      ...companyConfig("expert"),
       invoice_overrides: {
         "123": {
           operation_scope: "remittance",
           business_channel: "licitacao",
           is_biomie_commercial_visible: "0",
           commercial_base_amount: "975.25",
-          seller_external_id: "0008",
+          seller_external_id: "0100",
         },
       },
     };
     const actual = classifyCanonicalHeader(
       "invoices",
       "123",
-      { ide: { natOp: "Venda" } },
-      fiscalHeader,
+      invoiceRaw(),
+      { ...baseHeader, seller_external_id: null },
       config,
     );
     expect(actual).toMatchObject({
       status: "authorized",
-      operation_scope: "remittance",
-      business_channel: "licitacao",
-      is_biomie_commercial_visible: false,
-      commercial_base_amount: 975.25,
-      seller_external_id: "8",
-    });
-    expect(fiscalHeader.seller_external_id).toBe("5");
-  });
-  it("never applies another company's map or overwrites fiscal evidence", () => {
-    const config: LegacyClassificationConfig = {
-      invoice_overrides: {
-        "999": { status: "authorized", operation_scope: "commercial", business_channel: "varejo" },
-      },
-    };
-    const actual = classifyCanonicalHeader(
-      "invoices",
-      "123",
-      {},
-      { ...fiscalHeader, status: "denied" },
-      config,
-    );
-    expect(actual).toMatchObject({
-      status: "denied",
-      operation_scope: "unconfirmed",
-      business_channel: "unconfirmed",
-      is_biomie_commercial_visible: false,
+      seller_external_id: "100",
+      operation_scope: "commercial",
+      business_channel: "varejo",
+      is_biomie_commercial_visible: true,
+      commercial_base_amount: 990,
     });
   });
-  it("preserves an explicit zero commercial base", () => {
+
+  it("the payload seller wins over the legacy seller", () => {
     const config: LegacyClassificationConfig = {
-      invoice_overrides: { "123": { commercial_base_amount: "0" } },
-    };
-    expect(
-      classifyCanonicalHeader("invoices", "123", {}, fiscalHeader, config)[
-        "commercial_base_amount"
-      ],
-    ).toBe(0);
-  });
-  it("inherits a title's channel from its approved invoice and does not add unsupported invoice fields", () => {
-    const config: LegacyClassificationConfig = {
-      receivable_overrides: { "7": { invoice_external_id: "42" } },
-      invoice_overrides: { "42": { business_channel: "licitacao" } },
-    };
-    const actual = classifyCanonicalHeader(
-      "receivables",
-      "7",
-      {},
-      { document_number: "T-7" },
-      config,
-    );
-    expect(actual).toEqual({
-      document_number: "T-7",
-      invoice_external_id: "42",
-      business_channel: "licitacao",
-    });
-  });
-  it("preserves order operation overrides and normalizes quote stage 10", () => {
-    const config: LegacyClassificationConfig = {
-      ...retail,
-      orders_overrides: {
-        "7": { operation_scope: "commercial", business_channel: "varejo", etapa_omie: "010" },
-      },
+      ...companyConfig("mag-filial"),
+      invoice_overrides: { "9": { seller_external_id: "100" } },
     };
     expect(
       classifyCanonicalHeader(
-        "orders",
-        "7",
-        { cabecalho: { etapa: "60", nome_tipo_atividade: "Remessa" } },
+        "invoices",
+        "9",
+        invoiceRaw(),
+        { ...baseHeader, seller_external_id: "8766069381" },
+        config,
+      ),
+    ).toMatchObject({ seller_external_id: "8766069381", business_channel: "licitacao" });
+  });
+
+  it("an explicit manual override wins and is traceable", () => {
+    const config: LegacyClassificationConfig = {
+      ...companyConfig("uni-design"),
+      manual_channel_overrides: { "55": "licitacao" },
+    };
+    expect(
+      classifyCanonicalHeader(
+        "invoices",
+        "55",
+        invoiceRaw(),
+        { ...baseHeader, seller_external_id: "100" },
+        config,
+      ),
+    ).toMatchObject({ business_channel: "licitacao", channel_reason: "manual_override" });
+  });
+
+  it("never rewrites fiscal status", () => {
+    const actual = classifyCanonicalHeader(
+      "invoices",
+      "1",
+      {},
+      { ...baseHeader, status: "denied", seller_external_id: "100" },
+      companyConfig("expert"),
+    );
+    expect(actual).toMatchObject({ status: "denied", operation_scope: "unconfirmed" });
+  });
+
+  it("titles and orders follow the same seller rule", () => {
+    const config = companyConfig("ergooffice");
+    expect(
+      classifyCanonicalHeader(
+        "receivables",
+        "t1",
         {},
+        { seller_external_id: "7467611512", customer_external_id: "1" },
+        config,
+      ),
+    ).toMatchObject({ business_channel: "licitacao", channel_reason: "licitacao_seller_code" });
+    expect(
+      classifyCanonicalHeader(
+        "orders",
+        "o1",
+        { cabecalho: { etapa: "50" }, det: [{ produto: { cfop: "6.102" } }] },
+        { seller_external_id: "100", customer_external_id: "2" },
         config,
       ),
     ).toMatchObject({
+      business_channel: "outros",
       operation_scope: "commercial",
-      stage_code: "10",
-      business_channel: "varejo",
+      stage_code: "50",
     });
   });
-  it("classifies new order names and keeps missing stages unknown", () => {
+});
+
+describe("order operation scope from real Omie payload fields", () => {
+  it("uses item CFOPs when nome_tipo_atividade is absent", () => {
+    const order = (cfops: string[]) => ({
+      cabecalho: { etapa: "20" },
+      det: cfops.map((cfop) => ({ produto: { cfop } })),
+    });
+    expect(classifyOperation("orders", order(["5.102", "5.102"]), {})).toBe("commercial");
+    expect(classifyOperation("orders", order(["5.910"]), {})).toBe("remittance");
+    expect(classifyOperation("orders", order(["5.102", "5.910"]), {})).toBe("unconfirmed");
+    expect(classifyOperation("orders", order(["5.949"]), {})).toBe("unconfirmed");
+    expect(classifyOperation("orders", { cabecalho: {} }, {})).toBe("unconfirmed");
+  });
+  it("prefers an explicit activity name when Omie sends it", () => {
     expect(
-      classifyCanonicalHeader(
+      classifyOperation(
         "orders",
-        "8",
-        { cabecalho: { etapa: 20, nome_tipo_atividade: "Remessa de Produto" } },
+        {
+          cabecalho: { nome_tipo_atividade: "Remessa de Produto" },
+          det: [{ produto: { cfop: "5.102" } }],
+        },
         {},
-        retail,
       ),
-    ).toMatchObject({ operation_scope: "remittance", stage_code: "20" });
+    ).toBe("remittance");
+  });
+  it("keeps the stage pending when Omie does not send it", () => {
     expect(
-      classifyCanonicalHeader(
-        "orders",
-        "8",
-        { cabecalho: { codigo_tipo_atividade: "unknown" } },
-        {},
-        retail,
-      ),
+      classifyCanonicalHeader("orders", "8", { cabecalho: {} }, {}, companyConfig("expert")),
     ).toMatchObject({ operation_scope: "unconfirmed", stage_code: null });
   });
 });
 
-describe("deterministic legacy operation rules", () => {
+describe("invoice operation rules", () => {
   it.each(["5102", "5.102", 5102])("normalizes approved CFOP %s", (CFOP) => {
     expect(classifyOperation("invoices", { det: [{ prod: { CFOP } }] }, {})).toBe("commercial");
   });
-  it("does not infer commercial scope from a normal NF, unknown CFOP or numeric activity code", () => {
+  it("does not infer commercial scope from a normal NF or an unknown CFOP", () => {
     expect(classifyOperation("invoices", { ide: { finNFe: "1" } }, {})).toBe("unconfirmed");
     expect(classifyOperation("invoices", { det: [{ prod: { CFOP: "5.999" } }] }, {})).toBe(
       "unconfirmed",
     );
-    expect(classifyOperation("orders", { cabecalho: { codigo_tipo_atividade: "10" } }, {})).toBe(
-      "unconfirmed",
-    );
   });
-  it("gives explicit remittance operation 14 priority over a generic sale name", () => {
+  it("gives explicit remittance operation 14 and finNFe 4 priority", () => {
     expect(
       classifyOperation(
         "invoices",
@@ -179,7 +367,7 @@ describe("deterministic legacy operation rules", () => {
       ),
     ).toBe("unconfirmed");
   });
-  it("uses active approved name rules before built-in text matches", () => {
+  it("uses active approved operation-name rules before built-in text matches", () => {
     const config: LegacyClassificationConfig = {
       operation_rules: [
         {
@@ -195,109 +383,47 @@ describe("deterministic legacy operation rules", () => {
       "remittance",
     );
     expect(
-      classifyOperation("orders", { cabecalho: { nome_tipo_atividade: "Orçamento - PD" } }, {}),
-    ).toBe("commercial");
-    expect(
       classifyOperation("invoices", { ide: { natOp: "Remessa para venda externa" } }, {}),
     ).toBe("unconfirmed");
   });
 });
 
-describe("company channel rules", () => {
-  it("uses seller names with SQL LIKE and rule priorities; manual rules do not auto-match", () => {
-    const config: LegacyClassificationConfig = {
-      vendors: [{ external_id: "0005", name: "Equipe LICITAÇÃO" }],
-      channel_rules: [
-        { id: 3, priority: 100, rule_type: "default", target_channel: "varejo" },
-        {
-          id: 2,
-          priority: 10,
-          rule_type: "vendedor_nome_like",
-          match_value: "%licita%",
-          target_channel: "licitacao",
-          ativo: "1",
-        },
-        { id: 1, priority: 1, rule_type: "manual", target_channel: "outros" },
-      ],
-    };
-    expect(classifyChannel({}, fiscalHeader, config)).toBe("licitacao");
-  });
-  it("normalizes project IDs and does not activate disabled rules", () => {
-    const config: LegacyClassificationConfig = {
-      default_channel: "varejo",
-      channel_rules: [
-        {
-          priority: 1,
-          rule_type: "projeto_id_list",
-          match_value: "123",
-          target_channel: "outros",
-          ativo: "0",
-        },
-        {
-          priority: 2,
-          rule_type: "projeto_id_list",
-          match_value: " 000123, 77 ",
-          target_channel: "licitacao",
-        },
-      ],
-    };
-    expect(classifyChannel({ pedido: { nIdProjeto: 123 } }, fiscalHeader, config)).toBe(
-      "licitacao",
-    );
-  });
-  it("matches customer CNPJ lists through server-only document hashes", () => {
-    const document = "12345678000195";
-    const config: LegacyClassificationConfig = {
-      default_channel: "varejo",
-      customers: [
-        { external_id: "77", document_hash: createHash("sha256").update(document).digest("hex") },
-      ],
-      channel_rules: [
-        {
-          rule_type: "cliente_cnpj_list",
-          match_value: "12.345.678/0001-95",
-          target_channel: "outros",
-        },
-      ],
-    };
-    expect(classifyChannel({}, fiscalHeader, config)).toBe("outros");
-  });
-  it("keeps unseen records unconfirmed without an approved default or when seller evidence is missing", () => {
-    expect(classifyChannel({}, fiscalHeader, {})).toBe("unconfirmed");
+describe("commercial revenue contract", () => {
+  it("is gross - freight - insurance - other expenses, IPI stays in the base", () => {
+    // 1000 goods + 50 IPI + 100 freight = 1150 gross; minus freight/insurance/other.
+    expect(commercialBase(baseHeader)).toBe(990);
     expect(
-      classifyChannel({}, fiscalHeader, {
-        default_channel: "varejo",
-        channel_rules: [
-          { rule_type: "vendedor_nome_like", match_value: "%licita%", target_channel: "licitacao" },
-        ],
+      commercialBase({
+        gross_amount: 1050,
+        freight_amount: 0,
+        insurance_amount: 0,
+        other_expenses_amount: 0,
       }),
-    ).toBe("unconfirmed");
+    ).toBe(1050);
   });
-  it("uses the exact commercial-base components and retains goods and fiscal totals", () => {
-    const actual = classifyCanonicalHeader(
-      "invoices",
-      "123",
-      { det: [{ prod: { CFOP: "5102" } }] },
-      fiscalHeader,
-      retail,
-    );
-    expect(actual).toMatchObject({
-      operation_scope: "commercial",
-      business_channel: "varejo",
-      is_biomie_commercial_visible: true,
-      commercial_base_amount: 990,
-      gross_amount: "1150.00",
-      goods_amount: 1000,
-    });
+  it("treats absent components as zero and keeps cents exact", () => {
+    expect(commercialBase({ gross_amount: "0.30", freight_amount: "0.10" })).toBe(0.2);
+    expect(commercialBase({})).toBeNull();
+  });
+});
+
+describe("seller name normalization", () => {
+  it("only an exact LICITACAO name matches", () => {
+    expect(normalizeSellerName(" Licitação ")).toBe("LICITACAO");
+    expect(normalizeSellerName("LICITAÇÃO")).toBe("LICITACAO");
+    expect(normalizeSellerName("Equipe Licitação")).toBe("EQUIPE LICITACAO");
+    expect(
+      decideChannel({ externalId: "x", sellerCode: null, sellerName: "licitação" }, {}),
+    ).toEqual({ channel: "licitacao", reason: "licitacao_seller_name" });
   });
 });
 
 describe("classification RPC boundary", () => {
   it("loads config only for the requested company", async () => {
-    const rpc = vi.fn(async () => ({ data: { default_channel: "varejo" }, error: null }));
+    const rpc = vi.fn(async () => ({ data: { default_view_channel: "varejo" }, error: null }));
     await expect(
       loadLegacyClassificationConfig({ rpc } as never, "company-1"),
-    ).resolves.toMatchObject({ default_channel: "varejo" });
+    ).resolves.toMatchObject({ default_view_channel: "varejo" });
     expect(rpc).toHaveBeenCalledWith("get_legacy_classification_config", {
       p_company: "company-1",
     });

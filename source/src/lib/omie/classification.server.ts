@@ -6,15 +6,43 @@ import type { OmieTxEntity } from "./adapters";
 type Row = Record<string, unknown>;
 export type OperationScope = "commercial" | "remittance" | "unknown" | "unconfirmed";
 export type BusinessChannel = "varejo" | "licitacao" | "outros" | "unconfirmed";
+
+/**
+ * Why a record received its sales channel. Persisted next to the channel so
+ * every divergence can be explained by a documented rule.
+ */
+export type ChannelReason =
+  | "manual_override"
+  | "intra_group"
+  | "licitacao_seller_code"
+  | "licitacao_seller_name"
+  | "default_varejo";
+
+/**
+ * Private, server-only configuration per company. Legacy keys are kept for
+ * reference; only the fields documented below influence classification.
+ *
+ * - `licitacao_seller_codes`: Omie codes of the operational seller "Licitação".
+ * - `channel_rules`: only active `cliente_cnpj_list` rules targeting `outros`
+ *   (intra-group customers, outside the numbers) are honored.
+ * - `manual_channel_overrides`: explicit manual decisions per external id.
+ * - `default_view_channel` / `default_channel`: UI preference only. They NEVER
+ *   classify a sale (default_view_channel != sales channel classification).
+ * - `*_overrides`: legacy snapshot used only as a seller fallback and for
+ *   reconciliation; legacy channels/scopes are not authoritative.
+ */
 export interface LegacyClassificationConfig {
   invoice_overrides?: Record<string, Row>;
   orders_overrides?: Record<string, Row>;
   receivable_overrides?: Record<string, Row>;
+  manual_channel_overrides?: Record<string, string>;
+  licitacao_seller_codes?: string[];
   operation_rules?: Row[];
   channel_rules?: Row[];
   vendors?: Row[];
   customers?: Row[];
   company_slug?: string;
+  default_view_channel?: string;
   default_channel?: string;
 }
 
@@ -174,29 +202,9 @@ function scopeByName(name: unknown, config: LegacyClassificationConfig): Operati
   return sale ? "commercial" : remittance ? "remittance" : "unconfirmed";
 }
 
-export function classifyOperation(
-  entity: "invoices" | "orders",
-  raw: Row,
-  config: LegacyClassificationConfig,
-): OperationScope {
-  if (entity === "orders") {
-    // Legacy's activity-code map is empty. An arbitrary numeric activity code is not evidence.
-    return scopeByName(object(raw["cabecalho"])["nome_tipo_atividade"], config);
-  }
-  const operation = object(raw["pedido"])["opPedido"];
-  if (id(operation) === "14") return "remittance";
-  if (text(operation) && !/^\d+$/.test(text(operation))) {
-    const classified = scopeByName(operation, config);
-    if (classified !== "unconfirmed") return classified;
-  }
-  const ide = object(raw["ide"]);
-  if (text(ide["natOp"])) return scopeByName(ide["natOp"], config);
-  if (id(ide["finNFe"]) === "4") return "remittance";
-  const details = Array.isArray(raw["det"]) ? raw["det"] : [];
-  const codes = details
-    .map((detail) => digits(object(object(detail)["prod"])["CFOP"]))
-    .filter(Boolean);
-  if (!codes.length) return "unconfirmed"; // finNFe=1 does not prove a sale.
+/** Every item must agree; one unknown or conflicting CFOP keeps the document pending. */
+function scopeByCfops(codes: string[]): OperationScope {
+  if (!codes.length) return "unconfirmed";
   const classifications = new Set(
     codes.map((code) =>
       REMITTANCE_CFOPS.has(code)
@@ -209,111 +217,152 @@ export function classifyOperation(
   return classifications.size === 1 ? [...classifications][0]! : "unconfirmed";
 }
 
-function overrideFor(overrides: Record<string, Row> | undefined, externalId: unknown): Row {
-  const rawId = text(externalId);
-  return object(overrides?.[rawId] ?? overrides?.[id(externalId)]);
+export function classifyOperation(
+  entity: "invoices" | "orders",
+  raw: Row,
+  config: LegacyClassificationConfig,
+): OperationScope {
+  const details = Array.isArray(raw["det"]) ? raw["det"] : [];
+  if (entity === "orders") {
+    // ListarPedidos does not return nome_tipo_atividade in this account; when it
+    // does, the name wins. Otherwise the item CFOPs (same fiscal rule used for
+    // invoices) decide. Without either signal the order stays pending.
+    const byName = scopeByName(object(raw["cabecalho"])["nome_tipo_atividade"], config);
+    if (byName !== "unconfirmed") return byName;
+    return scopeByCfops(
+      details.map((detail) => digits(object(object(detail)["produto"])["cfop"])).filter(Boolean),
+    );
+  }
+  const operation = object(raw["pedido"])["opPedido"];
+  if (id(operation) === "14") return "remittance";
+  if (text(operation) && !/^\d+$/.test(text(operation))) {
+    const classified = scopeByName(operation, config);
+    if (classified !== "unconfirmed") return classified;
+  }
+  const ide = object(raw["ide"]);
+  if (text(ide["natOp"])) return scopeByName(ide["natOp"], config);
+  if (id(ide["finNFe"]) === "4") return "remittance";
+  return scopeByCfops(
+    details.map((detail) => digits(object(object(detail)["prod"])["CFOP"])).filter(Boolean),
+  );
 }
 
-function like(haystack: string, pattern: unknown): boolean {
-  const expression = lower(pattern);
-  if (!expression) return false;
-  const escaped = expression
-    .split(/([%_])/)
-    .map((piece) =>
-      piece === "%" ? ".*" : piece === "_" ? "." : piece.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-    )
-    .join("");
-  return new RegExp(`^${escaped}$`, "su").test(lower(haystack));
+/** Uppercase, accent-free, single-spaced name used only for exact comparisons. */
+export function normalizeSellerName(value: unknown): string {
+  return text(value)
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
 }
+
+export const LICITACAO_SELLER_NAME = "LICITACAO";
 
 function rowById(rows: Row[] | undefined, externalId: unknown): Row {
   const external = id(externalId);
   return external ? object(rows?.find((row) => id(row["external_id"]) === external)) : {};
 }
 
-export function classifyChannel(
-  raw: Row,
-  header: Row,
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+/** Documents of group companies, from active intra-group (`outros`) customer rules only. */
+export function intraGroupDocuments(config: LegacyClassificationConfig): {
+  plain: Set<string>;
+  hashed: Set<string>;
+} {
+  const plain = new Set<string>();
+  for (const rule of ordered(config.channel_rules)) {
+    if (text(rule["rule_type"]) !== "cliente_cnpj_list") continue;
+    if (channel(rule["target_channel"]) !== "outros") continue;
+    for (const value of text(rule["match_value"]).split(",")) {
+      const document = digits(value);
+      if (document.length === 11 || document.length === 14) plain.add(document);
+    }
+  }
+  return { plain, hashed: new Set([...plain].map(sha256)) };
+}
+
+export interface ChannelInput {
+  externalId: string;
+  sellerCode: unknown;
+  sellerName?: unknown;
+  customerExternalId?: unknown;
+  customerDocument?: unknown;
+}
+
+export interface ChannelDecision {
+  channel: BusinessChannel;
+  reason: ChannelReason;
+}
+
+/**
+ * Official rule (approved 29/09/2026), in order:
+ * manual override > intra-group customer (outros, outside the numbers) >
+ * Omie code of the seller "Licitação" > normalized seller name LICITACAO >
+ * VAREJO. Observation, project, customer type and the company default channel
+ * never classify a sale.
+ */
+export function decideChannel(
+  input: ChannelInput,
   config: LegacyClassificationConfig,
-): BusinessChannel {
-  const vendor = rowById(config.vendors, header["seller_external_id"]);
-  const sellerName = text(vendor["name"]) || text(object(raw["pedido"])["cNomeVendedor"]);
-  const customer = rowById(config.customers, header["customer_external_id"]);
+): ChannelDecision {
+  const manual = config.manual_channel_overrides?.[input.externalId];
+  if (manual !== undefined && channel(manual) !== "unconfirmed")
+    return { channel: channel(manual), reason: "manual_override" };
+
+  const customer = rowById(config.customers, input.customerExternalId);
   const documentDigits = digits(
-    [
-      object(raw["nfDestInt"])["cnpj_cpf"],
-      raw["cnpj_cpf"],
-      customer["document_original"],
-      customer["documento"],
-    ]
+    [input.customerDocument, customer["document_original"], customer["documento"]]
       .map(text)
       .find(Boolean),
   );
-  const document = [11, 14].includes(documentDigits.length) ? documentDigits : "";
-  const hash = lower(customer["document_hash"]);
-  const documentHash = /^[a-f0-9]{64}$/.test(hash) ? hash : "";
-  const notes = [
-    object(raw["infAdic"])["infCpl"],
-    object(raw["infAdic"])["infAdFisco"],
-    object(raw["compl"])["cObs"],
-    object(raw["observacoes"])["obs_venda"],
-    object(raw["observacoes"])["obs_interna"],
-    object(raw["cabecalho"])["observacao"],
-    object(raw["frete"])["observacao"],
-  ]
-    .map(text)
-    .filter(Boolean)
-    .join(" ");
-  const project = id(
-    object(raw["pedido"])["nIdProjeto"] ??
-      object(raw["compl"])["nIdProjeto"] ??
-      object(raw["informacoes_adicionais"])["codProj"] ??
-      raw["nIdProjeto"],
-  );
-  for (const rule of ordered(config.channel_rules)) {
-    const target = channel(rule["target_channel"]);
-    if (target === "unconfirmed") continue;
-    const type = text(rule["rule_type"]);
-    if (type === "manual") continue;
-    if (type === "vendedor_nome_like" && !sellerName && text(header["seller_external_id"]))
-      return "unconfirmed";
-    if (
-      type === "cliente_cnpj_list" &&
-      !document &&
-      !documentHash &&
-      text(header["customer_external_id"])
-    )
-      return "unconfirmed";
-    const values = text(rule["match_value"])
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const matches =
-      type === "vendedor_nome_like"
-        ? Boolean(sellerName) && like(sellerName, rule["match_value"])
-        : type === "pedido_obs_like"
-          ? Boolean(notes) && like(notes, rule["match_value"])
-          : type === "cliente_cnpj_list"
-            ? values.some((value) =>
-                document
-                  ? digits(value) === document
-                  : documentHash &&
-                    createHash("sha256").update(digits(value)).digest("hex") === documentHash,
-              )
-            : type === "projeto_id_list"
-              ? Boolean(project) && project !== "0" && values.some((value) => id(value) === project)
-              : type === "default";
-    if (matches) return target;
-  }
-  // Unlike legacy's implicit varejo fallback, only an explicitly imported
-  // approved company default can classify a previously unseen record.
-  return channel(config.default_channel);
+  const group = intraGroupDocuments(config);
+  const documentHash = lower(customer["document_hash"]);
+  if (
+    (documentDigits && group.plain.has(documentDigits)) ||
+    (/^[a-f0-9]{64}$/.test(documentHash) && group.hashed.has(documentHash))
+  )
+    return { channel: "outros", reason: "intra_group" };
+
+  const sellerCode = id(input.sellerCode);
+  const licitacaoCodes = new Set((config.licitacao_seller_codes ?? []).map(id).filter(Boolean));
+  if (sellerCode && licitacaoCodes.has(sellerCode))
+    return { channel: "licitacao", reason: "licitacao_seller_code" };
+
+  const sellerName =
+    text(input.sellerName) || text(rowById(config.vendors, input.sellerCode)["name"]);
+  if (normalizeSellerName(sellerName) === LICITACAO_SELLER_NAME)
+    return { channel: "licitacao", reason: "licitacao_seller_name" };
+
+  return { channel: "varejo", reason: "default_varejo" };
+}
+
+function overrideFor(overrides: Record<string, Row> | undefined, externalId: unknown): Row {
+  const rawId = text(externalId);
+  return object(overrides?.[rawId] ?? overrides?.[id(externalId)]);
 }
 
 function amount(value: unknown): number | undefined {
   if (value === null || value === undefined || text(value) === "") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/** gross - freight - insurance - other expenses; IPI stays in the base. */
+export function commercialBase(header: Row): number | null {
+  const gross = amount(header["gross_amount"]);
+  const freight = amount(header["freight_amount"]) ?? 0;
+  const insurance = amount(header["insurance_amount"]) ?? 0;
+  const other = amount(header["other_expenses_amount"]) ?? 0;
+  if (gross === undefined) return null;
+  return (
+    (Math.round(gross * 100) -
+      Math.round(freight * 100) -
+      Math.round(insurance * 100) -
+      Math.round(other * 100)) /
+    100
+  );
 }
 
 /** Returns only fields that exist on the target canonical table. Never changes fiscal status. */
@@ -325,63 +374,48 @@ export function classifyCanonicalHeader(
   config: LegacyClassificationConfig,
 ): Row {
   if (entity === "settlements") return header;
-  const overrides =
+  const legacy = overrideFor(
     entity === "invoices"
       ? config.invoice_overrides
       : entity === "orders"
         ? config.orders_overrides
-        : config.receivable_overrides;
-  const approved = overrideFor(overrides, externalId);
+        : config.receivable_overrides,
+    externalId,
+  );
   const mappedHeader = { ...header };
-  for (const field of [
-    "seller_external_id",
-    ...(entity === "receivables" ? ["invoice_external_id"] : []),
-  ]) {
-    if (Object.hasOwn(approved, field))
-      mappedHeader[field] = text(approved[field]) ? id(approved[field]) : null;
-  }
-  const linked =
-    entity === "receivables"
-      ? overrideFor(config.invoice_overrides, mappedHeader["invoice_external_id"])
-      : {};
-  const approvedChannel = approved["business_channel"] ?? linked["business_channel"];
-  mappedHeader["business_channel"] =
-    approvedChannel !== undefined
-      ? channel(approvedChannel)
-      : classifyChannel(raw, mappedHeader, config);
+  // The Omie payload is authoritative. The legacy snapshot only fills a seller
+  // the payload could not determine (e.g. invoices without installment titles).
+  if (!text(mappedHeader["seller_external_id"]) && text(legacy["seller_external_id"]))
+    mappedHeader["seller_external_id"] = id(legacy["seller_external_id"]);
+
+  const decision = decideChannel(
+    {
+      externalId,
+      sellerCode: mappedHeader["seller_external_id"],
+      customerExternalId: mappedHeader["customer_external_id"],
+      customerDocument:
+        entity === "invoices"
+          ? object(raw["nfDestInt"])["cnpj_cpf"]
+          : entity === "receivables"
+            ? raw["cnpj_cpf"]
+            : undefined,
+    },
+    config,
+  );
+  mappedHeader["business_channel"] = decision.channel;
+  mappedHeader["channel_reason"] = decision.reason;
+
   if (entity === "orders") {
-    mappedHeader["operation_scope"] = Object.hasOwn(approved, "operation_scope")
-      ? scope(approved["operation_scope"])
-      : classifyOperation("orders", raw, config);
-    const stage = text(
-      approved["stage_code"] ?? approved["etapa_omie"] ?? object(raw["cabecalho"])["etapa"],
-    );
+    mappedHeader["operation_scope"] = classifyOperation("orders", raw, config);
+    const stage = text(object(raw["cabecalho"])["etapa"] ?? legacy["stage_code"]);
     mappedHeader["stage_code"] = /^\d+$/.test(stage) ? id(stage) : null;
   }
   if (entity === "invoices") {
-    mappedHeader["operation_scope"] = Object.hasOwn(approved, "operation_scope")
-      ? scope(approved["operation_scope"])
-      : classifyOperation("invoices", raw, config);
-    mappedHeader["is_biomie_commercial_visible"] =
-      flag(approved["is_biomie_commercial_visible"]) ??
-      mappedHeader["business_channel"] === "varejo";
-    const gross = amount(header["gross_amount"]);
-    const freight = amount(header["freight_amount"]);
-    const insurance = amount(header["insurance_amount"]);
-    const other = amount(header["other_expenses_amount"]);
-    const computedBase =
-      gross !== undefined && freight !== undefined && insurance !== undefined && other !== undefined
-        ? Math.max(
-            0,
-            (Math.round(gross * 100) -
-              Math.round(freight * 100) -
-              Math.round(insurance * 100) -
-              Math.round(other * 100)) /
-              100,
-          )
-        : null;
-    mappedHeader["commercial_base_amount"] =
-      amount(approved["commercial_base_amount"]) ?? computedBase;
+    mappedHeader["operation_scope"] = classifyOperation("invoices", raw, config);
+    // Legacy meaning kept: "visible in the retail commercial universe". Licitação
+    // is counted through its own channel in fact_sales; intra-group (outros) is not.
+    mappedHeader["is_biomie_commercial_visible"] = decision.channel === "varejo";
+    mappedHeader["commercial_base_amount"] = commercialBase(header);
   }
   return mappedHeader;
 }
