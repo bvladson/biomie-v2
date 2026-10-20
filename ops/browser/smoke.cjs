@@ -7,6 +7,13 @@ const path = require('node:path');
 const base = process.env.BIOMIE_TEST_URL || 'https://biomie.magmoveiscorporativos.com.br';
 const accounts = JSON.parse(process.env.BIOMIE_SMOKE_ACCOUNTS || '[]');
 const shots = process.env.BIOMIE_SMOKE_SHOTS || path.resolve(__dirname, '../../ops/logs');
+// Visual comparison (29_smoke.py --shots <prefix>): full-page screenshots of the admin's screens.
+const shotPrefix = process.env.BIOMIE_SMOKE_SHOT_PREFIX || '';
+async function shot(page, account, name) {
+  if (!shotPrefix || account.label !== 'admin') return;
+  await page.waitForTimeout(1800); // charts finish their entry animation
+  await page.screenshot({ path: path.join(shots, `${shotPrefix}-${name}.png`), fullPage: true }).catch(() => {});
+}
 // Never let a token, cookie or key reach the output (Playwright errors embed request headers).
 const redact = (text) => String(text)
   .replace(/(authorization|cookie|apikey|x-api-key)\s*:\s*[^\n']+/gi, '$1: [redacted]')
@@ -26,6 +33,7 @@ async function login(page, account) {
   await page.goto(base + '/auth');
   await page.getByRole('button', { name: 'Entrar', exact: true }).waitFor();
   await page.waitForTimeout(1500);
+  await shot(page, account, 'login');
   await page.getByLabel('E-mail ou usuário').fill(account.email);
   await page.getByLabel('Senha', { exact: true }).fill(account.password);
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
@@ -78,12 +86,14 @@ async function login(page, account) {
       // A period without registered targets must say so, never show "R$ 0".
       result.targetNotRegistered = await page.getByText('Meta não cadastrada para o período').count();
       await page.screenshot({ path: path.join(shots, `smoke-${account.label}-cockpit.png`), fullPage: true });
+      await shot(page, account, 'cockpit');
       for (const route of ROUTES) {
         await page.goto(base + route);
         await page.locator('h1, h2').first().waitFor({ timeout: 30000 });
         await page.waitForTimeout(800);
         const heading = (await page.locator('h1, h2').first().innerText()).slice(0, 80);
         visited.push({ route, heading, url: new URL(page.url()).pathname });
+        await shot(page, account, route.slice(1));
       }
       const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(account.role);
       for (const route of ADMIN_ROUTES) {
@@ -94,14 +104,23 @@ async function login(page, account) {
           if (await page.getByText(DENIED).count()) throw new Error(`administrador recusado em ${route}`);
           const heading = (await page.locator('h1, h2').first().innerText()).slice(0, 80);
           visited.push({ route, heading, url: new URL(page.url()).pathname });
+          await shot(page, account, route.slice(1));
         } else {
           await page.getByText(DENIED).first().waitFor({ timeout: 30000 });
           visited.push({ route, denied: true, url: new URL(page.url()).pathname });
         }
       }
+      if (shotPrefix && account.label === 'admin') {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto(base + '/cockpit');
+        await page.getByRole('heading', { name: 'Visão Geral', exact: true }).waitFor();
+        await shot(page, account, 'cockpit-celular');
+        await page.setViewportSize({ width: 1440, height: 1000 });
+      }
       await page.goto(base + '/cockpit');
       await page.getByRole('heading', { name: 'Visão Geral', exact: true }).waitFor();
       await page.getByText(account.fullName, { exact: true }).first().click();
+      await shot(page, account, 'menu-conta');
       await page.getByRole('menuitem', { name: 'Sair' }).click();
       await page.waitForURL('**/auth**', { timeout: 30000 });
       await login(page, account);

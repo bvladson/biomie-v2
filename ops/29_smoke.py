@@ -93,11 +93,18 @@ try:
     report['create'] = remote({'action': 'create', 'accounts': accounts})
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
            'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs')}
+    # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
+    if '--shots' in sys.argv:
+        env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
+    # --upstream-port: which private web to look at (3130 production, 3132 preview).
+    port = sys.argv[sys.argv.index('--upstream-port') + 1] if '--upstream-port' in sys.argv else '3130'
+    if not port.isdigit():
+        raise SystemExit('invalid --upstream-port')
     if '--pre-cutover' in sys.argv:
-        tunnel = subprocess.Popen(SSH[:-1] + ['-N', '-L', '33130:127.0.0.1:3130', SSH[-1]])
+        tunnel = subprocess.Popen(SSH[:-1] + ['-N', '-L', f'33130:127.0.0.1:{port}', SSH[-1]])
         time.sleep(4)
         env['BIOMIE_TEST_UPSTREAM'] = 'http://127.0.0.1:33130'
-    report['mode'] = 'pre-cutover (private web via tunnel)' if tunnel else 'public site'
+    report['mode'] = f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site'
     (BASE / 'ops' / 'logs').mkdir(exist_ok=True)
     p = subprocess.run(['node', str(BASE / 'ops/browser/smoke.cjs')], cwd=BASE / 'ops/browser', env=env,
                        capture_output=True, text=True, timeout=900)
