@@ -189,6 +189,12 @@
     font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased;
   }
+  /* Recharts paints legend labels in the series colour (inline style). Brand blue works for
+     marks (3:1) but not for 12px text (4.5:1): labels use the secondary text colour and the
+     legend icon keeps the series colour. */
+  .recharts-legend-item-text {
+    color: var(--color-muted-foreground) !important;
+  }
 }
 
 @utility tabular {
