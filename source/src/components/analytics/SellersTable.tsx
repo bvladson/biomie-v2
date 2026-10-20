@@ -58,7 +58,7 @@ export function SellersTable({
                 <div className="flex items-center gap-2">
                   <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                     <div
-                      className="h-full rounded-full bg-primary"
+                      className="h-full rounded-full bg-chart-1"
                       style={{ width: `${Math.min((s.attainment ?? 0) * 100, 100)}%` }}
                     />
                     <div

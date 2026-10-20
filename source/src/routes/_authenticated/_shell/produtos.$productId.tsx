@@ -137,7 +137,7 @@ function Product360Page() {
                 yAxisId="v"
                 dataKey="revenue"
                 name="Faturamento"
-                fill="var(--primary)"
+                fill="var(--chart-1)"
                 radius={[3, 3, 0, 0]}
               />
               <Line
@@ -151,7 +151,7 @@ function Product360Page() {
                 yAxisId="v"
                 dataKey="avgPrice"
                 name="Preço médio"
-                stroke="var(--warning)"
+                stroke="var(--chart-2)"
                 dot={false}
               />
             </ComposedChart>

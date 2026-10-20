@@ -26,7 +26,7 @@ export function RankList({
               </div>
               <div className="h-1 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-primary/70"
+                  className="h-full rounded-full bg-chart-1/70"
                   style={{ width: `${(i.value / max) * 100}%` }}
                 />
               </div>

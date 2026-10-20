@@ -106,23 +106,23 @@ function AuthPage() {
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
-      <div className="hidden flex-col justify-between border-r bg-sidebar p-10 lg:flex">
+      <div className="hidden flex-col justify-between border-r border-sidebar-border bg-sidebar p-10 text-sidebar-foreground lg:flex">
         <div className="flex items-center gap-2.5">
           <BrandMark className="size-8" />
           <div className="leading-none">
-            <div className="font-semibold tracking-tight">BIOMIE</div>
-            <div className="text-xs text-muted-foreground">Analytics Platform</div>
+            <div className="font-semibold tracking-tight text-white">BIOMIE</div>
+            <div className="text-xs text-sidebar-foreground/70">Analytics Platform</div>
           </div>
         </div>
         <div className="max-w-md">
-          <p className="text-3xl font-semibold leading-tight tracking-tight">
+          <p className="text-3xl font-semibold leading-tight tracking-tight text-white">
             O que aconteceu, onde vamos chegar e o que fazer agora.
           </p>
-          <p className="mt-4 text-sm text-muted-foreground">
+          <p className="mt-4 text-sm text-sidebar-foreground/80">
             Faturamento, metas, carteira e forecast em uma única fonte oficial de métricas.
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">© BIOMIE</p>
+        <p className="text-xs text-sidebar-foreground/60">© BIOMIE</p>
       </div>
       <div className="flex items-center justify-center p-6">
         <form

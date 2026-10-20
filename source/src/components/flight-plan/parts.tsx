@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const TONE: Record<string, string> = {
   success: "text-success border-success/30 bg-success/10",
-  warning: "text-warning-foreground border-warning/40 bg-warning/15 dark:text-warning",
+  warning: "text-warning border-warning/30 bg-warning/10",
   risk: "text-risk border-risk/30 bg-risk/10",
   destructive: "text-destructive border-destructive/30 bg-destructive/10",
 };

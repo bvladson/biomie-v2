@@ -50,8 +50,8 @@ export function AppSidebar() {
         <div className="flex items-center gap-2.5 px-1.5">
           <BrandMark className="size-7 shrink-0" />
           <div className="flex flex-col leading-none group-data-[collapsible=icon]:hidden">
-            <span className="text-sm font-semibold tracking-tight">BIOMIE</span>
-            <span className="text-[11px] text-muted-foreground">Analytics Platform</span>
+            <span className="text-sm font-semibold tracking-tight text-white">BIOMIE</span>
+            <span className="text-[11px] text-sidebar-foreground/70">Analytics Platform</span>
           </div>
         </div>
       </SidebarHeader>
@@ -76,7 +76,7 @@ export function AppSidebar() {
                         <item.icon />
                         <span>{item.label}</span>
                         {!item.ready && (
-                          <span className="ml-auto text-[10px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
+                          <span className="ml-auto text-[10px] font-medium text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">
                             em breve
                           </span>
                         )}
@@ -95,14 +95,16 @@ export function AppSidebar() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton size="lg" tooltip="Empresa">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-accent text-accent-foreground">
+                  <div className="flex size-8 items-center justify-center rounded-md bg-sidebar-accent text-sidebar-primary">
                     <Building2 className="size-4" />
                   </div>
                   <div className="flex min-w-0 flex-col text-left leading-tight">
-                    <span className="eyebrow">Empresa</span>
+                    <span className="text-[0.6875rem] font-medium uppercase tracking-[0.06em] text-sidebar-foreground/60">
+                      Empresa
+                    </span>
                     <span className="truncate text-sm font-medium">{company?.name ?? "—"}</span>
                   </div>
-                  <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+                  <ChevronsUpDown className="ml-auto size-4 text-sidebar-foreground/60" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="end" className="w-64">
@@ -124,14 +126,14 @@ export function AppSidebar() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton size="lg" tooltip="Conta">
-                  <div className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+                  <div className="flex size-8 items-center justify-center rounded-full bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
                     {initials}
                   </div>
                   <div className="flex min-w-0 flex-col text-left leading-tight">
                     <span className="truncate text-sm font-medium">
                       {ctx.user.fullName ?? ctx.user.email}
                     </span>
-                    <span className="truncate text-xs text-muted-foreground">
+                    <span className="truncate text-xs text-sidebar-foreground/60">
                       {ctx.roles.map((r) => ROLE_LABELS[r]).join(", ")}
                     </span>
                   </div>

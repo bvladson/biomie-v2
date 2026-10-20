@@ -199,7 +199,7 @@ function Vendor360Page() {
                 }
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar yAxisId="v" dataKey="Faturamento" fill="var(--primary)" radius={[3, 3, 0, 0]} />
+              <Bar yAxisId="v" dataKey="Faturamento" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
               <Line
                 yAxisId="v"
                 dataKey="Meta"
@@ -211,7 +211,7 @@ function Vendor360Page() {
                 yAxisId="p"
                 dataKey="attainment"
                 name="Atingimento"
-                stroke="var(--warning)"
+                stroke="var(--chart-2)"
                 dot={{ r: 2 }}
               />
             </ComposedChart>

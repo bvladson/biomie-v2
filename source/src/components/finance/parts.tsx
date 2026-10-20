@@ -89,7 +89,7 @@ export function AgingTable({
                     <div
                       className={cn(
                         "h-2 rounded",
-                        r.bucket === "future" ? "bg-primary" : "bg-destructive/70",
+                        r.bucket === "future" ? "bg-chart-1" : "bg-destructive/70",
                       )}
                       style={{ width: `${Math.round((pct ?? 0) * 100)}%` }}
                     />

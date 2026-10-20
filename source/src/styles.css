@@ -7,8 +7,10 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * BIOMIE design system — neutral, precise, analytics-first.
- * Ink neutrals + a deep "bio" teal as the single accent.
+ * BIOMIE design system — identidade azul e ciano (manual de identidade visual, 20/10/2026).
+ * Every color lives in the tokens below; components use the role tokens
+ * (primary, muted, success...) and charts use chart-1..5. Semantic colors
+ * (positive, alert, negative) never take the brand hues.
  */
 
 @theme inline {
@@ -21,6 +23,11 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-cyan: var(--brand-cyan);
+  --color-brand-light: var(--brand-light);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -45,6 +52,7 @@
   --color-demo: var(--demo);
   --color-demo-foreground: var(--demo-foreground);
   --color-surface: var(--surface);
+  --color-overlay: var(--overlay);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -66,89 +74,108 @@
 
 :root {
   --radius: 0.5rem;
-  --background: oklch(0.985 0.002 200);
-  --surface: oklch(1 0 0);
-  --foreground: oklch(0.2 0.012 230);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.012 230);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.012 230);
-  --primary: oklch(0.47 0.085 185);
-  --primary-foreground: oklch(0.985 0.005 185);
-  --secondary: oklch(0.96 0.004 210);
-  --secondary-foreground: oklch(0.25 0.012 230);
-  --muted: oklch(0.965 0.003 210);
-  --muted-foreground: oklch(0.52 0.012 230);
-  --accent: oklch(0.95 0.02 185);
-  --accent-foreground: oklch(0.32 0.06 185);
-  --destructive: oklch(0.57 0.2 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --success: oklch(0.56 0.13 155);
-  --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.72 0.14 70);
-  --risk: oklch(0.64 0.17 45);
-  --warning-foreground: oklch(0.25 0.05 70);
-  --demo: oklch(0.93 0.06 85);
-  --demo-foreground: oklch(0.38 0.08 70);
-  --border: oklch(0.92 0.004 220);
-  --input: oklch(0.9 0.005 220);
-  --ring: oklch(0.47 0.085 185);
-  --chart-1: oklch(0.47 0.085 185);
-  --chart-2: oklch(0.72 0.02 230);
-  --chart-3: oklch(0.62 0.1 160);
-  --chart-4: oklch(0.7 0.12 70);
-  --chart-5: oklch(0.55 0.08 250);
-  --sidebar: oklch(0.975 0.003 210);
-  --sidebar-foreground: oklch(0.3 0.012 230);
-  --sidebar-primary: oklch(0.47 0.085 185);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.935 0.006 210);
-  --sidebar-accent-foreground: oklch(0.2 0.012 230);
-  --sidebar-border: oklch(0.92 0.004 220);
-  --sidebar-ring: oklch(0.47 0.085 185);
+
+  /* Identity palette */
+  --brand: #087bfa; /* Azul da marca */
+  --brand-deep: #001331; /* Azul profundo */
+  --brand-navy: #061a3d; /* Menu lateral */
+  --brand-cyan: #20dde2; /* Destaques em ciano */
+  --brand-light: #8dd4ff; /* Azul claro */
+
+  /* Surfaces and text */
+  --background: #f5f9fd; /* Fundo geral do sistema */
+  --surface: #ffffff; /* Cards e painéis */
+  --foreground: #142942; /* Texto principal */
+  --card: #ffffff;
+  --card-foreground: #142942;
+  --popover: #ffffff;
+  --popover-foreground: #142942;
+  --muted: #f1f6fb; /* fills: table headers, tab lists, skeletons */
+  --muted-foreground: #5c728c; /* Texto secundário */
+  --border: #dde7f0; /* Bordas e divisórias */
+  --input: #c3d3e3; /* field borders, a step stronger than dividers */
+  --overlay: var(--brand-deep); /* modal backdrop */
+
+  /* Actions, hover and selection */
+  --primary: #075cca; /* Botões principais */
+  --primary-foreground: #ffffff;
+  --secondary: #eaf2fb;
+  --secondary-foreground: #142942;
+  --accent: #e8f2fe; /* hover and selected rows/items */
+  --accent-foreground: #075cca;
+  --ring: var(--brand);
+
+  /* Semantic: indicators and alerts (never brand hues) */
+  --success: #15805c; /* Indicadores positivos */
+  --success-foreground: #ffffff;
+  --warning: #935c0b; /* Alertas */
+  --warning-foreground: #ffffff;
+  --risk: #b4501c; /* between alert and negative ("Em risco") */
+  --destructive: #c5394b; /* Indicadores negativos */
+  --destructive-foreground: #ffffff;
+  --demo: #fdf1dc;
+  --demo-foreground: #935c0b;
+
+  /* Charts: lines need contrast on white, so cyan and light blue are fills only */
+  --chart-1: var(--brand); /* main series */
+  --chart-2: var(--brand-deep); /* target, forecast, comparison */
+  --chart-3: #075cca; /* projection */
+  --chart-4: var(--brand-cyan); /* fills and highlights */
+  --chart-5: var(--brand-light); /* fills and highlights */
+
+  /* Sidebar */
+  --sidebar: var(--brand-navy);
+  --sidebar-foreground: #c7d5e8;
+  --sidebar-primary: var(--brand-cyan);
+  --sidebar-primary-foreground: var(--brand-deep);
+  --sidebar-accent: #0f2d5c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #16325e;
+  --sidebar-ring: var(--brand-cyan);
 }
 
 .dark {
-  --background: oklch(0.17 0.01 230);
-  --surface: oklch(0.2 0.01 230);
-  --foreground: oklch(0.96 0.003 210);
-  --card: oklch(0.2 0.01 230);
-  --card-foreground: oklch(0.96 0.003 210);
-  --popover: oklch(0.2 0.01 230);
-  --popover-foreground: oklch(0.96 0.003 210);
-  --primary: oklch(0.7 0.1 185);
-  --primary-foreground: oklch(0.18 0.02 185);
-  --secondary: oklch(0.26 0.01 230);
-  --secondary-foreground: oklch(0.96 0.003 210);
-  --muted: oklch(0.26 0.01 230);
-  --muted-foreground: oklch(0.7 0.01 230);
-  --accent: oklch(0.28 0.03 185);
-  --accent-foreground: oklch(0.9 0.04 185);
-  --destructive: oklch(0.68 0.18 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --success: oklch(0.7 0.13 155);
-  --success-foreground: oklch(0.18 0 0);
-  --warning: oklch(0.78 0.13 70);
-  --risk: oklch(0.7 0.16 45);
-  --warning-foreground: oklch(0.2 0.05 70);
-  --demo: oklch(0.35 0.06 80);
-  --demo-foreground: oklch(0.92 0.06 85);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.7 0.1 185);
-  --chart-1: oklch(0.7 0.1 185);
-  --chart-2: oklch(0.5 0.015 230);
-  --chart-3: oklch(0.7 0.11 160);
-  --chart-4: oklch(0.78 0.12 70);
-  --chart-5: oklch(0.65 0.08 250);
-  --sidebar: oklch(0.19 0.01 230);
-  --sidebar-foreground: oklch(0.9 0.003 210);
-  --sidebar-primary: oklch(0.7 0.1 185);
-  --sidebar-primary-foreground: oklch(0.18 0 0);
-  --sidebar-accent: oklch(0.26 0.01 230);
-  --sidebar-accent-foreground: oklch(0.96 0 0);
-  --sidebar-border: oklch(1 0 0 / 9%);
-  --sidebar-ring: oklch(0.7 0.1 185);
+  --background: var(--brand-deep);
+  --surface: var(--brand-navy);
+  --foreground: #e6eef8;
+  --card: var(--brand-navy);
+  --card-foreground: #e6eef8;
+  --popover: var(--brand-navy);
+  --popover-foreground: #e6eef8;
+  --muted: #0b2450;
+  --muted-foreground: #9fb3cb;
+  --border: #1b3a68;
+  --input: #24467a;
+  --overlay: #000814;
+  --primary: #3b97fb;
+  --primary-foreground: var(--brand-deep);
+  --secondary: #0f2d5c;
+  --secondary-foreground: #e6eef8;
+  --accent: #0f2d5c;
+  --accent-foreground: var(--brand-light);
+  --ring: var(--brand-cyan);
+  --success: #3fbf8f;
+  --success-foreground: var(--brand-deep);
+  --warning: #e3a23f;
+  --warning-foreground: var(--brand-deep);
+  --risk: #ec8a52;
+  --destructive: #e8697a;
+  --destructive-foreground: var(--brand-deep);
+  --demo: #3b2a07;
+  --demo-foreground: #f2c46b;
+  --chart-1: #3b97fb;
+  --chart-2: var(--brand-light);
+  --chart-3: var(--brand-cyan);
+  --chart-4: var(--brand-cyan);
+  --chart-5: var(--brand-light);
+  --sidebar: #000d24;
+  --sidebar-foreground: #c7d5e8;
+  --sidebar-primary: var(--brand-cyan);
+  --sidebar-primary-foreground: var(--brand-deep);
+  --sidebar-accent: #0f2d5c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #16325e;
+  --sidebar-ring: var(--brand-cyan);
 }
 
 @layer base {

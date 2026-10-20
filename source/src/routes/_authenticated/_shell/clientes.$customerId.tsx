@@ -165,14 +165,14 @@ function Customer360Page() {
                 yAxisId="v"
                 dataKey="revenue"
                 name="Faturamento"
-                fill="var(--primary)"
+                fill="var(--chart-1)"
                 radius={[3, 3, 0, 0]}
               />
               <Line
                 yAxisId="v"
                 dataKey="ticket"
                 name="Ticket"
-                stroke="var(--warning)"
+                stroke="var(--chart-2)"
                 dot={false}
                 connectNulls={false}
               />
@@ -198,7 +198,7 @@ function Customer360Page() {
               className={cn(
                 "h-3 w-5 rounded-sm",
                 h.invoices
-                  ? "bg-primary"
+                  ? "bg-chart-1"
                   : "border border-dashed border-destructive/60 bg-transparent",
               )}
             />

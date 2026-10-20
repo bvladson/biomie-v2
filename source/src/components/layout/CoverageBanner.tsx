@@ -31,7 +31,7 @@ export function CoverageBanner() {
   return (
     <div
       role="status"
-      className="flex items-start gap-2 border-t bg-amber-50 px-4 py-2 text-xs text-amber-900 md:px-6 dark:bg-amber-950/40 dark:text-amber-200"
+      className="flex items-start gap-2 border-t border-warning/20 bg-warning/10 px-4 py-2 text-xs text-warning md:px-6"
     >
       <CalendarClock className="mt-0.5 size-3.5 shrink-0" />
       <span>

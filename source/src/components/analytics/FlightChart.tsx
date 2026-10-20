@@ -20,7 +20,7 @@ export function FlightChart({ daily }: { daily: CockpitDTO["daily"] }) {
         <defs>
           <linearGradient id="fillCum" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--color-cumulative)" stopOpacity={0.22} />
-            <stop offset="100%" stopColor="var(--color-cumulative)" stopOpacity={0} />
+            <stop offset="100%" stopColor="var(--chart-4)" stopOpacity={0.06} />
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />

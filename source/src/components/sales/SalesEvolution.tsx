@@ -116,7 +116,7 @@ export function SalesEvolution({ q }: { q: AnalyticsQuery }) {
                 type="monotone"
                 dataKey="atual"
                 name="Período atual"
-                stroke="var(--primary)"
+                stroke="var(--chart-1)"
                 strokeWidth={2}
                 dot={false}
                 connectNulls={false}
