@@ -21,6 +21,9 @@ const ROUTES = ['/plano-de-voo', '/vendas', '/vendedores', '/clientes', '/produt
 // Admins must open these; everybody else must get the server-side refusal.
 const ADMIN_ROUTES = ['/integracoes', '/admin'];
 const DENIED = 'Acesso restrito a administradores.';
+const TARGETS_DENIED = 'Acesso restrito a gestores e administradores.';
+// Learned from the admin account (it runs first): does this release have the targets editor?
+let targetsDeployed = null;
 
 async function login(page, account) {
   await page.goto(base + '/auth');
@@ -98,6 +101,31 @@ async function login(page, account) {
           await page.getByText(DENIED).first().waitFor({ timeout: 30000 });
           visited.push({ route, denied: true, url: new URL(page.url()).pathname });
         }
+      }
+      // Targets editor. Admins type into a cell and undo (nothing is ever saved);
+      // everybody else is refused. Skipped while the release does not have it yet.
+      if (isAdmin) {
+        await page.goto(base + '/cockpit');
+        await page.getByRole('heading', { name: 'Visão Geral', exact: true }).waitFor({ timeout: 30000 });
+        targetsDeployed = (await page.getByRole('link', { name: 'Metas', exact: true }).count()) > 0;
+      }
+      if (targetsDeployed === false) result.targets = 'tela de metas ainda não publicada';
+      else if (isAdmin) {
+        await page.goto(base + '/metas');
+        await page.getByRole('heading', { name: /^Metas — / }).waitFor({ timeout: 30000 });
+        const cell = page.locator('input[data-row][data-col="1"]:not([disabled])').first();
+        if (await cell.count()) {
+          const before = await cell.inputValue();
+          await cell.fill('123,45');
+          await page.getByRole('button', { name: 'Salvar 1 alteração', exact: true }).waitFor({ timeout: 10000 });
+          await page.getByRole('button', { name: 'Desfazer alterações', exact: true }).click();
+          if ((await cell.inputValue()) !== before) throw new Error('metas: desfazer não restaurou a célula');
+          result.targets = 'planilha editável, alteração desfeita, nada gravado';
+        } else result.targets = 'planilha sem célula editável';
+      } else if (targetsDeployed === true) {
+        await page.goto(base + '/metas');
+        await page.getByText(TARGETS_DENIED).first().waitFor({ timeout: 30000 });
+        result.targets = 'recusado';
       }
       await page.goto(base + '/cockpit');
       await page.getByRole('heading', { name: 'Visão Geral', exact: true }).waitFor();

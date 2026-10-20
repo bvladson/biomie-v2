@@ -192,3 +192,34 @@ os JSON de importação já usados (`legacy-export`, `legacy-canonical`,
 `omie-validation*`) e só roda com backup local e externo verificado com menos de
 6 horas. Mantém `legacy-map.json` e o backup do legado da virada. Lista outros
 candidatos para revisão, sem apagar.
+
+## 10. Metas (tela em planilha, migração 0039)
+
+Primeira evolução depois da virada, construída no branch `feature/metas` e
+ativada só depois da estabilização.
+
+- **Quem edita**: ADMIN e SUPER_ADMIN, em todos os vendedores da empresa; GESTOR,
+  só nos vendedores das equipes que ele gerencia hoje. Os demais papéis veem as
+  metas nos painéis, sem tela de edição. Hoje o único gestor gerencia todos os
+  vendedores, porque a importação criou uma equipe por vendedor.
+- **Como**: uma grade por mês com Base, Ativa e Desafio para a equipe toda. Aceita
+  blocos colados do Excel a partir de qualquer célula, Enter desce para o próximo
+  vendedor, "Copiar do mês anterior" preenche só células vazias, célula vazia
+  remove a meta. Mostra totais e avisa níveis fora de ordem. Bloqueia sair da tela
+  com alterações não salvas.
+- **Segurança**: a tela lê e grava só por `sales_targets_grid` e
+  `save_sales_targets`, chamadas com a sessão do próprio usuário. São funções
+  SECURITY DEFINER com `search_path` fixo e EXECUTE só para `authenticated`, e
+  validam o escopo de `auth.uid()` em cada linha. Um lote com uma linha fora do
+  escopo não grava nada. INSERT, UPDATE e DELETE diretos na tabela continuam
+  negados. Cada gravação vai para a auditoria. Provas em
+  `deploy/db/verify_sales_targets.sql` e `verify_rpc_grants.sql`.
+- **Ativação**, depois da estabilização:
+  1. `python ops/upload_release.py HEAD` a partir de `feature/metas`;
+  2. `python ops/remote.py ops/22_test_database.py <sha12>` com as 9 suítes;
+  3. `python ops/remote.py ops/21_activate_release.py <sha12> --start-worker`,
+     que aplica a 0039, e depois `25_load.py resume`;
+  4. `27_nginx.py verify` e `python ops/29_smoke.py`: o administrador digita numa
+     célula e desfaz, sem gravar nada, e o usuário comum é recusado.
+- **Reversão**: ativar a release anterior. A 0039 só acrescenta funções, colunas,
+  um índice e uma restrição, e é compatível com o código anterior.
