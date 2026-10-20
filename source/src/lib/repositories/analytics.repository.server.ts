@@ -33,7 +33,8 @@ interface RawCockpit {
     working: boolean;
     revenue: number | null;
     cumulative: number | null;
-    targetCumulative: number;
+    /** Null when no target is registered for the period (no line is drawn). */
+    targetCumulative: number | null;
   }[];
   sellers: { id: string; name: string; revenue: number; invoices: number; target: number }[];
   drivers: Record<
@@ -102,7 +103,9 @@ export async function fetchCockpit(supabase: Client, q: AnalyticsQuery): Promise
   const cur = normAgg(raw.current);
   const pm = normAgg(raw.previousMonth);
   const py = normAgg(raw.previousYear);
-  const target = num(raw.target);
+  // A period without registered targets has no target: never show it as R$ 0.
+  const registeredTarget = num(raw.target);
+  const target = registeredTarget > 0 ? registeredTarget : null;
   const wd = raw.workingDays;
 
   const kpis: Record<string, KpiValue> = {
@@ -112,10 +115,16 @@ export async function fetchCockpit(supabase: Client, q: AnalyticsQuery): Promise
       vsPreviousMonth: delta(cur.revenue, pm.revenue),
       vsPreviousYear: delta(cur.revenue, py.revenue),
     },
-    target: { key: "target", value: target, vsPreviousMonth: null, vsPreviousYear: null },
+    target: {
+      key: "target",
+      value: target,
+      vsPreviousMonth: null,
+      vsPreviousYear: null,
+      ...(target === null ? { hint: "Meta não cadastrada para o período" } : {}),
+    },
     target_attainment: {
       key: "target_attainment",
-      value: attainment(cur.revenue, target),
+      value: target === null ? null : attainment(cur.revenue, target),
       vsPreviousMonth: null,
       vsPreviousYear: null,
     },
@@ -165,7 +174,7 @@ export async function fetchCockpit(supabase: Client, q: AnalyticsQuery): Promise
     },
     daily_required: {
       key: "daily_required",
-      value: dailyRequired(cur.revenue, target, wd.elapsed, wd.total),
+      value: target === null ? null : dailyRequired(cur.revenue, target, wd.elapsed, wd.total),
       vsPreviousMonth: null,
       vsPreviousYear: null,
       hint: "por dia útil restante",
@@ -183,7 +192,7 @@ export async function fetchCockpit(supabase: Client, q: AnalyticsQuery): Promise
       ...d,
       revenue: d.revenue == null ? null : num(d.revenue),
       cumulative: d.cumulative == null ? null : num(d.cumulative),
-      targetCumulative: num(d.targetCumulative),
+      targetCumulative: target === null ? null : num(d.targetCumulative),
     })),
     sellers: raw.sellers.map((s) => ({
       ...s,
