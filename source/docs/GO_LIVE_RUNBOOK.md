@@ -52,6 +52,10 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
   dias). Cadastros diários às 06h; reprocessamento do ano aos domingos às 05h;
   fotografia do Plano de Voo às 08h (America/Fortaleza). Cadastros e reprocessamento
   semanal consultam a fila antes de enfileirar, então um reinício não repete o lote do dia.
+- Se o Omie muda o total de registros de um mês no meio da paginação (títulos
+  criados durante o expediente), a carga relê aquele mês desde a página 1, até 3
+  vezes, respeitando os 61 s entre consultas idênticas; só então falha, sem
+  afirmar cobertura. O próximo ciclo recorrente refaz o período.
 - Toda nova tentativa de chamada ao Omie aparece no log do worker
   (`omie retry call=... kind=... wait_ms=...`, mensagem já mascarada).
 - Durante um ciclo recorrente a prontidão mostra `DEGRADED` para as entidades com

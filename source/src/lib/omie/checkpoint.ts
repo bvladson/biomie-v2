@@ -9,7 +9,12 @@ export interface TxCheckpoint {
   totalPages: number | null;
   retryAttempts?: number;
   retryAt?: string;
+  /** Restarts of the current partition because Omie's pagination changed mid-read. */
+  restarts?: number;
 }
+
+/** A busy company can add records while a month is paginated; re-read it at most this often. */
+export const MAX_PARTITION_RESTARTS = 3;
 
 export function emptyTxCheckpoint(): TxCheckpoint {
   return {

@@ -82,7 +82,10 @@ elif command == 'status':
     queue = sql("select coalesce(json_agg(q order by q.prio, q.created), '[]') from (select c.slug, j.entity, j.status, "
                 "j.partitions_done||'/'||j.partitions_total parts, left(coalesce(j.last_error,''),120) err, j.priority prio, "
                 "j.created_at created from public.integration_backfill_jobs j join public.companies c on c.id=j.company_id "
-                "where j.created_at > now() - interval '2 days') q")
+                "where j.created_at > now() - interval '2 days' and j.status not in ('DONE','CANCELLED')) q")
+    # With recurring loads on, finished jobs are only counted (hundreds per day).
+    queue_24h = sql("select coalesce(json_object_agg(status, n), '{}') from (select status, count(*) n "
+                    "from public.integration_backfill_jobs where created_at > now() - interval '24 hours' group by 1) x")
     runs = sql("select coalesce(json_agg(r), '[]') from (select distinct on (c.slug, r.entity) c.slug, r.entity, r.status, "
                "r.received, r.raw_complete raw, r.canonical_complete can, r.gold_complete gold, "
                "to_char(r.finished_at at time zone 'America/Fortaleza','HH24:MI') fin, left(coalesce(r.message,''),140) msg "
@@ -92,7 +95,7 @@ elif command == 'status':
     load = pathlib.Path('/proc/loadavg').read_text().split()[:3]
     stats = run(['docker', 'stats', '--no-stream', '--format', '{{.Name}} {{.CPUPerc}} {{.MemUsage}}'])
     print(json.dumps({'worker': json.loads(worker or '{}'), 'loadavg': load, 'cpus': os.cpu_count(),
-                      'queue': json.loads(queue), 'latest_runs': json.loads(runs),
+                      'queue': json.loads(queue), 'queue_24h': json.loads(queue_24h), 'latest_runs': json.loads(runs),
                       'stats': [s for s in stats.splitlines() if 'biomie-v2' in s or 'erpnext-db' in s]},
                      indent=1, ensure_ascii=False))
 else:

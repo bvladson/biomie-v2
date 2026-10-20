@@ -135,6 +135,41 @@ describe("transactional worker recovery", () => {
     expect(db.updates.at(-1)?.["raw_complete"]).toBe(true);
   });
 
+  it("re-reads the month from page 1 when Omie's pagination changes mid-read", async () => {
+    // Records were added in Omie between page 1 and page 2 (busy morning).
+    mocks.page.mockResolvedValueOnce({
+      page: 2,
+      totalPages: 3,
+      totalRecords: 5,
+      records: [payload],
+    });
+    const db = database(3);
+    const result = await runTxSyncStep(db.admin, input);
+    expect(result.status).toBe("SUCCESS");
+    expect(db.updates.map((u) => u["checkpoint_end"])).toContainEqual(
+      expect.objectContaining({ page: 1, restarts: 1, expected: null, received: 0 }),
+    );
+    expect(mocks.page.mock.calls[1]?.[2]).toMatchObject({ pagina: 1 });
+    expect(mocks.promote).toHaveBeenCalledOnce();
+  });
+
+  it("gives up after a few restarts when the month never stops changing", async () => {
+    let call = 0;
+    mocks.page.mockImplementation(
+      async (_path: string, _method: string, params: { pagina: number }) => ({
+        page: params.pagina,
+        totalPages: 2,
+        totalRecords: 10 + call++,
+        records: [payload],
+      }),
+    );
+    const db = database(3);
+    const result = await runTxSyncStep(db.admin, input);
+    expect(result.status).toBe("FAILED");
+    expect(result.message).toMatch(/paginação mudou/);
+    expect(mocks.promote).not.toHaveBeenCalled();
+  });
+
   it("keeps the old counters and page if the checkpoint write fails", async () => {
     const db = database(3, true);
     const result = await runTxSyncStep(db.admin, input);

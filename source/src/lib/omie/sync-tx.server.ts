@@ -10,7 +10,12 @@ import {
 } from "./adapters";
 import { promoteGoldIfAllowed } from "./sync.server";
 import { acquireWorkerLease } from "@/lib/jobs/worker-lease.server";
-import { emptyTxCheckpoint, parseTxCheckpoint, partitionProven } from "./checkpoint";
+import {
+  emptyTxCheckpoint,
+  MAX_PARTITION_RESTARTS,
+  parseTxCheckpoint,
+  partitionProven,
+} from "./checkpoint";
 import { classifyCanonicalHeader, loadLegacyClassificationConfig } from "./classification.server";
 import { loadOmieCredentials } from "./credentials.server";
 
@@ -248,11 +253,28 @@ async function runTxSyncStepUnlocked(
         cp.totalPages !== res.totalPages ||
         (cp.expected !== null && res.totalRecords !== null && cp.expected !== res.totalRecords)
       ) {
-        throw new OmieError(
-          "incomplete",
-          "A paginação mudou durante a carga. Reinicie o período para comprovar a cobertura.",
-          false,
-        );
+        // Records were created or changed in Omie while this month was paginated
+        // (busy companies in business hours). Re-read the month from page 1 so the
+        // coverage proof stays valid; pages already stored are upserted again.
+        const restarts = (cp.restarts ?? 0) + 1;
+        if (restarts > MAX_PARTITION_RESTARTS)
+          throw new OmieError(
+            "incomplete",
+            "A paginação mudou durante a carga. Reinicie o período para comprovar a cobertura.",
+            false,
+          );
+        const restartCp = {
+          ...nextCp,
+          page: 1,
+          expected: null,
+          received: 0,
+          totalPages: null,
+          restarts,
+        };
+        await save({}, restartCp, c);
+        cp = restartCp;
+        page = 1;
+        continue;
       }
       if (res.records.length) {
         const raws = [];
@@ -313,6 +335,7 @@ async function runTxSyncStepUnlocked(
         nextCp.expected = null;
         nextCp.received = 0;
         nextCp.totalPages = null;
+        nextCp.restarts = 0;
       } else nextCp.page = page + 1;
       await save({}, nextCp, next);
       Object.assign(c, next);
