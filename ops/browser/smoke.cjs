@@ -124,6 +124,15 @@ async function login(page, account) {
         }
       }
       if (shotPrefix && account.label === 'admin') {
+        // Detail pages (charts with the series colours): the first row of each list (revenue order).
+        for (const [list, name] of [['/vendedores', 'vendedor-detalhe'], ['/clientes', 'cliente-detalhe'],
+          ['/produtos', 'produto-detalhe']]) {
+          await page.goto(base + list);
+          await page.locator('table tbody tr').first().locator('td').first().click({ timeout: 45000 });
+          await page.waitForURL((u) => u.pathname.startsWith(list + '/'), { timeout: 30000 });
+          await page.locator('h1, h2').first().waitFor({ timeout: 30000 });
+          await shot(page, account, name);
+        }
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto(base + '/cockpit');
         await page.getByRole('heading', { name: 'Visão Geral', exact: true }).waitFor();
