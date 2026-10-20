@@ -43,11 +43,19 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
 
 - Serviço `worker` do compose. A tela só enfileira cargas (`manage_backfill`).
 - Controle: `python ops/remote.py ops/25_load.py pause|resume|status`, ou na tela
-  Integrações (SUPER_ADMIN). Recorrência: `node .output/worker-ctl.mjs recurring on|off`.
+  Integrações (SUPER_ADMIN). Recorrência: `python ops/remote.py ops/25_load.py recurring on|off`
+  (ligada desde a virada de 19/10/2026).
 - Recorrência (quando ligada): notas, pedidos, títulos e liquidações dos últimos
   62 dias nos minutos 21 e 51 de cada hora (`BIOMIE_RECURRING_TX_MINUTES`, as
-  janelas livres do legado; um horário perdido espera o próximo); cadastros diários às 06h; reprocessamento do ano aos
-  domingos às 05h; fotografia do Plano de Voo às 08h (America/Fortaleza).
+  janelas livres do legado; um horário perdido espera o próximo). Contas a receber
+  sempre trazem também os títulos com emissão futura (uma partição extra de 730
+  dias). Cadastros diários às 06h; reprocessamento do ano aos domingos às 05h;
+  fotografia do Plano de Voo às 08h (America/Fortaleza). Cadastros e reprocessamento
+  semanal consultam a fila antes de enfileirar, então um reinício não repete o lote do dia.
+- Toda nova tentativa de chamada ao Omie aparece no log do worker
+  (`omie retry call=... kind=... wait_ms=...`, mensagem já mascarada).
+- Durante um ciclo recorrente a prontidão mostra `DEGRADED` para as entidades com
+  job na fila; ela volta a `READY` quando o ciclo termina (minutos).
 - Proteções: cede quando a carga por CPU da máquina passa de 0,75; janelas
   proibidas em `BIOMIE_WORKER_BLACKOUTS` (ex.: manutenção VSB 20/10 19h30–21h);
   limitador do Omie com 61 s entre consultas idênticas, circuito de 30 min no 425,
@@ -115,20 +123,39 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
 
 - Endurecimento antes da troca: `python ops/remote.py ops/27_nginx.py harden <sha12>`
   (log só de caminho, limites por IP, CSP; `/supabase/auth/v1/token` 10/min por IP).
+- Antes e depois da troca: `python ops/remote.py ops/32_cutover_record.py <rotulo>`
+  grava em `/opt/biomie-v2/ops/cutover-record-*.json` (root) o commit, a release, a
+  imagem, as migrações, os containers, as impressões digitais das configurações
+  (nunca o conteúdo), o estado do nginx, os backups e o worker.
 - Troca: `python ops/remote.py ops/27_nginx.py cutover <sha12>`. O site legado é
   guardado em `/opt/biomie-v2/ops/nginx/legacy-site.conf`. Webhooks do Omie
   continuam indo para o legado, que segue sincronizando (rollback aquecido).
+  Depois do reload o script confere, com novas tentativas por alguns segundos:
+  login da v2 com CSP, webhook chegando ao PHP sem redirecionamento, favorito
+  antigo com 302, API 200 e jobs 404. Se algo falhar, ele reverte sozinho.
+  `27_nginx.py verify` repete essas checagens sem mudar nada.
+- Lição da virada de 19/10/2026: um `location ^~ /biomie/` encerra a busca por
+  regex e encobre o webhook do Omie (`/biomie/webhooks/omie/...` recebia 302).
+  Revertido em 1,5 min, sem webhook perdido; a configuração usa prefixo comum.
+- Virada concluída em 19/10/2026 18:29 com a release `f085e2fa93be`; teste de
+  fumaça público (administrador e usuário comum) aprovado.
 - **Reversão** (segundos, sem reconstrução):
   `python ops/remote.py ops/27_nginx.py rollback`. Critérios: erro de
   autenticação, números materialmente incorretos, falha de RLS ou financeiro,
   indisponibilidade grave.
+- Teste de fumaça: `python ops/29_smoke.py [--pre-cutover]` cria um administrador
+  e um usuário comum temporários (senhas só em memória), percorre as telas,
+  confere a recusa das telas de administrador para o usuário comum e apaga as
+  contas. Toda a saída passa por máscara de tokens, cookies e chaves.
 - Nunca parar o `php8.3-fpm`: ele atende outros quatro sites da VPS.
 
 ## 7. Reconciliação
 
 `python ops/remote.py ops/26_reconcile.py [YYYY-MM] [YYYY-MM]` compara v2 × RAW
 do Omie × legado por empresa e mês, nota a nota, e categoriza diferenças
-(`only_v2_licitacao`, `scope_diff`, `channel_split_diff`, `base_diff`, ...).
+(`only_v2_licitacao`, `scope_diff`, `status_diff`, `channel_split_diff`,
+`channel_universe_diff`, `base_diff`, ...). A soma das categorias tem de bater
+com a diferença total de cada empresa, ao centavo.
 Relatório completo root-only em `/opt/biomie-v2/ops/reconciliation-*.json`.
 Títulos são comparados pela mesma base do legado: mês de emissão, posição de hoje.
 
@@ -146,3 +173,11 @@ entidade é recanonicalizada, promovida ao Gold e verificada. Cada período cujo
 já tinha paginação comprovada ganha uma execução `REPROCESS`, que atualiza
 prontidão e cobertura. Registros que a regra atual não converte não são
 certificados (status WARNING).
+
+## 9. Artefatos sensíveis na VPS
+
+`python ops/remote.py ops/33_cleanup_sensitive.py [--dry-run]` apaga com `shred`
+os JSON de importação já usados (`legacy-export`, `legacy-canonical`,
+`omie-validation*`) e só roda com backup local e externo verificado com menos de
+6 horas. Mantém `legacy-map.json` e o backup do legado da virada. Lista outros
+candidatos para revisão, sem apagar.
