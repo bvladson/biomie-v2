@@ -20,7 +20,7 @@ COMPOSE = ['docker', 'compose', '--env-file', str(ENV), '-f', str(BASE / 'compos
 TEST_DB = 'biomie_v2_test'
 SUITES = ['deploy/db/verify_security.sql', 'deploy/db/verify_channel_filter.sql',
           'deploy/db/verify_pipeline_contract.sql', 'deploy/db/verify_rpc_grants.sql',
-          'deploy/db/verify_order_scope.sql', 'deploy/db/verify_finance_adjustments.sql',
+          'deploy/db/verify_order_scope.sql', 'deploy/db/verify_finance_adjustments.sql', 'deploy/db/verify_sales_targets.sql',
           'scripts/test-commercial-contract.sql',
           'scripts/test-omie-matching.sql']
 

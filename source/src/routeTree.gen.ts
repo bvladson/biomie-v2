@@ -21,6 +21,7 @@ import { Route as AuthenticatedShellFinanceiroRouteImport } from './routes/_auth
 import { Route as AuthenticatedShellForecastRouteImport } from './routes/_authenticated/_shell/forecast'
 import { Route as AuthenticatedShellGeografiaRouteImport } from './routes/_authenticated/_shell/geografia'
 import { Route as AuthenticatedShellIntegracoesRouteImport } from './routes/_authenticated/_shell/integracoes'
+import { Route as AuthenticatedShellMetasRouteImport } from './routes/_authenticated/_shell/metas'
 import { Route as AuthenticatedShellPlanoDeVooRouteImport } from './routes/_authenticated/_shell/plano-de-voo'
 import { Route as AuthenticatedShellQualidadeRouteImport } from './routes/_authenticated/_shell/qualidade'
 import { Route as AuthenticatedShellQualidadeDosDadosRouteImport } from './routes/_authenticated/_shell/qualidade-dos-dados'
@@ -98,6 +99,11 @@ const AuthenticatedShellIntegracoesRoute =
     path: '/integracoes',
     getParentRoute: () => AuthenticatedShellRoute,
   } as any)
+const AuthenticatedShellMetasRoute = AuthenticatedShellMetasRouteImport.update({
+  id: '/metas',
+  path: '/metas',
+  getParentRoute: () => AuthenticatedShellRoute,
+} as any)
 const AuthenticatedShellPlanoDeVooRoute =
   AuthenticatedShellPlanoDeVooRouteImport.update({
     id: '/plano-de-voo',
@@ -182,6 +188,7 @@ export interface FileRoutesByFullPath {
   '/forecast': typeof AuthenticatedShellForecastRoute
   '/geografia': typeof AuthenticatedShellGeografiaRoute
   '/integracoes': typeof AuthenticatedShellIntegracoesRoute
+  '/metas': typeof AuthenticatedShellMetasRoute
   '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
   '/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
@@ -206,6 +213,7 @@ export interface FileRoutesByTo {
   '/forecast': typeof AuthenticatedShellForecastRoute
   '/geografia': typeof AuthenticatedShellGeografiaRoute
   '/integracoes': typeof AuthenticatedShellIntegracoesRoute
+  '/metas': typeof AuthenticatedShellMetasRoute
   '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
   '/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
@@ -233,6 +241,7 @@ export interface FileRoutesById {
   '/_authenticated/_shell/forecast': typeof AuthenticatedShellForecastRoute
   '/_authenticated/_shell/geografia': typeof AuthenticatedShellGeografiaRoute
   '/_authenticated/_shell/integracoes': typeof AuthenticatedShellIntegracoesRoute
+  '/_authenticated/_shell/metas': typeof AuthenticatedShellMetasRoute
   '/_authenticated/_shell/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
   '/_authenticated/_shell/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/_authenticated/_shell/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
@@ -259,6 +268,7 @@ export interface FileRouteTypes {
     | '/forecast'
     | '/geografia'
     | '/integracoes'
+    | '/metas'
     | '/plano-de-voo'
     | '/qualidade'
     | '/qualidade-dos-dados'
@@ -283,6 +293,7 @@ export interface FileRouteTypes {
     | '/forecast'
     | '/geografia'
     | '/integracoes'
+    | '/metas'
     | '/plano-de-voo'
     | '/qualidade'
     | '/qualidade-dos-dados'
@@ -309,6 +320,7 @@ export interface FileRouteTypes {
     | '/_authenticated/_shell/forecast'
     | '/_authenticated/_shell/geografia'
     | '/_authenticated/_shell/integracoes'
+    | '/_authenticated/_shell/metas'
     | '/_authenticated/_shell/plano-de-voo'
     | '/_authenticated/_shell/qualidade'
     | '/_authenticated/_shell/qualidade-dos-dados'
@@ -418,6 +430,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedShellIntegracoesRouteImport
       parentRoute: typeof AuthenticatedShellRoute
     }
+    '/_authenticated/_shell/metas': {
+      id: '/_authenticated/_shell/metas'
+      path: '/metas'
+      fullPath: '/metas'
+      preLoaderRoute: typeof AuthenticatedShellMetasRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
     '/_authenticated/_shell/plano-de-voo': {
       id: '/_authenticated/_shell/plano-de-voo'
       path: '/plano-de-voo'
@@ -513,6 +532,7 @@ interface AuthenticatedShellRouteChildren {
   AuthenticatedShellForecastRoute: typeof AuthenticatedShellForecastRoute
   AuthenticatedShellGeografiaRoute: typeof AuthenticatedShellGeografiaRoute
   AuthenticatedShellIntegracoesRoute: typeof AuthenticatedShellIntegracoesRoute
+  AuthenticatedShellMetasRoute: typeof AuthenticatedShellMetasRoute
   AuthenticatedShellPlanoDeVooRoute: typeof AuthenticatedShellPlanoDeVooRoute
   AuthenticatedShellQualidadeRoute: typeof AuthenticatedShellQualidadeRoute
   AuthenticatedShellQualidadeDosDadosRoute: typeof AuthenticatedShellQualidadeDosDadosRoute
@@ -533,6 +553,7 @@ const AuthenticatedShellRouteChildren: AuthenticatedShellRouteChildren = {
   AuthenticatedShellForecastRoute: AuthenticatedShellForecastRoute,
   AuthenticatedShellGeografiaRoute: AuthenticatedShellGeografiaRoute,
   AuthenticatedShellIntegracoesRoute: AuthenticatedShellIntegracoesRoute,
+  AuthenticatedShellMetasRoute: AuthenticatedShellMetasRoute,
   AuthenticatedShellPlanoDeVooRoute: AuthenticatedShellPlanoDeVooRoute,
   AuthenticatedShellQualidadeRoute: AuthenticatedShellQualidadeRoute,
   AuthenticatedShellQualidadeDosDadosRoute:

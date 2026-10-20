@@ -27,7 +27,9 @@ export type Permission =
   | "explore:use"
   | "admin:manage"
   | "integrations:manage"
-  | "flightplan:write";
+  | "flightplan:write"
+  /** Edit monthly targets (admins: whole company; managers: own teams, enforced in the database). */
+  | "targets:manage";
 
 const MATRIX: Record<AppRole, Permission[]> = {
   SUPER_ADMIN: [
@@ -37,6 +39,7 @@ const MATRIX: Record<AppRole, Permission[]> = {
     "admin:manage",
     "integrations:manage",
     "flightplan:write",
+    "targets:manage",
   ],
   ADMIN: [
     "cockpit:view",
@@ -45,9 +48,10 @@ const MATRIX: Record<AppRole, Permission[]> = {
     "admin:manage",
     "integrations:manage",
     "flightplan:write",
+    "targets:manage",
   ],
   DIRETORIA: ["cockpit:view", "finance:view", "explore:use", "flightplan:write"],
-  GESTOR: ["cockpit:view", "explore:use", "flightplan:write"],
+  GESTOR: ["cockpit:view", "explore:use", "flightplan:write", "targets:manage"],
   VENDEDOR: ["cockpit:view", "flightplan:write"],
   FINANCEIRO: ["cockpit:view", "finance:view"],
   ANALISTA: ["cockpit:view", "explore:use"],

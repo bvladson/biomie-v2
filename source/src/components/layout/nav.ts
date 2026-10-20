@@ -11,6 +11,7 @@ import {
   Settings2,
   ShieldCheck,
   ShoppingCart,
+  Target,
   Users,
   UserSquare2,
   Wallet,
@@ -32,6 +33,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: "/cockpit", label: "Cockpit", icon: Gauge, ready: true },
       { to: "/plano-de-voo", label: "Plano de Voo", icon: Plane, ready: true },
+      { to: "/metas", label: "Metas", icon: Target, permission: "targets:manage", ready: true },
       { to: "/vendas", label: "Vendas", icon: ShoppingCart, ready: true },
       { to: "/vendedores", label: "Vendedores", icon: UserSquare2, ready: true },
       { to: "/clientes", label: "Clientes", icon: Users, ready: true },
