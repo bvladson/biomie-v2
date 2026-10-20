@@ -2,17 +2,30 @@
 // (BIOMIE_SMOKE_ACCOUNTS, set in memory by ops/29_smoke.py) and are never written.
 // Output: JSON with per-account results (no secrets).
 const { chromium } = require('playwright');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const base = process.env.BIOMIE_TEST_URL || 'https://biomie.magmoveiscorporativos.com.br';
 const accounts = JSON.parse(process.env.BIOMIE_SMOKE_ACCOUNTS || '[]');
 const shots = process.env.BIOMIE_SMOKE_SHOTS || path.resolve(__dirname, '../../ops/logs');
-// Visual comparison (29_smoke.py --shots <prefix>): full-page screenshots of the admin's screens.
+// Visual comparison (29_smoke.py --shots <prefix>): the admin's screens once their data arrived.
+// The window grows to the page height BEFORE the capture: a fullPage capture resizes at the last
+// moment and the charts restart their entry animation from zero (empty plots).
 const shotPrefix = process.env.BIOMIE_SMOKE_SHOT_PREFIX || '';
-async function shot(page, account, name) {
+async function shot(page, account, name, { grow = true } = {}) {
   if (!shotPrefix || account.label !== 'admin') return;
-  await page.waitForTimeout(1800); // charts finish their entry animation
-  await page.screenshot({ path: path.join(shots, `${shotPrefix}-${name}.png`), fullPage: true }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 45000 }).catch(() => {});
+  const viewport = page.viewportSize();
+  const height = grow ? await page.evaluate(() => document.documentElement.scrollHeight) : 0;
+  const grown = height > viewport.height;
+  if (grown) await page.setViewportSize({ width: viewport.width, height: Math.min(height, 8000) });
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(2500); // charts redraw for the new size and finish their entry animation
+  await page.screenshot({ path: path.join(shots, `${shotPrefix}-${name}.png`) }).catch(() => {});
+  // The screen's text too: before/after must show the same data (only the visual layer changes).
+  const text = await page.evaluate(() => (document.querySelector('main') || document.body).innerText).catch(() => '');
+  fs.writeFileSync(path.join(shots, `${shotPrefix}-${name}.txt`), text);
+  if (grown) await page.setViewportSize(viewport);
 }
 // Never let a token, cookie or key reach the output (Playwright errors embed request headers).
 const redact = (text) => String(text)
@@ -115,12 +128,16 @@ async function login(page, account) {
         await page.goto(base + '/cockpit');
         await page.getByRole('heading', { name: 'Visão Geral', exact: true }).waitFor();
         await shot(page, account, 'cockpit-celular');
+        await page.getByRole('button', { name: 'Toggle Sidebar' }).first().click();
+        await page.getByRole('dialog').getByText('Plano de Voo', { exact: true }).waitFor();
+        await shot(page, account, 'menu-celular', { grow: false });
+        await page.keyboard.press('Escape');
         await page.setViewportSize({ width: 1440, height: 1000 });
       }
       await page.goto(base + '/cockpit');
       await page.getByRole('heading', { name: 'Visão Geral', exact: true }).waitFor();
       await page.getByText(account.fullName, { exact: true }).first().click();
-      await shot(page, account, 'menu-conta');
+      await shot(page, account, 'menu-conta', { grow: false });
       await page.getByRole('menuitem', { name: 'Sair' }).click();
       await page.waitForURL('**/auth**', { timeout: 30000 });
       await login(page, account);

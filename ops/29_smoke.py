@@ -14,9 +14,11 @@ import re
 import pathlib
 import secrets
 import shlex
+import socket
 import subprocess
 import sys
 import time
+import urllib.request
 
 BASE = pathlib.Path(__file__).resolve().parent.parent
 SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=yes',
@@ -101,9 +103,20 @@ try:
     if not port.isdigit():
         raise SystemExit('invalid --upstream-port')
     if '--pre-cutover' in sys.argv:
-        tunnel = subprocess.Popen(SSH[:-1] + ['-N', '-L', f'33130:127.0.0.1:{port}', SSH[-1]])
+        # Free local port + ExitOnForwardFailure: never ride on a stale tunnel to another web.
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            local = s.getsockname()[1]
+        tunnel = subprocess.Popen(SSH[:-1] + ['-N', '-o', 'ExitOnForwardFailure=yes',
+                                              '-L', f'{local}:127.0.0.1:{port}', SSH[-1]])
         time.sleep(4)
-        env['BIOMIE_TEST_UPSTREAM'] = 'http://127.0.0.1:33130'
+        if tunnel.poll() is not None:
+            raise SystemExit(f'tunnel to 127.0.0.1:{port} failed (exit {tunnel.returncode})')
+        env['BIOMIE_TEST_UPSTREAM'] = f'http://127.0.0.1:{local}'
+        # Which build answered: the hashed stylesheet name changes with every release.
+        with urllib.request.urlopen(f'http://127.0.0.1:{local}/auth', timeout=30) as r:
+            found = re.search(r'/assets/styles-[A-Za-z0-9_-]+[.]css', r.read().decode('utf-8', 'replace'))
+        report['upstream_styles'] = found.group(0) if found else None
     report['mode'] = f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site'
     (BASE / 'ops' / 'logs').mkdir(exist_ok=True)
     p = subprocess.run(['node', str(BASE / 'ops/browser/smoke.cjs')], cwd=BASE / 'ops/browser', env=env,
