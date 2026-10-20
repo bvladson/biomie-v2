@@ -99,7 +99,14 @@ rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
   Desconto, juros e multa da baixa ajustam o saldo na data da baixa, e a baixa só
   de desconto fecha o título. Impostos retidos pelo cliente (`retem_X = S`: IR,
   PIS, COFINS, CSLL, ISS, INSS) não ficam em aberto. Título RECEBIDO no Omie sem
-  baixa importada mantém o saldo e aparece como pendência MEDIUM.
+  baixa importada mantém o saldo e aparece como pendência MEDIUM. Causa encontrada
+  em 20/10/2026: baixa lançada no Omie com o ano errado na data de pagamento
+  (2002, 2025), anterior à emissão do título; a carga busca baixas por data de
+  pagamento a partir de 2026. Corrigida a data no Omie, o reprocessamento de
+  domingo importa a baixa e fecha o título.
+- **Metas**: período sem meta cadastrada aparece como "Meta não cadastrada para o
+  período", nunca como R$ 0. A v2 não tem tela de metas; depois da virada a tela do
+  legado não é mais acessível, então metas novas são carregadas por script.
 - **Metas**: Compromisso do legado = meta Ativa; Superação = Desafio; Excelência e
   Nível 4 ficam arquivados. A meta do Cockpit é a soma das metas por vendedor; as
   metas mensais por empresa do legado (MAG Filial varejo R$ 350 mil) estão

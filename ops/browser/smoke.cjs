@@ -75,6 +75,8 @@ async function login(page, account) {
       await page.waitForTimeout(2500);
       result.cockpitRevenue = (await page.locator('text=Faturamento').first().locator('xpath=../..').innerText()).replace(/\s+/g, ' ').slice(0, 80);
       result.coverageBanner = await page.getByRole('status').filter({ hasText: 'importado' }).count();
+      // A period without registered targets must say so, never show "R$ 0".
+      result.targetNotRegistered = await page.getByText('Meta não cadastrada para o período').count();
       await page.screenshot({ path: path.join(shots, `smoke-${account.label}-cockpit.png`), fullPage: true });
       for (const route of ROUTES) {
         await page.goto(base + route);
