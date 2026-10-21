@@ -12,6 +12,9 @@ passphrase in /opt/biomie-v2/shared/backup.passphrase BEFORE leaving the
 process; nothing is stored or sent in plaintext. Keep a copy of the passphrase
 outside the VPS: without it no backup can be restored.
 Retention: 30 days locally and offsite (at least the newest bundle is kept).
+Offsite destination: /opt/biomie-v2/shared/offsite.conf (HOST, PORT, USER, KEY lines;
+KEY is the path of the ssh key, no secret in the file). Until that file exists the
+destination is read from the legacy BIomie backup script, as before.
 """
 from __future__ import annotations
 
@@ -36,6 +39,8 @@ PASSPHRASE = BASE / 'shared' / 'backup.passphrase'
 STORE = pathlib.Path('/var/backups/biomie-v2')
 STATE = BASE / 'ops' / 'backup-state.json'
 COMPOSE = ['docker', 'compose', '--env-file', str(ENV), '-f', str(BASE / 'compose.yml')]
+OFFSITE_CONF = BASE / 'shared' / 'offsite.conf'
+# Fallback only while the legacy BIomie exists (it is being retired).
 LEGACY_BACKUP = pathlib.Path('/var/www/biomie/live/cron/hostinger/db_backup.sh')
 OFFSITE_DIR = 'backups/biomie-v2-db'
 RETENTION_DAYS = 30
@@ -78,17 +83,25 @@ def passphrase() -> pathlib.Path:
 
 
 def offsite_config():
-    if not LEGACY_BACKUP.exists():
-        return None
-    text = LEGACY_BACKUP.read_text()
     values = {}
-    for key in ('HOST', 'PORT', 'USER', 'KEY'):
-        m = re.search(r'^OFFSITE_' + key + r'="\$\{BIOMIE_OFFSITE_' + key + r':-([^}]*)\}"', text, re.M)
-        if m:
-            values[key] = m.group(1)
+    if OFFSITE_CONF.exists():
+        source = 'offsite.conf'
+        for line in OFFSITE_CONF.read_text().splitlines():
+            key, sep, value = line.strip().partition('=')
+            if sep and key in ('HOST', 'PORT', 'USER', 'KEY'):
+                values[key] = value.strip().strip('"')
+    elif LEGACY_BACKUP.exists():
+        source = 'legacy-script'
+        text = LEGACY_BACKUP.read_text()
+        for key in ('HOST', 'PORT', 'USER', 'KEY'):
+            m = re.search(r'^OFFSITE_' + key + r'="\$\{BIOMIE_OFFSITE_' + key + r':-([^}]*)\}"', text, re.M)
+            if m:
+                values[key] = m.group(1)
+    else:
+        return None
     if len(values) != 4 or not pathlib.Path(values['KEY']).is_file():
         return None
-    return values
+    return {**values, 'SOURCE': source}
 
 
 def ssh_base(cfg):
@@ -184,7 +197,7 @@ def send_offsite(path: pathlib.Path):
     offsite_ssh(cfg, f"mv '{partial}' '{OFFSITE_DIR}/{path.name}' && "
                      f"find '{OFFSITE_DIR}' -maxdepth 1 -name 'biomie-v2-*.tar.gpg' -mtime +{RETENTION_DAYS} -delete")
     count = offsite_ssh(cfg, f"ls '{OFFSITE_DIR}' | grep -c '^biomie-v2-.*\\.tar\\.gpg$' || true").stdout.strip()
-    return {'host': cfg['HOST'], 'dir': OFFSITE_DIR, 'copies': count}
+    return {'host': cfg['HOST'], 'dir': OFFSITE_DIR, 'copies': count, 'config': cfg['SOURCE']}
 
 
 def cmd_run(offsite=True):
