@@ -20,7 +20,9 @@ begin
       and p.proname in ('get_integration_credentials','ingest_omie_raw','promote_omie_gold','mark_raw_processed',
         'replace_omie_canonical_items','get_legacy_classification_config','record_integration_test',
         'report_worker_status','get_worker_control','set_demo_visibility','resolve_legacy_login',
-        'replace_integration_credentials_ciphertext','finance_title_facts','verify_job_token');
+        'replace_integration_credentials_ciphertext','finance_title_facts','verify_job_token',
+        'stock_worker_settings','stock_worker_enqueue','stock_worker_claim','stock_worker_save_locations',
+        'stock_worker_save_page','stock_worker_finish','stock_worker_fail');
   if bad is not null then raise exception 'authenticated can execute server-only: %', bad; end if;
 
   select string_agg(x, ', ') into bad from unnest(array['fact_sales','sales_kpis','cockpit_summary',
