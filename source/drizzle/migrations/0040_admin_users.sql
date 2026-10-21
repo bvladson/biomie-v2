@@ -270,7 +270,8 @@ begin
       if not r.company_id = any(v_scope) then
         raise exception 'Você não pode vincular vendedores de outras empresas.' using errcode = '42501';
       end if;
-      if r.user_id is distinct from p_user and not r.active then
+      -- Inativo só passa se já era o vendedor desta mesma pessoa.
+      if not r.active and not (p_user is not null and r.user_id = p_user) then
         raise exception '% está inativo no Omie.', r.name;
       end if;
       if r.user_id is not null and r.user_id is distinct from p_user then
