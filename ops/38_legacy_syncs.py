@@ -21,11 +21,13 @@ import time
 
 CRON = pathlib.Path('/etc/cron.d/biomie')
 BACKUPS = pathlib.Path('/root/backups')
-TARGETS = ('worker.sh', 'sync_commercial.sh', 'sync_finance.sh', 'ops_sentinel.sh')
+TARGETS = ('worker.sh', 'sync_commercial.sh', 'sync_finance.sh', 'quote_agenda_scan.sh',
+           'finance_future_receivables.sh', 'ops_sentinel.sh')
 KEEP = ('materialize.sh',)
 MARK = '#OFF-biomie-v2 '
 LOGS = pathlib.Path('/var/www/biomie/live/storage/logs/cron')
-RUNNING = 'cron/worker.php|cron/sync_all_companies.php|bin/ops_sentinel.php'
+LOG_NAME = {'finance_future_receivables.sh': 'finance_future.log'}
+RUNNING = 'cron/worker.php|cron/sync_all_companies.php|bin/quote_agenda_scan.php|bin/ops_sentinel.php'
 
 
 def sha(path):
@@ -48,13 +50,13 @@ def lines_state(text):
 
 
 def last_finish(script):
-    log = LOGS / (script.replace('.sh', '') + '.log')
+    log = LOGS / LOG_NAME.get(script, script.replace('.sh', '') + '.log')
     if not log.exists():
         return None
     with log.open('rb') as handle:
         handle.seek(max(0, log.stat().st_size - 200_000))
         tail = handle.read().decode('utf-8', 'replace').splitlines()
-    marks = [line for line in tail if line.startswith('[') and ' finish' in line]
+    marks = [line for line in tail if line.startswith('[') and (' finish' in line or ': fim ' in line)]
     return marks[-1][1:20] if marks else None
 
 
