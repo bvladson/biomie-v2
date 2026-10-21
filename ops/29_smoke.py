@@ -1,6 +1,9 @@
 """Browser smoke test with short-lived real accounts (admin + common user).
 
     python ops/29_smoke.py [base_url]
+    python ops/29_smoke.py --admin      # Admin 2.0 de ponta a ponta (Super admin, Admin da
+                                        # MAG Filial e Vendedor): convite, senha temporária,
+                                        # bloqueio, exclusão e as travas de cada perfil
 
 Passwords are generated in memory, sent to the VPS over the SSH stdin and to the
 browser through the environment; they are never printed or written. The accounts
@@ -58,6 +61,10 @@ else:
     for u in data.get('users', []):
         if (u.get('email') or '').startswith('smoke-') and u['email'].endswith('@biomie.invalid'):
             out.append({'deleted': http('DELETE', '/admin/users/' + u['id'])[0]})
+    # Admin 2.0: who was deleted on screen stays as a logical deletion (e-mail anonymised);
+    # find it by the profile e-mail and remove it for good.
+    for uid in [x for x in sql("select id from public.profiles where email like 'smoke-%@biomie.invalid';").split() if x]:
+        out.append({'deleted_tombstone': http('DELETE', '/admin/users/' + uid)[0]})
     sql("delete from public.user_company_access a where not exists(select 1 from auth.users u where u.id=a.user_id);"
         "delete from public.user_roles r where not exists(select 1 from auth.users u where u.id=r.user_id);"
         "delete from public.profiles p where not exists(select 1 from auth.users u where u.id=p.id);")
@@ -83,7 +90,15 @@ def remote(payload):
 
 
 stamp = time.strftime('%Y%m%d%H%M%S')
+ADMIN_MODE = '--admin' in sys.argv  # Admin 2.0 end-to-end (ops/browser/admin-smoke.cjs)
 accounts = [
+    {'label': 'super', 'email': f'smoke-super-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'SUPER_ADMIN', 'fullName': 'Smoke Super'},
+    {'label': 'tenant', 'email': f'smoke-tenant-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'ADMIN', 'fullName': 'Smoke Tenant', 'companies': ['mag-filial']},
+    {'label': 'vendor', 'email': f'smoke-vendor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'VENDEDOR', 'fullName': 'Smoke Vendor', 'companies': ['mag-filial']},
+] if ADMIN_MODE else [
     {'label': 'admin', 'email': f'smoke-admin-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'SUPER_ADMIN', 'fullName': 'Smoke Admin'},
     {'label': 'common', 'email': f'smoke-common-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
@@ -94,7 +109,7 @@ tunnel = None
 try:
     report['create'] = remote({'action': 'create', 'accounts': accounts})
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
-           'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs')}
+           'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
@@ -119,10 +134,12 @@ try:
         report['upstream_styles'] = found.group(0) if found else None
     report['mode'] = f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site'
     (BASE / 'ops' / 'logs').mkdir(exist_ok=True)
-    p = subprocess.run(['node', str(BASE / 'ops/browser/smoke.cjs')], cwd=BASE / 'ops/browser', env=env,
+    script = 'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs'
+    p = subprocess.run(['node', str(BASE / 'ops/browser' / script)], cwd=BASE / 'ops/browser', env=env,
                        capture_output=True, text=True, timeout=900)
     try:
-        report['browser'] = json.loads(redact(p.stdout[p.stdout.index('['):]))
+        start = p.stdout.index('{' if ADMIN_MODE else '[')
+        report['browser'] = json.loads(redact(p.stdout[start:]))
     except ValueError:
         report['browser_error'] = redact((p.stderr or p.stdout)[-1500:])
     report['browser_exit'] = p.returncode

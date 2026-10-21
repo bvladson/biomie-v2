@@ -192,3 +192,27 @@ os JSON de importação já usados (`legacy-export`, `legacy-canonical`,
 `omie-validation*`) e só roda com backup local e externo verificado com menos de
 6 horas. Mantém `legacy-map.json` e o backup do legado da virada. Lista outros
 candidatos para revisão, sem apagar.
+
+## 11. Admin 2.0 (usuários, acessos, calendário, auditoria e Minha conta)
+
+Branch `feature/admin-2`, migração `0040_admin_users` (somente acréscimos; `0039` fica para as metas).
+
+- **Onde ficam as regras:** esquema `admin_internal` (SECURITY DEFINER, `search_path` fixo, fora do
+  esquema exposto pela API); a API só enxerga invólucros SECURITY INVOKER em `public` (`admin_*`, `my_*`).
+  Toda função usa `auth.uid()`: a auditoria e o gatilho de `user_roles` registram o autor real.
+- **Serviço de login** (criar conta, link, senha temporária, bloqueio, exclusão): só no servidor
+  (`admin-users.repository.server.ts`, chave de serviço). O banco confere antes e registra depois;
+  conta criada sem configuração é apagada e bloqueio sem registro é desfeito.
+- **Decisões aplicadas:** D1 link de uso único (24 h, padrão do serviço de login) e senha temporária
+  como alternativa (troca obrigatória, prazo de 72 h, marca em `app_metadata`); D2 Admin cria só nas
+  empresas dele e com papéis operacionais, e só o Super admin altera papel de quem já existe; D3 a
+  tela recomenda bloquear; D4 logins de vendedor um a um. D5 (feriados por empresa) segue pendente.
+- **Portões antes de publicar:** `22_test_database` (suíte `verify_admin_users.sql`), testes e build
+  locais. **Depois de ativar:** `29_smoke.py` (regressão) e `29_smoke.py --admin` (convite aberto em
+  navegador limpo até o Cockpit, senha temporária forçando a troca, bloqueio, exclusão, Admin da
+  empresa sem papéis de administração e sem outra empresa, Vendedor barrado e Minha conta aberta).
+- **Retorno:** ativar a release anterior. A `0040` pode ficar: só acrescenta objetos que a versão
+  anterior não usa (a restrição de feriados aceita os 26 nacionais existentes).
+- **Sessões:** encerrar sessões e bloquear removem a renovação na hora; o acesso já emitido vale até
+  1 hora (`GOTRUE_JWT_EXP`). A tela avisa isso.
+
