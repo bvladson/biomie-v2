@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as DefinirSenhaRouteImport } from './routes/definir-senha'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthenticatedShellRouteImport } from './routes/_authenticated/_shell'
 import { Route as AuthenticatedShellAdminRouteImport } from './routes/_authenticated/_shell/admin'
@@ -21,10 +22,13 @@ import { Route as AuthenticatedShellFinanceiroRouteImport } from './routes/_auth
 import { Route as AuthenticatedShellForecastRouteImport } from './routes/_authenticated/_shell/forecast'
 import { Route as AuthenticatedShellGeografiaRouteImport } from './routes/_authenticated/_shell/geografia'
 import { Route as AuthenticatedShellIntegracoesRouteImport } from './routes/_authenticated/_shell/integracoes'
+import { Route as AuthenticatedShellMinhaContaRouteImport } from './routes/_authenticated/_shell/minha-conta'
 import { Route as AuthenticatedShellPlanoDeVooRouteImport } from './routes/_authenticated/_shell/plano-de-voo'
 import { Route as AuthenticatedShellQualidadeRouteImport } from './routes/_authenticated/_shell/qualidade'
 import { Route as AuthenticatedShellQualidadeDosDadosRouteImport } from './routes/_authenticated/_shell/qualidade-dos-dados'
 import { Route as AuthenticatedShellVendasRouteImport } from './routes/_authenticated/_shell/vendas'
+import { Route as AuthenticatedShellAdminAuditoriaRouteImport } from './routes/_authenticated/_shell/admin_.auditoria'
+import { Route as AuthenticatedShellAdminEmpresasRouteImport } from './routes/_authenticated/_shell/admin_.empresas'
 import { Route as AuthenticatedShellClientesIndexRouteImport } from './routes/_authenticated/_shell/clientes.index'
 import { Route as AuthenticatedShellClientesCustomerIdRouteImport } from './routes/_authenticated/_shell/clientes.$customerId'
 import { Route as AuthenticatedShellProdutosIndexRouteImport } from './routes/_authenticated/_shell/produtos.index'
@@ -33,6 +37,9 @@ import { Route as AuthenticatedShellVendedoresIndexRouteImport } from './routes/
 import { Route as AuthenticatedShellVendedoresSellerIdRouteImport } from './routes/_authenticated/_shell/vendedores.$sellerId'
 import { Route as ApiPublicJobsFlightPlanSnapshotsRouteImport } from './routes/api/public/jobs/flight-plan-snapshots'
 import { Route as ApiPublicJobsOmieBackfillRouteImport } from './routes/api/public/jobs/omie-backfill'
+import { Route as AuthenticatedShellAdminUsuariosIndexRouteImport } from './routes/_authenticated/_shell/admin_.usuarios.index'
+import { Route as AuthenticatedShellAdminUsuariosIdRouteImport } from './routes/_authenticated/_shell/admin_.usuarios.$id'
+import { Route as AuthenticatedShellAdminUsuariosNovoRouteImport } from './routes/_authenticated/_shell/admin_.usuarios.novo'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +53,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DefinirSenhaRoute = DefinirSenhaRouteImport.update({
+  id: '/definir-senha',
+  path: '/definir-senha',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -98,6 +110,12 @@ const AuthenticatedShellIntegracoesRoute =
     path: '/integracoes',
     getParentRoute: () => AuthenticatedShellRoute,
   } as any)
+const AuthenticatedShellMinhaContaRoute =
+  AuthenticatedShellMinhaContaRouteImport.update({
+    id: '/minha-conta',
+    path: '/minha-conta',
+    getParentRoute: () => AuthenticatedShellRoute,
+  } as any)
 const AuthenticatedShellPlanoDeVooRoute =
   AuthenticatedShellPlanoDeVooRouteImport.update({
     id: '/plano-de-voo',
@@ -120,6 +138,18 @@ const AuthenticatedShellVendasRoute =
   AuthenticatedShellVendasRouteImport.update({
     id: '/vendas',
     path: '/vendas',
+    getParentRoute: () => AuthenticatedShellRoute,
+  } as any)
+const AuthenticatedShellAdminAuditoriaRoute =
+  AuthenticatedShellAdminAuditoriaRouteImport.update({
+    id: '/admin_/auditoria',
+    path: '/admin/auditoria',
+    getParentRoute: () => AuthenticatedShellRoute,
+  } as any)
+const AuthenticatedShellAdminEmpresasRoute =
+  AuthenticatedShellAdminEmpresasRouteImport.update({
+    id: '/admin_/empresas',
+    path: '/admin/empresas',
     getParentRoute: () => AuthenticatedShellRoute,
   } as any)
 const AuthenticatedShellClientesIndexRoute =
@@ -170,10 +200,29 @@ const ApiPublicJobsOmieBackfillRoute =
     path: '/api/public/jobs/omie-backfill',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AuthenticatedShellAdminUsuariosIndexRoute =
+  AuthenticatedShellAdminUsuariosIndexRouteImport.update({
+    id: '/admin_/usuarios/',
+    path: '/admin/usuarios/',
+    getParentRoute: () => AuthenticatedShellRoute,
+  } as any)
+const AuthenticatedShellAdminUsuariosIdRoute =
+  AuthenticatedShellAdminUsuariosIdRouteImport.update({
+    id: '/admin_/usuarios/$id',
+    path: '/admin/usuarios/$id',
+    getParentRoute: () => AuthenticatedShellRoute,
+  } as any)
+const AuthenticatedShellAdminUsuariosNovoRoute =
+  AuthenticatedShellAdminUsuariosNovoRouteImport.update({
+    id: '/admin_/usuarios/novo',
+    path: '/admin/usuarios/novo',
+    getParentRoute: () => AuthenticatedShellRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/definir-senha': typeof DefinirSenhaRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof AuthenticatedShellAdminRoute
   '/cockpit': typeof AuthenticatedShellCockpitRoute
@@ -182,10 +231,13 @@ export interface FileRoutesByFullPath {
   '/forecast': typeof AuthenticatedShellForecastRoute
   '/geografia': typeof AuthenticatedShellGeografiaRoute
   '/integracoes': typeof AuthenticatedShellIntegracoesRoute
+  '/minha-conta': typeof AuthenticatedShellMinhaContaRoute
   '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
   '/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
   '/vendas': typeof AuthenticatedShellVendasRoute
+  '/admin/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
+  '/admin/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
   '/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
@@ -194,10 +246,14 @@ export interface FileRoutesByFullPath {
   '/clientes/': typeof AuthenticatedShellClientesIndexRoute
   '/produtos/': typeof AuthenticatedShellProdutosIndexRoute
   '/vendedores/': typeof AuthenticatedShellVendedoresIndexRoute
+  '/admin/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
+  '/admin/usuarios/novo': typeof AuthenticatedShellAdminUsuariosNovoRoute
+  '/admin/usuarios/': typeof AuthenticatedShellAdminUsuariosIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/definir-senha': typeof DefinirSenhaRoute
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof AuthenticatedShellAdminRoute
   '/cockpit': typeof AuthenticatedShellCockpitRoute
@@ -206,10 +262,13 @@ export interface FileRoutesByTo {
   '/forecast': typeof AuthenticatedShellForecastRoute
   '/geografia': typeof AuthenticatedShellGeografiaRoute
   '/integracoes': typeof AuthenticatedShellIntegracoesRoute
+  '/minha-conta': typeof AuthenticatedShellMinhaContaRoute
   '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
   '/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
   '/vendas': typeof AuthenticatedShellVendasRoute
+  '/admin/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
+  '/admin/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
   '/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
@@ -218,12 +277,16 @@ export interface FileRoutesByTo {
   '/clientes': typeof AuthenticatedShellClientesIndexRoute
   '/produtos': typeof AuthenticatedShellProdutosIndexRoute
   '/vendedores': typeof AuthenticatedShellVendedoresIndexRoute
+  '/admin/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
+  '/admin/usuarios/novo': typeof AuthenticatedShellAdminUsuariosNovoRoute
+  '/admin/usuarios': typeof AuthenticatedShellAdminUsuariosIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/definir-senha': typeof DefinirSenhaRoute
   '/reset-password': typeof ResetPasswordRoute
   '/_authenticated/_shell': typeof AuthenticatedShellRouteWithChildren
   '/_authenticated/_shell/admin': typeof AuthenticatedShellAdminRoute
@@ -233,10 +296,13 @@ export interface FileRoutesById {
   '/_authenticated/_shell/forecast': typeof AuthenticatedShellForecastRoute
   '/_authenticated/_shell/geografia': typeof AuthenticatedShellGeografiaRoute
   '/_authenticated/_shell/integracoes': typeof AuthenticatedShellIntegracoesRoute
+  '/_authenticated/_shell/minha-conta': typeof AuthenticatedShellMinhaContaRoute
   '/_authenticated/_shell/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
   '/_authenticated/_shell/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/_authenticated/_shell/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
   '/_authenticated/_shell/vendas': typeof AuthenticatedShellVendasRoute
+  '/_authenticated/_shell/admin_/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
+  '/_authenticated/_shell/admin_/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/_authenticated/_shell/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
   '/_authenticated/_shell/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/_authenticated/_shell/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
@@ -245,12 +311,16 @@ export interface FileRoutesById {
   '/_authenticated/_shell/clientes/': typeof AuthenticatedShellClientesIndexRoute
   '/_authenticated/_shell/produtos/': typeof AuthenticatedShellProdutosIndexRoute
   '/_authenticated/_shell/vendedores/': typeof AuthenticatedShellVendedoresIndexRoute
+  '/_authenticated/_shell/admin_/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
+  '/_authenticated/_shell/admin_/usuarios/novo': typeof AuthenticatedShellAdminUsuariosNovoRoute
+  '/_authenticated/_shell/admin_/usuarios/': typeof AuthenticatedShellAdminUsuariosIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/auth'
+    | '/definir-senha'
     | '/reset-password'
     | '/admin'
     | '/cockpit'
@@ -259,10 +329,13 @@ export interface FileRouteTypes {
     | '/forecast'
     | '/geografia'
     | '/integracoes'
+    | '/minha-conta'
     | '/plano-de-voo'
     | '/qualidade'
     | '/qualidade-dos-dados'
     | '/vendas'
+    | '/admin/auditoria'
+    | '/admin/empresas'
     | '/clientes/$customerId'
     | '/produtos/$productId'
     | '/vendedores/$sellerId'
@@ -271,10 +344,14 @@ export interface FileRouteTypes {
     | '/clientes/'
     | '/produtos/'
     | '/vendedores/'
+    | '/admin/usuarios/$id'
+    | '/admin/usuarios/novo'
+    | '/admin/usuarios/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
+    | '/definir-senha'
     | '/reset-password'
     | '/admin'
     | '/cockpit'
@@ -283,10 +360,13 @@ export interface FileRouteTypes {
     | '/forecast'
     | '/geografia'
     | '/integracoes'
+    | '/minha-conta'
     | '/plano-de-voo'
     | '/qualidade'
     | '/qualidade-dos-dados'
     | '/vendas'
+    | '/admin/auditoria'
+    | '/admin/empresas'
     | '/clientes/$customerId'
     | '/produtos/$productId'
     | '/vendedores/$sellerId'
@@ -295,11 +375,15 @@ export interface FileRouteTypes {
     | '/clientes'
     | '/produtos'
     | '/vendedores'
+    | '/admin/usuarios/$id'
+    | '/admin/usuarios/novo'
+    | '/admin/usuarios'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/definir-senha'
     | '/reset-password'
     | '/_authenticated/_shell'
     | '/_authenticated/_shell/admin'
@@ -309,10 +393,13 @@ export interface FileRouteTypes {
     | '/_authenticated/_shell/forecast'
     | '/_authenticated/_shell/geografia'
     | '/_authenticated/_shell/integracoes'
+    | '/_authenticated/_shell/minha-conta'
     | '/_authenticated/_shell/plano-de-voo'
     | '/_authenticated/_shell/qualidade'
     | '/_authenticated/_shell/qualidade-dos-dados'
     | '/_authenticated/_shell/vendas'
+    | '/_authenticated/_shell/admin_/auditoria'
+    | '/_authenticated/_shell/admin_/empresas'
     | '/_authenticated/_shell/clientes/$customerId'
     | '/_authenticated/_shell/produtos/$productId'
     | '/_authenticated/_shell/vendedores/$sellerId'
@@ -321,12 +408,16 @@ export interface FileRouteTypes {
     | '/_authenticated/_shell/clientes/'
     | '/_authenticated/_shell/produtos/'
     | '/_authenticated/_shell/vendedores/'
+    | '/_authenticated/_shell/admin_/usuarios/$id'
+    | '/_authenticated/_shell/admin_/usuarios/novo'
+    | '/_authenticated/_shell/admin_/usuarios/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  DefinirSenhaRoute: typeof DefinirSenhaRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ApiPublicJobsFlightPlanSnapshotsRoute: typeof ApiPublicJobsFlightPlanSnapshotsRoute
   ApiPublicJobsOmieBackfillRoute: typeof ApiPublicJobsOmieBackfillRoute
@@ -353,6 +444,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/definir-senha': {
+      id: '/definir-senha'
+      path: '/definir-senha'
+      fullPath: '/definir-senha'
+      preLoaderRoute: typeof DefinirSenhaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reset-password': {
@@ -418,6 +516,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedShellIntegracoesRouteImport
       parentRoute: typeof AuthenticatedShellRoute
     }
+    '/_authenticated/_shell/minha-conta': {
+      id: '/_authenticated/_shell/minha-conta'
+      path: '/minha-conta'
+      fullPath: '/minha-conta'
+      preLoaderRoute: typeof AuthenticatedShellMinhaContaRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
     '/_authenticated/_shell/plano-de-voo': {
       id: '/_authenticated/_shell/plano-de-voo'
       path: '/plano-de-voo'
@@ -444,6 +549,20 @@ declare module '@tanstack/react-router' {
       path: '/vendas'
       fullPath: '/vendas'
       preLoaderRoute: typeof AuthenticatedShellVendasRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
+    '/_authenticated/_shell/admin_/auditoria': {
+      id: '/_authenticated/_shell/admin_/auditoria'
+      path: '/admin/auditoria'
+      fullPath: '/admin/auditoria'
+      preLoaderRoute: typeof AuthenticatedShellAdminAuditoriaRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
+    '/_authenticated/_shell/admin_/empresas': {
+      id: '/_authenticated/_shell/admin_/empresas'
+      path: '/admin/empresas'
+      fullPath: '/admin/empresas'
+      preLoaderRoute: typeof AuthenticatedShellAdminEmpresasRouteImport
       parentRoute: typeof AuthenticatedShellRoute
     }
     '/_authenticated/_shell/clientes/': {
@@ -502,6 +621,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicJobsOmieBackfillRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/_shell/admin_/usuarios/': {
+      id: '/_authenticated/_shell/admin_/usuarios/'
+      path: '/admin/usuarios'
+      fullPath: '/admin/usuarios/'
+      preLoaderRoute: typeof AuthenticatedShellAdminUsuariosIndexRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
+    '/_authenticated/_shell/admin_/usuarios/$id': {
+      id: '/_authenticated/_shell/admin_/usuarios/$id'
+      path: '/admin/usuarios/$id'
+      fullPath: '/admin/usuarios/$id'
+      preLoaderRoute: typeof AuthenticatedShellAdminUsuariosIdRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
+    '/_authenticated/_shell/admin_/usuarios/novo': {
+      id: '/_authenticated/_shell/admin_/usuarios/novo'
+      path: '/admin/usuarios/novo'
+      fullPath: '/admin/usuarios/novo'
+      preLoaderRoute: typeof AuthenticatedShellAdminUsuariosNovoRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
   }
 }
 
@@ -513,16 +653,22 @@ interface AuthenticatedShellRouteChildren {
   AuthenticatedShellForecastRoute: typeof AuthenticatedShellForecastRoute
   AuthenticatedShellGeografiaRoute: typeof AuthenticatedShellGeografiaRoute
   AuthenticatedShellIntegracoesRoute: typeof AuthenticatedShellIntegracoesRoute
+  AuthenticatedShellMinhaContaRoute: typeof AuthenticatedShellMinhaContaRoute
   AuthenticatedShellPlanoDeVooRoute: typeof AuthenticatedShellPlanoDeVooRoute
   AuthenticatedShellQualidadeRoute: typeof AuthenticatedShellQualidadeRoute
   AuthenticatedShellQualidadeDosDadosRoute: typeof AuthenticatedShellQualidadeDosDadosRoute
   AuthenticatedShellVendasRoute: typeof AuthenticatedShellVendasRoute
+  AuthenticatedShellAdminAuditoriaRoute: typeof AuthenticatedShellAdminAuditoriaRoute
+  AuthenticatedShellAdminEmpresasRoute: typeof AuthenticatedShellAdminEmpresasRoute
   AuthenticatedShellClientesCustomerIdRoute: typeof AuthenticatedShellClientesCustomerIdRoute
   AuthenticatedShellProdutosProductIdRoute: typeof AuthenticatedShellProdutosProductIdRoute
   AuthenticatedShellVendedoresSellerIdRoute: typeof AuthenticatedShellVendedoresSellerIdRoute
   AuthenticatedShellClientesIndexRoute: typeof AuthenticatedShellClientesIndexRoute
   AuthenticatedShellProdutosIndexRoute: typeof AuthenticatedShellProdutosIndexRoute
   AuthenticatedShellVendedoresIndexRoute: typeof AuthenticatedShellVendedoresIndexRoute
+  AuthenticatedShellAdminUsuariosIdRoute: typeof AuthenticatedShellAdminUsuariosIdRoute
+  AuthenticatedShellAdminUsuariosNovoRoute: typeof AuthenticatedShellAdminUsuariosNovoRoute
+  AuthenticatedShellAdminUsuariosIndexRoute: typeof AuthenticatedShellAdminUsuariosIndexRoute
 }
 
 const AuthenticatedShellRouteChildren: AuthenticatedShellRouteChildren = {
@@ -533,11 +679,14 @@ const AuthenticatedShellRouteChildren: AuthenticatedShellRouteChildren = {
   AuthenticatedShellForecastRoute: AuthenticatedShellForecastRoute,
   AuthenticatedShellGeografiaRoute: AuthenticatedShellGeografiaRoute,
   AuthenticatedShellIntegracoesRoute: AuthenticatedShellIntegracoesRoute,
+  AuthenticatedShellMinhaContaRoute: AuthenticatedShellMinhaContaRoute,
   AuthenticatedShellPlanoDeVooRoute: AuthenticatedShellPlanoDeVooRoute,
   AuthenticatedShellQualidadeRoute: AuthenticatedShellQualidadeRoute,
   AuthenticatedShellQualidadeDosDadosRoute:
     AuthenticatedShellQualidadeDosDadosRoute,
   AuthenticatedShellVendasRoute: AuthenticatedShellVendasRoute,
+  AuthenticatedShellAdminAuditoriaRoute: AuthenticatedShellAdminAuditoriaRoute,
+  AuthenticatedShellAdminEmpresasRoute: AuthenticatedShellAdminEmpresasRoute,
   AuthenticatedShellClientesCustomerIdRoute:
     AuthenticatedShellClientesCustomerIdRoute,
   AuthenticatedShellProdutosProductIdRoute:
@@ -548,6 +697,12 @@ const AuthenticatedShellRouteChildren: AuthenticatedShellRouteChildren = {
   AuthenticatedShellProdutosIndexRoute: AuthenticatedShellProdutosIndexRoute,
   AuthenticatedShellVendedoresIndexRoute:
     AuthenticatedShellVendedoresIndexRoute,
+  AuthenticatedShellAdminUsuariosIdRoute:
+    AuthenticatedShellAdminUsuariosIdRoute,
+  AuthenticatedShellAdminUsuariosNovoRoute:
+    AuthenticatedShellAdminUsuariosNovoRoute,
+  AuthenticatedShellAdminUsuariosIndexRoute:
+    AuthenticatedShellAdminUsuariosIndexRoute,
 }
 
 const AuthenticatedShellRouteWithChildren =
@@ -568,6 +723,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  DefinirSenhaRoute: DefinirSenhaRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ApiPublicJobsFlightPlanSnapshotsRoute: ApiPublicJobsFlightPlanSnapshotsRoute,
   ApiPublicJobsOmieBackfillRoute: ApiPublicJobsOmieBackfillRoute,

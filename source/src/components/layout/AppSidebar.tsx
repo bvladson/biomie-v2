@@ -1,6 +1,6 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Building2, ChevronsUpDown, LogOut, Settings } from "lucide-react";
+import { Building2, ChevronsUpDown, LogOut, Settings, UserRound } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -142,6 +142,11 @@ export function AppSidebar() {
               <DropdownMenuContent side="right" align="end" className="w-56">
                 <DropdownMenuLabel className="truncate">{ctx.user.email}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link to="/minha-conta">
+                    <UserRound className="size-4" /> Minha conta
+                  </Link>
+                </DropdownMenuItem>
                 {hasPermission(ctx.roles, "admin:manage") && (
                   <DropdownMenuItem asChild>
                     <Link to="/admin">

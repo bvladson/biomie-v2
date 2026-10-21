@@ -83,7 +83,7 @@ function ResetPassword() {
           <Input
             id="pw"
             type="password"
-            minLength={8}
+            minLength={10}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required

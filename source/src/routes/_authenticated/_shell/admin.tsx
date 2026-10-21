@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -30,6 +30,7 @@ import {
 } from "@/domain/finance";
 import { useState } from "react";
 import { TeamsTab } from "@/components/admin/TeamsTab";
+import { AdminNav } from "@/admin/components/AdminSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -460,6 +461,23 @@ function AuditTab() {
   );
 }
 
+function MovedNotice({
+  to,
+  children,
+}: {
+  to: "/admin/usuarios" | "/admin/auditoria";
+  children: React.ReactNode;
+}) {
+  return (
+    <p className="border-b bg-accent/40 px-4 py-2.5 text-sm">
+      {children}{" "}
+      <Link to={to} className="font-medium text-primary underline-offset-2 hover:underline">
+        Abrir
+      </Link>
+    </p>
+  );
+}
+
 function AdminPage() {
   const { data: ctx } = useSuspenseQuery(appContextQuery());
   if (!hasPermission(ctx.roles, "admin:manage")) {
@@ -471,7 +489,8 @@ function AdminPage() {
   }
   return (
     <main className="mx-auto flex w-full max-w-[1400px] flex-col gap-6 px-4 py-6 md:px-6 md:py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Administração</h1>
+      <AdminNav />
+      <h1 className="text-2xl font-semibold tracking-tight">Configurações do BI</h1>
       <Tabs defaultValue="users">
         <div className="-mx-1 overflow-x-auto px-1">
           <TabsList>
@@ -484,6 +503,10 @@ function AdminPage() {
           </TabsList>
         </div>
         <TabsContent value="users" className="panel mt-4">
+          <MovedNotice to="/admin/usuarios">
+            Para cadastrar pessoas, entregar o acesso, bloquear e definir empresas e vendedores, use
+            Administração › Usuários.
+          </MovedNotice>
           <UsersTab />
         </TabsContent>
         <TabsContent value="metrics" className="panel mt-4">
@@ -499,6 +522,9 @@ function AdminPage() {
           <JobsTab />
         </TabsContent>
         <TabsContent value="audit" className="panel mt-4">
+          <MovedNotice to="/admin/auditoria">
+            A auditoria completa, com filtros e exportação, está em Administração › Auditoria.
+          </MovedNotice>
           <AuditTab />
         </TabsContent>
       </Tabs>
