@@ -105,11 +105,12 @@ async function createViaWizard(page, { name, email, delivery }) {
     await page.getByRole('button', { name: 'Bloquear acesso' }).click();
     await page.locator('#b-reason').fill('Teste automático do Admin');
     await page.getByRole('button', { name: 'Bloquear', exact: true }).click();
-    await page.getByText('Acesso bloqueado.').waitFor({ timeout: 30000 });
+    // Aviso na tela + notificação: o mesmo texto aparece duas vezes.
+    await page.getByText('Acesso bloqueado.').first().waitFor({ timeout: 30000 });
     await page.getByRole('button', { name: 'Reativar', exact: true }).click();
     await page.locator('#b-reason').fill('Teste automático do Admin');
     await page.getByRole('dialog').getByRole('button', { name: 'Reativar', exact: true }).click();
-    await page.getByText('Acesso bloqueado.').waitFor({ state: 'detached', timeout: 30000 });
+    await page.getByText('Acesso bloqueado.').first().waitFor({ state: 'detached', timeout: 30000 });
   });
 
   await step('convite: link abre a página de senha e entra no Cockpit', async () => {

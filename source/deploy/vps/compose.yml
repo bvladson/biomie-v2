@@ -53,6 +53,10 @@ services:
       GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
       GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-}
       GOTRUE_SMTP_SENDER_NAME: Biomie
+      # ATENCAO: resolvidos contra API_EXTERNAL_URL (.../supabase); caminho absoluto troca o caminho
+      # inteiro e o /supabase some (link num 404 do site, 22/10/2026). O link entregue pelo Admin e
+      # remontado no servidor (publicAccessLink). Antes de ligar o SMTP, trocar para
+      # /supabase/auth/v1/verify; recriar o auth exige recarregar o gateway (nginx guarda o IP).
       GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
       GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
@@ -107,6 +111,7 @@ services:
     environment: &app_environment
       APP_ENV: production
       APP_BASE_URL: ${APP_BASE_URL}
+      PUBLIC_SUPABASE_URL: ${PUBLIC_SUPABASE_URL}
       SUPABASE_URL: http://gateway:8000
       SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}

@@ -215,6 +215,13 @@ Branch `feature/admin-2`, migração `0040_admin_users` (somente acréscimos; `0
   anterior não usa (a restrição de feriados aceita os 26 nacionais existentes).
 - **Sessões:** encerrar sessões e bloquear removem a renovação na hora; o acesso já emitido vale até
   1 hora (`GOTRUE_JWT_EXP`). A tela avisa isso.
+- **Link de convite e novo link (22/10/2026):** o serviço de login monta o link resolvendo
+  `GOTRUE_MAILER_URLPATHS_*` (`/auth/v1/verify`) contra `API_EXTERNAL_URL` (`.../supabase`), e o
+  caminho absoluto derruba o `/supabase`: o link caía num 404 do site (o teste `29_smoke.py --admin`
+  pegou na produção). O servidor do BIOMIE remonta o link sob `PUBLIC_SUPABASE_URL` com o mesmo
+  token (`publicAccessLink`). **Antes de ligar o SMTP** (e-mails de convite e recuperação), trocar os
+  quatro caminhos para `/supabase/auth/v1/verify` e, ao recriar o `auth`, recarregar o gateway
+  (`docker compose exec gateway nginx -s reload`): o nginx guarda o IP do `auth` desde que iniciou.
 
 
 ## 12. Estoque (posição do Omie, curvas e simulação de liquidação)

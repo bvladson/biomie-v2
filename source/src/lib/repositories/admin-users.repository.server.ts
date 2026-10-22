@@ -90,6 +90,25 @@ function accessRedirect(): string {
   return `${base.replace(/\/+$/, "")}/reset-password`;
 }
 
+const VERIFY_PATH = "auth/v1/verify";
+
+/**
+ * Link de acesso sempre sob o endereço público da API (PUBLIC_SUPABASE_URL, ".../supabase").
+ * O serviço de login monta o link resolvendo GOTRUE_MAILER_URLPATHS_* contra API_EXTERNAL_URL,
+ * e um caminho absoluto ("/auth/v1/verify") troca o caminho inteiro: o "/supabase" some e o
+ * link cai num 404 do site (teste de navegador em produção, 22/10/2026). Aqui o link é remontado
+ * com o mesmo token, para nunca entregar um endereço quebrado (o compose fica para quando o SMTP
+ * for ligado: ver o comentário de GOTRUE_MAILER_URLPATHS_*).
+ */
+export function publicAccessLink(actionLink: string): string {
+  const configured = process.env["PUBLIC_SUPABASE_URL"];
+  if (!configured) return actionLink;
+  const link = new URL(actionLink);
+  if (!link.pathname.endsWith(`/${VERIFY_PATH}`)) return actionLink;
+  const base = new URL(`${configured.replace(/\/+$/, "")}/`);
+  return new URL(`${VERIFY_PATH}${link.search}${link.hash}`, base).toString();
+}
+
 const UPPER = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 const LOWER = "abcdefghijkmnpqrstuvwxyz";
 const DIGITS = "23456789";
@@ -171,7 +190,7 @@ async function createLoginAccount(
       throw loginServiceError(error, "Não foi possível criar a conta no serviço de login.");
     return {
       userId: data.user.id,
-      secret: { kind: delivery, value: link, expiresAt: inMs(LINK_TTL_MS) },
+      secret: { kind: delivery, value: publicAccessLink(link), expiresAt: inMs(LINK_TTL_MS) },
     };
   }
   const password = generateTempPassword();
@@ -273,7 +292,7 @@ export async function issueAccess(
     }
     const link = data?.properties?.action_link;
     if (error || !link) throw loginServiceError(error, "Não foi possível gerar o link de acesso.");
-    secret = { kind: delivery, value: link, expiresAt: inMs(LINK_TTL_MS) };
+    secret = { kind: delivery, value: publicAccessLink(link), expiresAt: inMs(LINK_TTL_MS) };
   } else {
     const password = generateTempPassword();
     const expiresAt = inMs(TEMP_PASSWORD_TTL_MS);

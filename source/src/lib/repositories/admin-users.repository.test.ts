@@ -256,3 +256,58 @@ describe("auxiliares", () => {
     expect(() => repo.validateNewPassword("OutraSenha123", "MesmaSenha123")).not.toThrow();
   });
 });
+
+describe("link de acesso", () => {
+  const publicApi = "https://biomie.exemplo.com.br/supabase";
+  const lost = "https://biomie.exemplo.com.br/auth/v1/verify?token=t1&type=invite";
+
+  it("fica sob o endereço público da API, mesmo quando o serviço de login perde o /supabase", () => {
+    process.env["PUBLIC_SUPABASE_URL"] = `${publicApi}/`;
+    try {
+      const redirect = "&redirect_to=https%3A%2F%2Fbiomie.exemplo.com.br%2Freset-password";
+      expect(repo.publicAccessLink(lost + redirect)).toBe(
+        `${publicApi}/auth/v1/verify?token=t1&type=invite${redirect}`,
+      );
+      expect(repo.publicAccessLink(`${publicApi}/auth/v1/verify?token=t2&type=recovery`)).toBe(
+        `${publicApi}/auth/v1/verify?token=t2&type=recovery`,
+      );
+      expect(repo.publicAccessLink("https://link/único")).toBe("https://link/único");
+    } finally {
+      delete process.env["PUBLIC_SUPABASE_URL"];
+    }
+  });
+
+  it("convite e novo link saem com o endereço público", async () => {
+    process.env["PUBLIC_SUPABASE_URL"] = publicApi;
+    try {
+      admin.generateLink.mockResolvedValue({
+        data: { user: { id: "new" }, properties: { action_link: lost } },
+        error: null,
+      });
+      const { db } = fakeDb({
+        admin_validate_new_user: () => ({}),
+        admin_provision_user: () => ({ data: user({ id: "new", status: "INVITED" }) }),
+      });
+      const r = await repo.createUser(db, input);
+      expect(r.secret.value).toBe(`${publicApi}/auth/v1/verify?token=t1&type=invite`);
+
+      admin.generateLink.mockResolvedValue({
+        data: {
+          properties: {
+            action_link: "https://biomie.exemplo.com.br/auth/v1/verify?token=t3&type=recovery",
+          },
+        },
+        error: null,
+      });
+      const again = fakeDb({
+        admin_check_action: () => ({ data: null }),
+        admin_user: () => ({ data: user() }),
+        admin_access_issued: () => ({}),
+      });
+      const secret = await repo.issueAccess(again.db, "u1", "INVITE_LINK");
+      expect(secret.value).toBe(`${publicApi}/auth/v1/verify?token=t3&type=recovery`);
+    } finally {
+      delete process.env["PUBLIC_SUPABASE_URL"];
+    }
+  });
+});
