@@ -5,8 +5,9 @@ import { LayoutDashboard, ListFilter, SlidersHorizontal } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useGlobalFilters } from "@/hooks/use-filters";
 import { appContextQuery } from "@/lib/queries";
-import type { CompanyFilter } from "../api/contract";
+import type { CompanyFilter, CurveWindow } from "../api/contract";
 import { StockContext, canOpenStock } from "../lib/hooks";
+import { CURVE_WINDOWS, DEFAULT_WINDOW, WINDOW_LABELS, isCurveWindow } from "../lib/curves";
 import { Notice } from "./shared";
 
 const navigation = [
@@ -17,6 +18,7 @@ const navigation = [
 
 type Scope = "company" | "all";
 const SCOPE_KEY = "biomie.estoque.escopo";
+const WINDOW_KEY = "biomie.estoque.janela";
 
 /** Preferência só deste navegador; sem acesso ao armazenamento, vale a empresa do filtro. */
 function readScope(): Scope {
@@ -27,16 +29,37 @@ function readScope(): Scope {
   }
 }
 
+function readWindow(): CurveWindow {
+  try {
+    const saved = window.localStorage.getItem(WINDOW_KEY);
+    return isCurveWindow(saved) ? saved : DEFAULT_WINDOW;
+  } catch {
+    return DEFAULT_WINDOW;
+  }
+}
+
 /** Estoque dentro do BIOMIE: segue a empresa do filtro do topo ou junta todas as do usuário. */
 export function StockLayout() {
   const { data: ctx } = useSuspenseQuery(appContextQuery());
   const { resolved, company } = useGlobalFilters();
   const [scope, setScope] = useState<Scope>("company");
-  useEffect(() => setScope(readScope()), []);
+  const [curveWindow, setCurveWindow] = useState<CurveWindow>(DEFAULT_WINDOW);
+  useEffect(() => {
+    setScope(readScope());
+    setCurveWindow(readWindow());
+  }, []);
   function choose(next: Scope) {
     setScope(next);
     try {
       window.localStorage.setItem(SCOPE_KEY, next);
+    } catch {
+      /* sem armazenamento: a escolha vale até recarregar */
+    }
+  }
+  function chooseWindow(next: CurveWindow) {
+    setCurveWindow(next);
+    try {
+      window.localStorage.setItem(WINDOW_KEY, next);
     } catch {
       /* sem armazenamento: a escolha vale até recarregar */
     }
@@ -50,7 +73,12 @@ export function StockLayout() {
   const companyId: CompanyFilter = scope === "all" || !resolved ? "all" : resolved.company;
   return (
     <StockContext.Provider
-      value={{ companyId, setCompanyId: (v) => choose(v === "all" ? "all" : "company") }}
+      value={{
+        companyId,
+        setCompanyId: (v) => choose(v === "all" ? "all" : "company"),
+        window: curveWindow,
+        setWindow: chooseWindow,
+      }}
     >
       <main
         id="stock-main"
@@ -90,10 +118,30 @@ export function StockLayout() {
             </ToggleGroup>
           </div>
         </div>
-        <p className="-mt-3 text-xs text-muted-foreground">
-          Posição da última leitura do Omie. O período e o canal do filtro não se aplicam ao
-          estoque.
-        </p>
+        <div className="-mt-3 flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <p className="text-xs text-muted-foreground">
+            Posição da última leitura do Omie. O período e o canal do filtro não se aplicam ao
+            estoque. A curva A/B/C/D vem do faturamento da janela escolhida (a mesma base da página
+            Produtos); D = saldo positivo sem venda na janela.
+          </p>
+          <div className="min-w-0 space-y-1.5">
+            <span className="block text-xs font-medium text-muted-foreground">Janela da curva</span>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              value={curveWindow}
+              onValueChange={(v) => isCurveWindow(v) && chooseWindow(v)}
+              aria-label="Janela da curva"
+              className="flex-wrap justify-start"
+            >
+              {CURVE_WINDOWS.map((w) => (
+                <ToggleGroupItem key={w} value={w} className="min-h-11 px-3">
+                  {WINDOW_LABELS[w]}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
+        </div>
         {scope === "company" && company?.isDemo && (
           <Notice>
             A empresa selecionada é de demonstração e não tem estoque. Escolha outra empresa no

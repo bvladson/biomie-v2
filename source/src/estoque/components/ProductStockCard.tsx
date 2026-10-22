@@ -1,4 +1,11 @@
 import { useCapabilities } from "../lib/hooks";
+import {
+  DEFAULT_WINDOW,
+  WINDOW_LABELS,
+  lastSaleText,
+  operationLabel,
+  shortDate,
+} from "../lib/curves";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { stockApi } from "../api";
@@ -24,7 +31,14 @@ export function ProductStockCard({
   const q = useQuery({
     queryKey: ["stock", "product", companyId, productId],
     queryFn: () =>
-      stockApi.positions({ companyId, productId, page: 0, sortBy: "name", sortDir: "asc" }),
+      stockApi.positions({
+        companyId,
+        productId,
+        window: DEFAULT_WINDOW,
+        page: 0,
+        sortBy: "name",
+        sortDir: "asc",
+      }),
     retry: false,
   });
   return (
@@ -49,6 +63,19 @@ export function ProductStockCard({
           }}
         />
       </div>
+      {q.data?.rows[0] && (
+        <p className="px-5 pb-3 text-sm text-muted-foreground">
+          Curva de {WINDOW_LABELS[DEFAULT_WINDOW]}:{" "}
+          <strong className="text-foreground">
+            {q.data.rows[0].curve === "U" ? "sem curva" : q.data.rows[0].curve}
+          </strong>
+          {q.data.rows[0].curveSource === "manual" ? " (manual)" : ""} · Última venda:{" "}
+          {lastSaleText(q.data.rows[0])}
+          {q.data.rows[0].lastEntry
+            ? ` · Última entrada: ${shortDate(q.data.rows[0].lastEntry)} (${operationLabel(q.data.rows[0].lastEntryOperation)})`
+            : ""}
+        </p>
+      )}
       {q.data && caps.data && (
         <Table className="min-w-[600px]">
           <TableHeader>

@@ -28,11 +28,13 @@ function guarded<A extends unknown[], R>(call: (...args: A) => Promise<R>) {
 
 export const serverStockApi: StockApi = {
   capabilities: guarded(() => fn.stockCapabilities()),
-  overview: guarded((companyId) => fn.stockOverview({ data: { companyId } })),
+  overview: guarded((companyId, window) => fn.stockOverview({ data: { companyId, window } })),
   positions: guarded((query) => fn.stockPositions({ data: query })),
   filterOptions: guarded((companyId) => fn.stockFilterOptions({ data: { companyId } })),
   setCurve: guarded((input) => fn.stockSetCurve({ data: input })),
-  simulationBase: guarded((companyId) => fn.stockSimulationBase({ data: { companyId } })),
+  simulationBase: guarded((companyId, window) =>
+    fn.stockSimulationBase({ data: { companyId, window } }),
+  ),
   listScenarios: guarded(() => fn.stockListScenarios()),
   saveScenario: guarded((input) => fn.stockSaveScenario({ data: input })),
   deleteScenario: guarded((id) => fn.stockDeleteScenario({ data: { id } }).then(() => undefined)),

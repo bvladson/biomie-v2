@@ -3,14 +3,21 @@
  * Separador ";", centavos com vírgula e proteção contra fórmula (csvCell), como no projeto
  * de origem. Sem permissão de custo, as colunas de custo não existem no arquivo.
  */
-import type { ScenarioInput, SimulationItem, StockPosition } from "../api/contract";
+import type { CurveWindow, ScenarioInput, SimulationItem, StockPosition } from "../api/contract";
 import { csv, decimal } from "./format";
 import { ALL_CURVES, simulate } from "./simulation";
+import { WINDOW_LABELS, incompleteLabel, operationLabel, shortDate } from "./curves";
 
 const optional = (value: number | null | undefined) =>
   value === null || value === undefined ? "" : decimal(value);
+const date = (value: string | null | undefined) => (value ? shortDate(value) : "");
 
-export function positionsCsv(rows: StockPosition[], viewCost: boolean): string {
+export function positionsCsv(
+  rows: StockPosition[],
+  viewCost: boolean,
+  window?: CurveWindow,
+): string {
+  const label = WINDOW_LABELS[window ?? "12m"];
   return csv([
     [
       "Empresa",
@@ -18,27 +25,61 @@ export function positionsCsv(rows: StockPosition[], viewCost: boolean): string {
       "SKU",
       "Família",
       "Local",
-      "Curva",
+      `Curva (${label})`,
+      "Origem da curva",
+      "Justificativa da curva manual",
       "Físico",
       "Reservado",
       "Pendente",
       "Mínimo",
-      ...(viewCost ? ["CMC", "Valor a custo", "Preço de venda"] : []),
+      ...(viewCost
+        ? ["CMC", "Valor a custo", "Preço de venda", `Faturamento (${label})`, "Participação"]
+        : []),
+      "Última venda",
+      "Dias sem venda",
+      "Vendas no BIOMIE desde",
+      "Última entrada",
+      "Operação da última entrada",
+      "Cadastro no Omie",
+      "Produto novo",
+      "Histórico incompleto",
+      "Vendido em outra empresa do grupo",
     ],
     ...rows.map((p) => [
       p.companyName,
       p.name,
       p.sku,
       p.family,
-      p.locationName ?? p.locationCode,
+      p.locationName ?? (p.locationCode === "*" ? `${p.locations ?? ""} locais` : p.locationCode),
       p.curve,
+      p.curveSource === "manual" ? "Manual" : p.curveSource === "auto" ? "Automática" : "",
+      p.curveReason ?? "",
       decimal(p.physicalQty),
       decimal(p.reservedQty),
       decimal(p.pendingQty),
       optional(p.minQty),
       ...(viewCost
-        ? [decimal(p.unitCost ?? 0), decimal(p.costValue ?? 0), decimal(p.salePrice ?? 0)]
+        ? [
+            decimal(p.unitCost ?? 0),
+            decimal(p.costValue ?? 0),
+            decimal(p.salePrice ?? 0),
+            optional(p.windowRevenue),
+            p.windowShare === null || p.windowShare === undefined
+              ? ""
+              : decimal(p.windowShare * 100) + "%",
+          ]
         : []),
+      date(p.lastSale),
+      p.daysWithoutSale ?? "",
+      date(p.salesFrom),
+      date(p.lastEntry),
+      operationLabel(p.lastEntryOperation),
+      date(p.registeredAt),
+      p.isNew ? "Sim" : "",
+      incompleteLabel(p.incompleteHistory, p),
+      p.soldElsewhere
+        ? `${p.soldElsewhere.companyName}${p.soldElsewhere.lastSale ? ` (${shortDate(p.soldElsewhere.lastSale)})` : ""}`
+        : "",
     ]),
   ]);
 }

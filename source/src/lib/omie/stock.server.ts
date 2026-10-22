@@ -177,10 +177,39 @@ function isFinal(error: unknown): boolean {
   return error instanceof OmieError && (error.kind === "auth" || error.kind === "client");
 }
 
-function safeMessage(error: unknown, credentials?: OmieCredentials): string {
+export function safeStockMessage(error: unknown, credentials?: OmieCredentials): string {
   if (error instanceof OmieError || error instanceof StockRecordError)
     return redact(error.message, credentials).slice(0, 300);
   return "Falha inesperada na leitura do estoque.";
+}
+
+/**
+ * Curva automática da empresa (migração 0043), logo depois de uma leitura publicada ou do fim das
+ * movimentações. Melhor esforço: o banco faz tudo numa transação (falha ou vendas inconsistentes
+ * mantêm as curvas anteriores); aqui só se registra a falha, sem afetar a leitura nem as cargas.
+ */
+export async function refreshCurves(
+  deps: Pick<StockStepDeps, "rpc" | "log">,
+  companyId: string,
+): Promise<void> {
+  try {
+    const { data, error } = await deps.rpc("stock_worker_refresh_curves", { p_company: companyId });
+    if (error) throw new Error(error.message);
+    const r = (data ?? {}) as { status?: string; reason?: string };
+    deps.log({
+      event: "stock_curves",
+      company: companyId,
+      status: r.status ?? null,
+      reason: r.reason ?? null,
+    });
+  } catch (failure) {
+    const detail = failure instanceof Error ? failure.message.slice(0, 200) : "erro";
+    const { error } = await deps.rpc("stock_worker_curve_failed", {
+      p_company: companyId,
+      p_error: "Falha no cálculo das curvas; as curvas anteriores foram mantidas.",
+    });
+    deps.log({ event: "stock_curves_failed", company: companyId, detail, recorded: !error });
+  }
 }
 
 /**
@@ -247,6 +276,7 @@ export async function runStockStep(
           reading: claim.id,
           positions: finished?.positions ?? null,
         });
+        if (finished?.published) await refreshCurves(deps, claim.companyId);
         return {
           jobId: claim.id,
           status: finished?.published ? "SUCCESS" : "RESTARTED",
@@ -258,7 +288,7 @@ export async function runStockStep(
     }
   } catch (failure) {
     const final = isFinal(failure);
-    const message = safeMessage(failure, credentials);
+    const message = safeStockMessage(failure, credentials);
     const { error: failError } = await deps.rpc("stock_worker_fail", {
       p_reading: claim.id,
       p_error: message,

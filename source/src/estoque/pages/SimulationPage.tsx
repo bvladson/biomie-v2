@@ -29,8 +29,9 @@ import { money, quantity, dateTime, errorMessage, downloadCsv } from "../lib/for
 import { PageTitle } from "../components/StockLayout";
 import { CurveBadge, Metric, Notice, Status } from "../components/shared";
 import { ProjectionChart } from "../components/ProjectionChart";
+import { WINDOW_LABELS } from "../lib/curves";
 export function SimulationPage() {
-  const { companyId } = useStockCompany(),
+  const { companyId, window } = useStockCompany(),
     client = useQueryClient(),
     caps = useCapabilities();
   const [scenario, setScenario] = useState<ScenarioInput>({
@@ -42,8 +43,8 @@ export function SimulationPage() {
     [busy, setBusy] = useState(false),
     [deleteId, setDeleteId] = useState<string | null>(null);
   const q = useQuery({
-    queryKey: ["stock", "simulation", companyId],
-    queryFn: () => stockApi.simulationBase(companyId),
+    queryKey: ["stock", "simulation", companyId, window],
+    queryFn: () => stockApi.simulationBase(companyId, window),
     enabled: caps.data?.viewCost === true,
     retry: false,
   });
@@ -76,7 +77,7 @@ export function SimulationPage() {
     <>
       <PageTitle
         title="Simulação de liquidação"
-        description="Saída planejada por curva · sem novas compras"
+        description={`Saída planejada por curva (${WINDOW_LABELS[window]}) · sem novas compras`}
       >
         {caps.data?.export && caps.data.viewCost && (
           <Button
@@ -86,7 +87,12 @@ export function SimulationPage() {
             onClick={async () => {
               setBusy(true);
               try {
-                const r = await stockApi.exportCsv({ kind: "simulation", companyId, scenario });
+                const r = await stockApi.exportCsv({
+                  kind: "simulation",
+                  companyId,
+                  scenario,
+                  window,
+                });
                 downloadCsv(r.fileName, r.csv);
               } catch (e) {
                 toast.error(errorMessage(e));

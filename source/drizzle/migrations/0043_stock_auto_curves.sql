@@ -628,6 +628,7 @@ declare
   v_incomplete boolean := coalesce((p_query->>'onlyIncomplete')::boolean, false);
   v_elsewhere boolean := coalesce((p_query->>'soldElsewhere')::boolean, false);
   v_manual boolean := coalesce((p_query->>'onlyManual')::boolean, false);
+  v_confirmed boolean := coalesce((p_query->>'onlyConfirmed')::boolean, false);
   v_min_days integer := nullif(p_query->>'minDaysWithoutSale', '')::integer;
   v_product text := nullif(p_query->>'productId', '');
   v_sort text := coalesce(nullif(p_query->>'sortBy', ''), 'costValue');
@@ -667,6 +668,9 @@ begin
       and (not v_incomplete or r.incomplete_reason is not null)
       and (not v_elsewhere or r.elsewhere_company is not null)
       and (not v_manual or r.curve_source = 'manual')
+      -- Sem venda confirmada: sem venda na janela, com histórico suficiente e não é produto novo.
+      and (not v_confirmed or (r.product_qty > 0 and r.curves_as_of is not null and r.window_revenue = 0
+           and not r.is_new and r.incomplete_reason is null))
       and (v_min_days is null or (r.product_qty > 0 and r.curves_as_of is not null
            and (r.last_sale is null or r.days_without_sale >= v_min_days)))
       and (v_product is null or r.product_id::text = v_product)),

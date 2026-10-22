@@ -1,11 +1,14 @@
 import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { CompanyFilter } from "../api/contract";
+import type { CompanyFilter, CurveWindow } from "../api/contract";
 import { stockApi } from "../api";
 export const StockContext = createContext<{
   companyId: CompanyFilter;
   setCompanyId: (v: string) => void;
-}>({ companyId: "all", setCompanyId: () => {} });
+  /** Janela da curva automática escolhida no topo do Estoque (padrão 12 meses). */
+  window: CurveWindow;
+  setWindow: (v: CurveWindow) => void;
+}>({ companyId: "all", setCompanyId: () => {}, window: "12m", setWindow: () => {} });
 export const useStockCompany = () => useContext(StockContext);
 export const useCapabilities = () =>
   useQuery({

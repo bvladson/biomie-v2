@@ -163,3 +163,110 @@ export function toLocationEntry(l: Record<string, unknown>): [string, StockLocat
     },
   ];
 }
+
+// ===================================================================== movimentações (0043)
+
+/**
+ * estoque/consulta:ListarMovimentoEstoque — entradas e saídas por período (documentação do Omie,
+ * 22/10/2026): idMov, dtMov, tipo (entrada/saida), operacao (00 ajuste, 11 venda, 13 devolução de
+ * venda, 14 remessa, 21 compra, 22 importação, 23 devolução ao fornecedor, 24 retorno de remessa,
+ * 28 ordem de produção...), cancelamento e devolucao (S/N), idProd (= nCodProd), qtde, cmc, valor.
+ * Base da última entrada e da chegada do produto. Registro sem identificador, data, tipo ou
+ * produto é pulado e contado (não trava a carga de meses).
+ */
+export const MOVEMENTS_PATH = "estoque/consulta/";
+export const MOVEMENTS_CALL = "ListarMovimentoEstoque";
+export const MOVEMENTS_LIST_KEYS = ["movProdutoListar"];
+export const MOVEMENTS_PAGE_SIZE = 100;
+export const MAX_MOVEMENT_PAGES = 2000;
+
+export interface MovementRow {
+  movement_id: number;
+  moved_on: string; // AAAA-MM-DD
+  kind: "entrada" | "saida";
+  operation: string | null;
+  origin: string | null;
+  canceled: boolean;
+  is_return: boolean;
+  omie_product_id: string;
+  location_code: string | null;
+  qty: number | null;
+  unit_cost: number | null;
+  value: number | null;
+  document: string | null;
+}
+
+export function movementsPageParams(
+  page: number,
+  from: string,
+  to: string,
+): Record<string, unknown> {
+  if (!Number.isInteger(page) || page < 1 || page > MAX_MOVEMENT_PAGES)
+    throw new StockRecordError("Período de movimentações grande demais; divida em blocos menores.");
+  if (!isOmieDate(from) || !isOmieDate(to)) throw new StockRecordError("Período inválido.");
+  return {
+    nPagina: page,
+    nRegPorPagina: MOVEMENTS_PAGE_SIZE,
+    dDtInicial: from,
+    dDtFinal: to,
+    lista_local_estoque: "TODOS",
+  };
+}
+
+/** "DD/MM/AAAA" ou "AAAA-MM-DD" → "AAAA-MM-DD"; qualquer outra coisa → null. */
+export function toIsoDate(value: unknown): string | null {
+  const s = text(value);
+  if (!s) return null;
+  let m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+const plain = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const looseNumber = (value: unknown): number | null => {
+  if (value === undefined || value === null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && Math.abs(n) <= 1e12 ? n : null;
+};
+
+/** Um item de movProdutoListar; null quando não dá para gravar (pulado e contado). */
+export function toMovementRow(m: Record<string, unknown>): MovementRow | null {
+  const id = text(m["idMov"]);
+  const product = text(m["idProd"]);
+  const date = toIsoDate(m["dtMov"]);
+  const tipo = text(m["tipo"]);
+  const kind = tipo ? plain(tipo) : null;
+  if (
+    !id ||
+    !/^\d{1,18}$/.test(id) ||
+    !product ||
+    !/^\d+$/.test(product) ||
+    product === "0" ||
+    !date
+  )
+    return null;
+  if (kind !== "entrada" && kind !== "saida") return null;
+  const local = text(m["codigo_local_estoque"]);
+  const operation = text(m["operacao"]);
+  return {
+    movement_id: Number(id),
+    moved_on: date,
+    kind,
+    operation: operation && /^\d{1,3}$/.test(operation) ? operation.padStart(2, "0") : null,
+    origin: text(m["desOrigem"])?.slice(0, 50) ?? null,
+    canceled: flag(m["cancelamento"]),
+    is_return: flag(m["devolucao"]),
+    omie_product_id: product,
+    location_code: local && /^\d+$/.test(local) && local !== "0" ? local : null,
+    qty: looseNumber(m["qtde"]),
+    unit_cost: looseNumber(m["cmc"]),
+    value: looseNumber(m["valor"]),
+    document: text(m["numDoc"])?.slice(0, 20) ?? null,
+  };
+}

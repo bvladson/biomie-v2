@@ -6,8 +6,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type {
+  ClassifiedCurve,
   CompanyFilter,
-  Curve,
+  CurveWindow,
   PositionQuery,
   SavedScenario,
   ScenarioInput,
@@ -52,8 +53,8 @@ const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
 
 export const capabilities = (db: Db) => call<StockCapabilities>(db, "stock_capabilities");
 
-export const overview = (db: Db, companyId: CompanyFilter) =>
-  call<StockOverview>(db, "stock_overview", { p_company: companyId });
+export const overview = (db: Db, companyId: CompanyFilter, window?: CurveWindow) =>
+  call<StockOverview>(db, "stock_overview", { p_company: companyId, p_window: window ?? null });
 
 export const positions = (db: Db, query: PositionQuery) =>
   call<{ rows: StockPosition[]; total: number }>(db, "stock_positions", { p_query: query });
@@ -65,12 +66,22 @@ export const filterOptions = (db: Db, companyId: CompanyFilter) =>
     { p_company: companyId },
   );
 
-export const setCurve = (db: Db, positionIds: string[], curve: Curve) =>
-  call<{ updated: number }>(db, "stock_set_curve", { p_position_ids: positionIds, p_curve: curve });
+export const setCurve = (
+  db: Db,
+  positionIds: string[],
+  curve: ClassifiedCurve | "AUTO",
+  reason?: string,
+) =>
+  call<{ updated: number }>(db, "stock_set_curve", {
+    p_position_ids: positionIds,
+    p_curve: curve,
+    p_reason: reason ?? null,
+  });
 
-export const simulationBase = (db: Db, companyId: CompanyFilter) =>
+export const simulationBase = (db: Db, companyId: CompanyFilter, window?: CurveWindow) =>
   call<{ items: SimulationItem[]; readAt: string | null }>(db, "stock_simulation_base", {
     p_company: companyId,
+    p_window: window ?? null,
   });
 
 export const listScenarios = (db: Db) => call<SavedScenario[]>(db, "stock_scenarios");
@@ -104,7 +115,12 @@ export async function exportCsv(
   db: Db,
   input:
     | { kind: "positions"; query: Omit<PositionQuery, "page"> }
-    | { kind: "simulation"; companyId: CompanyFilter; scenario: ScenarioInput },
+    | {
+        kind: "simulation";
+        companyId: CompanyFilter;
+        scenario: ScenarioInput;
+        window?: CurveWindow | undefined;
+      },
 ): Promise<{ fileName: string; csv: string }> {
   const caps = await capabilities(db);
   if (!caps.export) throw stockError("forbidden", "Você não pode exportar o estoque.");
@@ -113,10 +129,10 @@ export async function exportCsv(
     const data = await positions(db, { ...input.query, page: -1 });
     return {
       fileName: `estoque-posicoes-${stamp()}.csv`,
-      csv: positionsCsv(data.rows, caps.viewCost),
+      csv: positionsCsv(data.rows, caps.viewCost, input.query.window),
     };
   }
-  const base = await simulationBase(db, input.companyId);
+  const base = await simulationBase(db, input.companyId, input.window);
   return {
     fileName: `estoque-simulacao-${stamp()}.csv`,
     csv: simulationCsv(base.items, input.scenario),

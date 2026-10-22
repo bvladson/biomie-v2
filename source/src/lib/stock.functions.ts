@@ -13,6 +13,7 @@ const noStore = () => setResponseHeader("Cache-Control", "no-store");
 
 const company = z.union([z.literal("all"), z.string().uuid()]);
 const curve = z.enum(["A", "B", "C", "D", "U"]);
+const curveWindow = z.enum(["30d", "90d", "180d", "12m"]);
 const filters = z
   .object({
     companyId: company,
@@ -24,7 +25,27 @@ const filters = z
     hideZero: z.boolean().optional(),
     belowMin: z.boolean().optional(),
     productId: z.string().uuid().optional(),
-    sortBy: z.enum(["costValue", "physicalQty", "name", "sku"]).optional(),
+    window: curveWindow.optional(),
+    view: z.enum(["position", "product"]).optional(),
+    onlyNew: z.boolean().optional(),
+    onlyIncomplete: z.boolean().optional(),
+    soldElsewhere: z.boolean().optional(),
+    onlyManual: z.boolean().optional(),
+    onlyConfirmed: z.boolean().optional(),
+    minDaysWithoutSale: z
+      .union([z.literal(30), z.literal(90), z.literal(180), z.literal(365)])
+      .optional(),
+    sortBy: z
+      .enum([
+        "costValue",
+        "physicalQty",
+        "name",
+        "sku",
+        "lastSale",
+        "daysWithoutSale",
+        "windowRevenue",
+      ])
+      .optional(),
     sortDir: z.enum(["asc", "desc"]).optional(),
   })
   .strict();
@@ -35,6 +56,7 @@ const scenario = z
     discount: z.number().int().min(0).max(70),
   })
   .strict();
+// Empresa:produto:local; na visão por produto o local é "*" (todos os locais do produto).
 const positionId = z
   .string()
   .regex(/^[0-9a-fA-F-]{36}:[^:]{1,40}:[^:]{1,40}$/, "Posição inválida.");
@@ -45,10 +67,12 @@ export const stockCapabilities = createServerFn({ method: "GET" })
 
 export const stockOverview = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((i) => z.object({ companyId: company }).strict().parse(i))
+  .inputValidator((i) =>
+    z.object({ companyId: company, window: curveWindow.optional() }).strict().parse(i),
+  )
   .handler(async ({ data, context }) => {
     noStore();
-    return (await repo()).overview(context.supabase, data.companyId);
+    return (await repo()).overview(context.supabase, data.companyId, data.window);
   });
 
 export const stockPositions = createServerFn({ method: "POST" })
@@ -75,20 +99,26 @@ export const stockSetCurve = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) =>
     z
-      .object({ positionIds: z.array(positionId).min(1).max(5000), curve })
+      .object({
+        positionIds: z.array(positionId).min(1).max(5000),
+        curve: z.enum(["A", "B", "C", "D", "AUTO"]),
+        reason: z.string().trim().max(300).optional(),
+      })
       .strict()
       .parse(i),
   )
   .handler(async ({ data, context }) =>
-    (await repo()).setCurve(context.supabase, data.positionIds, data.curve),
+    (await repo()).setCurve(context.supabase, data.positionIds, data.curve, data.reason),
   );
 
 export const stockSimulationBase = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((i) => z.object({ companyId: company }).strict().parse(i))
+  .inputValidator((i) =>
+    z.object({ companyId: company, window: curveWindow.optional() }).strict().parse(i),
+  )
   .handler(async ({ data, context }) => {
     noStore();
-    return (await repo()).simulationBase(context.supabase, data.companyId);
+    return (await repo()).simulationBase(context.supabase, data.companyId, data.window);
   });
 
 export const stockListScenarios = createServerFn({ method: "GET" })
@@ -116,7 +146,14 @@ export const stockExportCsv = createServerFn({ method: "POST" })
     z
       .discriminatedUnion("kind", [
         z.object({ kind: z.literal("positions"), query: filters }).strict(),
-        z.object({ kind: z.literal("simulation"), companyId: company, scenario }).strict(),
+        z
+          .object({
+            kind: z.literal("simulation"),
+            companyId: company,
+            scenario,
+            window: curveWindow.optional(),
+          })
+          .strict(),
       ])
       .parse(i),
   )

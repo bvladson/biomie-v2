@@ -216,7 +216,15 @@ describe("StockApi contract boundaries", () => {
   });
   it("curve change covers product at all 3 locations within one company only", async () => {
     const { api } = createMockApi("SUPER_ADMIN", 300, 0);
-    const r = await api.setCurve({ positionIds: ["uni-p0-l0-0"], curve: "D" });
+    // Curva manual exige justificativa (0043); "AUTO" volta para a automática sem justificativa.
+    await expect(api.setCurve({ positionIds: ["uni-p0-l0-0"], curve: "D" })).rejects.toMatchObject({
+      code: "invalid",
+    });
+    const r = await api.setCurve({
+      positionIds: ["uni-p0-l0-0"],
+      curve: "D",
+      reason: "Produto parado no depósito há meses",
+    });
     expect(r.updated).toBe(3);
     const p = await api.positions({ companyId: "uni", productId: "uni-p0", page: 0 });
     expect(p.rows.every((x) => x.curve === "D")).toBe(true);
@@ -225,6 +233,9 @@ describe("StockApi contract boundaries", () => {
         (x) => x.curve === "A",
       ),
     ).toBe(true);
+    // Visão por produto: "empresa:produto:*" vale para todos os locais.
+    const back = await api.setCurve({ positionIds: ["uni:10000:*"], curve: "AUTO" });
+    expect(back.updated).toBe(3);
   });
   it("scenario limit 5; names max 60", async () => {
     const { api } = createMockApi("SUPER_ADMIN", 300, 0);

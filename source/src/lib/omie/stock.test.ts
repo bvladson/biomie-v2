@@ -4,11 +4,15 @@ import {
   MAX_STOCK_PAGES,
   StockRecordError,
   checkStockTotal,
+  movementsPageParams,
   stockPageParams,
+  toIsoDate,
   toLocationEntry,
+  toMovementRow,
   toStockRow,
 } from "./stock-adapter";
 import { runStockStep, type StockPageReader, type StockStepDeps } from "./stock.server";
+import { runStockMovementsStep } from "./stock-movements.server";
 
 describe("stock adapter (ListarPosEstoque)", () => {
   it("maps a position like the original project: físico × CMC, reservado e pendente à parte", () => {
@@ -225,7 +229,10 @@ describe("stock reading step (worker)", () => {
       "stock_worker_save_page",
       "stock_worker_save_page",
       "stock_worker_finish",
+      // Leitura publicada: a curva automática da empresa é recalculada na hora (0043).
+      "stock_worker_refresh_curves",
     ]);
+    expect(h.calls.at(-1)?.args).toEqual({ p_company: "c1" });
     expect(h.calls[1]?.args?.["p_locations"]).toEqual({
       "1": expect.objectContaining({ name: "Depósito" }),
     });
@@ -377,5 +384,225 @@ describe("stock reading step (worker)", () => {
       done: false,
     });
     expect(h.calls.map((c) => c.name)).toEqual(["stock_worker_claim"]);
+  });
+});
+
+describe("stock movements adapter (ListarMovimentoEstoque)", () => {
+  it("maps a movement and normalizes date, kind and operation", () => {
+    expect(
+      toMovementRow({
+        idMov: 987654321,
+        dtMov: "05/10/2026",
+        tipo: "Saída",
+        operacao: "11",
+        desOrigem: "Venda de Produto",
+        cancelamento: "N",
+        devolucao: "N",
+        idProd: 123456,
+        codigo_local_estoque: 4,
+        qtde: 2,
+        cmc: 50.5,
+        valor: 101,
+        numDoc: "000123",
+      }),
+    ).toEqual({
+      movement_id: 987654321,
+      moved_on: "2026-10-05",
+      kind: "saida",
+      operation: "11",
+      origin: "Venda de Produto",
+      canceled: false,
+      is_return: false,
+      omie_product_id: "123456",
+      location_code: "4",
+      qty: 2,
+      unit_cost: 50.5,
+      value: 101,
+      document: "000123",
+    });
+    const entry = toMovementRow({
+      idMov: "5",
+      dtMov: "2026-01-02",
+      tipo: "entrada",
+      operacao: "0",
+      idProd: "7",
+      cancelamento: "S",
+    });
+    expect(entry).toMatchObject({
+      kind: "entrada",
+      operation: "00",
+      canceled: true,
+      location_code: null,
+      qty: null,
+    });
+  });
+
+  it("skips records that cannot be stored instead of failing the whole period", () => {
+    expect(toMovementRow({ dtMov: "05/10/2026", tipo: "entrada", idProd: 1 })).toBeNull();
+    expect(toMovementRow({ idMov: 1, dtMov: "ontem", tipo: "entrada", idProd: 1 })).toBeNull();
+    expect(
+      toMovementRow({ idMov: 1, dtMov: "05/10/2026", tipo: "transferência", idProd: 1 }),
+    ).toBeNull();
+    expect(toMovementRow({ idMov: 1, dtMov: "05/10/2026", tipo: "entrada", idProd: 0 })).toBeNull();
+    expect(toIsoDate("31/12/2025")).toBe("2025-12-31");
+  });
+
+  it("asks for every location in a date range, 100 per page", () => {
+    expect(movementsPageParams(2, "01/09/2026", "30/09/2026")).toEqual({
+      nPagina: 2,
+      nRegPorPagina: 100,
+      dDtInicial: "01/09/2026",
+      dDtFinal: "30/09/2026",
+      lista_local_estoque: "TODOS",
+    });
+    expect(() => movementsPageParams(1, "2026-09-01", "30/09/2026")).toThrow(StockRecordError);
+  });
+});
+
+function movementsHarness(options: {
+  claim?: Record<string, unknown> | null;
+  pages?: Record<number, OmiePage<unknown> | Error>;
+  lastOfCompany?: boolean;
+}) {
+  const calls: Call[] = [];
+  let clock = 0;
+  const reader: StockPageReader = {
+    async listPage<T>(_path: string, _call: string, params: Record<string, unknown>) {
+      clock += 1_000;
+      const p = options.pages?.[Number(params["nPagina"])];
+      if (!p) throw new Error("página inesperada");
+      if (p instanceof Error) throw p;
+      return p as OmiePage<T>;
+    },
+  };
+  const deps: StockStepDeps = {
+    rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "stock_worker_movements_claim")
+        return {
+          data:
+            options.claim === undefined
+              ? { id: "m1", companyId: "c1", from: "01/09/2026", to: "30/09/2026", nextPage: 1 }
+              : options.claim,
+          error: null,
+        };
+      if (name === "stock_worker_movements_save_page") {
+        const n = Number(args?.["p_page"]);
+        return {
+          data: { restarted: false, done: n >= Number(args?.["p_pages_total"]) },
+          error: null,
+        };
+      }
+      if (name === "stock_worker_movements_finish")
+        return { data: { records: 3, lastOfCompany: options.lastOfCompany ?? true }, error: null };
+      if (name === "stock_worker_refresh_curves") return { data: { status: "ok" }, error: null };
+      return { data: { ok: true }, error: null };
+    },
+    acquireLease: async () => async () => {},
+    loadCredentials: async () => ({ appKey: "123456", appSecret: "segredo-super-secreto" }),
+    client: () => reader,
+    now: () => clock,
+    log: () => {},
+  };
+  return { deps, calls };
+}
+
+const movement = (id: number, kind = "entrada") => ({
+  idMov: id,
+  dtMov: "10/09/2026",
+  tipo: kind,
+  operacao: "21",
+  idProd: 500 + id,
+});
+
+describe("stock movements step (worker)", () => {
+  it("does nothing without queued periods (movements switched off)", async () => {
+    const h = movementsHarness({ claim: null });
+    expect(await runStockMovementsStep(h.deps)).toEqual({ jobId: null });
+  });
+
+  it("saves every page, counts skipped records and recalculates the curves at the end", async () => {
+    const h = movementsHarness({
+      pages: {
+        1: page([movement(1), { idMov: 2, tipo: "entrada" }], 1, 2, 3),
+        2: page([movement(3, "saida")], 2, 2, 3),
+      },
+    });
+    expect(await runStockMovementsStep(h.deps)).toEqual({
+      jobId: "m1",
+      status: "SUCCESS",
+      done: true,
+    });
+    const saves = h.calls.filter((c) => c.name === "stock_worker_movements_save_page");
+    expect(
+      saves.map((c) => [
+        c.args?.["p_page"],
+        (c.args?.["p_rows"] as unknown[]).length,
+        c.args?.["p_skipped"],
+      ]),
+    ).toEqual([
+      [1, 1, 1],
+      [2, 1, 0],
+    ]);
+    expect(h.calls.slice(-2).map((c) => c.name)).toEqual([
+      "stock_worker_movements_finish",
+      "stock_worker_refresh_curves",
+    ]);
+  });
+
+  it("only recalculates when the last period of the company is done", async () => {
+    const h = movementsHarness({
+      pages: { 1: page([movement(1)], 1, 1, 1) },
+      lastOfCompany: false,
+    });
+    await runStockMovementsStep(h.deps);
+    expect(h.calls.some((c) => c.name === "stock_worker_refresh_curves")).toBe(false);
+  });
+
+  it("an empty period finishes on the first page", async () => {
+    const h = movementsHarness({ pages: { 1: page([], 1, 0, 0) } });
+    expect((await runStockMovementsStep(h.deps)).status).toBe("SUCCESS");
+    expect(h.calls.find((c) => c.name === "stock_worker_movements_save_page")?.args).toMatchObject({
+      p_pages_total: 1,
+      p_records_total: 0,
+    });
+  });
+
+  it("an Omie block waits 30 minutes; refused credentials end the period without leaking them", async () => {
+    const blocked = movementsHarness({
+      pages: { 1: new OmieError("rate_limit", "Consumo redundante detectado.", true) },
+    });
+    expect((await runStockMovementsStep(blocked.deps)).status).toBe("RETRY");
+    expect(blocked.calls.at(-1)?.args).toMatchObject({
+      p_retry_after_seconds: 1800,
+      p_final: false,
+    });
+    const refused = movementsHarness({
+      pages: {
+        1: new OmieError("auth", "Credenciais recusadas: app_secret segredo-super-secreto", false),
+      },
+    });
+    expect((await runStockMovementsStep(refused.deps)).status).toBe("FAILED");
+    expect(String(refused.calls.at(-1)?.args?.["p_error"])).not.toContain("segredo-super-secreto");
+  });
+});
+
+describe("curve recalculation after a published reading", () => {
+  it("a failed recalculation is recorded and never fails the reading", async () => {
+    const h = harness({ pages: { 1: page([position(1)], 1, 1, 1) } });
+    const rpc = h.deps.rpc;
+    h.deps.rpc = async (name, args) =>
+      name === "stock_worker_refresh_curves"
+        ? { data: null, error: { message: "canceling statement due to statement timeout" } }
+        : rpc(name, args);
+    expect(await runStockStep(h.deps, h.budget)).toEqual({
+      jobId: "r1",
+      status: "SUCCESS",
+      done: true,
+    });
+    expect(h.calls.at(-1)).toMatchObject({
+      name: "stock_worker_curve_failed",
+      args: { p_company: "c1" },
+    });
   });
 });

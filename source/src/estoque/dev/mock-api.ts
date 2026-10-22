@@ -191,21 +191,29 @@ export function createMockApi(initialRole: MockRole = "SUPER_ADMIN", count = 300
         families: [...new Set(rows.flatMap((p) => (p.family ? [p.family] : [])))],
       };
     },
-    async setCurve({ positionIds, curve }) {
+    async setCurve({ positionIds, curve, reason }) {
       await gate();
       if (!roles[role].classify) fail("forbidden", "Você não pode classificar curvas.");
+      const auto = curve === "AUTO";
+      // Produto inteiro: "empresa:produto:*" vale para todos os locais (visão por produto).
+      const matches = (id: string, p: (typeof positions)[number]) =>
+        p.id === id || id === `${p.companyId}:${p.omieProductId}:*`;
       if (
-        !ALL_CURVES.includes(curve) ||
+        (!auto && !ALL_CURVES.includes(curve)) ||
         positionIds.length === 0 ||
-        positionIds.some((id) => !positions.some((p) => p.id === id))
+        positionIds.some((id) => !positions.some((p) => matches(id, p)))
       )
         fail("invalid", "Selecione posições válidas e uma curva.");
-      const selected = positions.filter((p) => positionIds.includes(p.id));
+      if (!auto && (reason ?? "").trim().length < 10)
+        fail("invalid", "Informe a justificativa da curva manual (pelo menos 10 caracteres).");
+      const selected = positions.filter((p) => positionIds.some((id) => matches(id, p)));
       const keys = new Set(selected.map((p) => `${p.companyId}:${p.omieProductId}`));
       let updated = 0;
       positions.forEach((p) => {
         if (keys.has(`${p.companyId}:${p.omieProductId}`)) {
-          p.curve = curve;
+          p.curve = auto ? "U" : curve;
+          p.curveSource = auto ? null : "manual";
+          p.curveReason = auto ? null : (reason ?? "").trim();
           updated++;
         }
       });
