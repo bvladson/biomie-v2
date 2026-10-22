@@ -29,6 +29,12 @@ export const AUDIT_ACTIONS: Record<string, string> = {
   "integrity.resolve": "Divergência decidida",
   "document.reveal": "CPF/CNPJ completo revelado",
   "finance.export": "Exportação do financeiro",
+  "stock.curve.changed": "Curva de estoque alterada",
+  "stock.scenario.saved": "Cenário de liquidação salvo",
+  "stock.scenario.deleted": "Cenário de liquidação excluído",
+  "stock.refresh.requested": "Leitura do estoque solicitada",
+  "stock.module.mode": "Liberação do módulo Estoque",
+  "stock.reading.toggled": "Leitura do estoque ligada ou desligada",
   "legacy.identity_import": "Importação do sistema antigo",
   "legacy.targets_teams_import": "Importação do sistema antigo",
   update: "Configuração do Plano de Voo",
@@ -58,6 +64,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   flight_plan_snapshots: "Plano de Voo",
   migration: "Migração",
   authorization: "Autorização",
+  stock: "Estoque",
 };
 
 const FIELD_LABELS: Record<string, string> = {

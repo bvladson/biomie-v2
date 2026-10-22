@@ -17,6 +17,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthenticatedShellRouteImport } from './routes/_authenticated/_shell'
 import { Route as AuthenticatedShellAdminRouteImport } from './routes/_authenticated/_shell/admin'
 import { Route as AuthenticatedShellCockpitRouteImport } from './routes/_authenticated/_shell/cockpit'
+import { Route as AuthenticatedShellEstoqueRouteImport } from './routes/_authenticated/_shell/estoque'
 import { Route as AuthenticatedShellExplorarRouteImport } from './routes/_authenticated/_shell/explorar'
 import { Route as AuthenticatedShellFinanceiroRouteImport } from './routes/_authenticated/_shell/financeiro'
 import { Route as AuthenticatedShellForecastRouteImport } from './routes/_authenticated/_shell/forecast'
@@ -31,6 +32,9 @@ import { Route as AuthenticatedShellAdminAuditoriaRouteImport } from './routes/_
 import { Route as AuthenticatedShellAdminEmpresasRouteImport } from './routes/_authenticated/_shell/admin_.empresas'
 import { Route as AuthenticatedShellClientesIndexRouteImport } from './routes/_authenticated/_shell/clientes.index'
 import { Route as AuthenticatedShellClientesCustomerIdRouteImport } from './routes/_authenticated/_shell/clientes.$customerId'
+import { Route as AuthenticatedShellEstoqueIndexRouteImport } from './routes/_authenticated/_shell/estoque.index'
+import { Route as AuthenticatedShellEstoquePosicoesRouteImport } from './routes/_authenticated/_shell/estoque.posicoes'
+import { Route as AuthenticatedShellEstoqueSimulacaoRouteImport } from './routes/_authenticated/_shell/estoque.simulacao'
 import { Route as AuthenticatedShellProdutosIndexRouteImport } from './routes/_authenticated/_shell/produtos.index'
 import { Route as AuthenticatedShellProdutosProductIdRouteImport } from './routes/_authenticated/_shell/produtos.$productId'
 import { Route as AuthenticatedShellVendedoresIndexRouteImport } from './routes/_authenticated/_shell/vendedores.index'
@@ -78,6 +82,12 @@ const AuthenticatedShellCockpitRoute =
   AuthenticatedShellCockpitRouteImport.update({
     id: '/cockpit',
     path: '/cockpit',
+    getParentRoute: () => AuthenticatedShellRoute,
+  } as any)
+const AuthenticatedShellEstoqueRoute =
+  AuthenticatedShellEstoqueRouteImport.update({
+    id: '/estoque',
+    path: '/estoque',
     getParentRoute: () => AuthenticatedShellRoute,
   } as any)
 const AuthenticatedShellExplorarRoute =
@@ -164,6 +174,24 @@ const AuthenticatedShellClientesCustomerIdRoute =
     path: '/clientes/$customerId',
     getParentRoute: () => AuthenticatedShellRoute,
   } as any)
+const AuthenticatedShellEstoqueIndexRoute =
+  AuthenticatedShellEstoqueIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedShellEstoqueRoute,
+  } as any)
+const AuthenticatedShellEstoquePosicoesRoute =
+  AuthenticatedShellEstoquePosicoesRouteImport.update({
+    id: '/posicoes',
+    path: '/posicoes',
+    getParentRoute: () => AuthenticatedShellEstoqueRoute,
+  } as any)
+const AuthenticatedShellEstoqueSimulacaoRoute =
+  AuthenticatedShellEstoqueSimulacaoRouteImport.update({
+    id: '/simulacao',
+    path: '/simulacao',
+    getParentRoute: () => AuthenticatedShellEstoqueRoute,
+  } as any)
 const AuthenticatedShellProdutosIndexRoute =
   AuthenticatedShellProdutosIndexRouteImport.update({
     id: '/produtos/',
@@ -226,6 +254,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof AuthenticatedShellAdminRoute
   '/cockpit': typeof AuthenticatedShellCockpitRoute
+  '/estoque': typeof AuthenticatedShellEstoqueRouteWithChildren
   '/explorar': typeof AuthenticatedShellExplorarRoute
   '/financeiro': typeof AuthenticatedShellFinanceiroRoute
   '/forecast': typeof AuthenticatedShellForecastRoute
@@ -239,11 +268,14 @@ export interface FileRoutesByFullPath {
   '/admin/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
   '/admin/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
+  '/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
+  '/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
   '/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
   '/api/public/jobs/flight-plan-snapshots': typeof ApiPublicJobsFlightPlanSnapshotsRoute
   '/api/public/jobs/omie-backfill': typeof ApiPublicJobsOmieBackfillRoute
   '/clientes/': typeof AuthenticatedShellClientesIndexRoute
+  '/estoque/': typeof AuthenticatedShellEstoqueIndexRoute
   '/produtos/': typeof AuthenticatedShellProdutosIndexRoute
   '/vendedores/': typeof AuthenticatedShellVendedoresIndexRoute
   '/admin/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
@@ -270,11 +302,14 @@ export interface FileRoutesByTo {
   '/admin/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
   '/admin/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
+  '/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
+  '/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
   '/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
   '/api/public/jobs/flight-plan-snapshots': typeof ApiPublicJobsFlightPlanSnapshotsRoute
   '/api/public/jobs/omie-backfill': typeof ApiPublicJobsOmieBackfillRoute
   '/clientes': typeof AuthenticatedShellClientesIndexRoute
+  '/estoque': typeof AuthenticatedShellEstoqueIndexRoute
   '/produtos': typeof AuthenticatedShellProdutosIndexRoute
   '/vendedores': typeof AuthenticatedShellVendedoresIndexRoute
   '/admin/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
@@ -291,6 +326,7 @@ export interface FileRoutesById {
   '/_authenticated/_shell': typeof AuthenticatedShellRouteWithChildren
   '/_authenticated/_shell/admin': typeof AuthenticatedShellAdminRoute
   '/_authenticated/_shell/cockpit': typeof AuthenticatedShellCockpitRoute
+  '/_authenticated/_shell/estoque': typeof AuthenticatedShellEstoqueRouteWithChildren
   '/_authenticated/_shell/explorar': typeof AuthenticatedShellExplorarRoute
   '/_authenticated/_shell/financeiro': typeof AuthenticatedShellFinanceiroRoute
   '/_authenticated/_shell/forecast': typeof AuthenticatedShellForecastRoute
@@ -304,11 +340,14 @@ export interface FileRoutesById {
   '/_authenticated/_shell/admin_/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
   '/_authenticated/_shell/admin_/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/_authenticated/_shell/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
+  '/_authenticated/_shell/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
+  '/_authenticated/_shell/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
   '/_authenticated/_shell/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/_authenticated/_shell/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
   '/api/public/jobs/flight-plan-snapshots': typeof ApiPublicJobsFlightPlanSnapshotsRoute
   '/api/public/jobs/omie-backfill': typeof ApiPublicJobsOmieBackfillRoute
   '/_authenticated/_shell/clientes/': typeof AuthenticatedShellClientesIndexRoute
+  '/_authenticated/_shell/estoque/': typeof AuthenticatedShellEstoqueIndexRoute
   '/_authenticated/_shell/produtos/': typeof AuthenticatedShellProdutosIndexRoute
   '/_authenticated/_shell/vendedores/': typeof AuthenticatedShellVendedoresIndexRoute
   '/_authenticated/_shell/admin_/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
@@ -324,6 +363,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/admin'
     | '/cockpit'
+    | '/estoque'
     | '/explorar'
     | '/financeiro'
     | '/forecast'
@@ -337,11 +377,14 @@ export interface FileRouteTypes {
     | '/admin/auditoria'
     | '/admin/empresas'
     | '/clientes/$customerId'
+    | '/estoque/posicoes'
+    | '/estoque/simulacao'
     | '/produtos/$productId'
     | '/vendedores/$sellerId'
     | '/api/public/jobs/flight-plan-snapshots'
     | '/api/public/jobs/omie-backfill'
     | '/clientes/'
+    | '/estoque/'
     | '/produtos/'
     | '/vendedores/'
     | '/admin/usuarios/$id'
@@ -368,11 +411,14 @@ export interface FileRouteTypes {
     | '/admin/auditoria'
     | '/admin/empresas'
     | '/clientes/$customerId'
+    | '/estoque/posicoes'
+    | '/estoque/simulacao'
     | '/produtos/$productId'
     | '/vendedores/$sellerId'
     | '/api/public/jobs/flight-plan-snapshots'
     | '/api/public/jobs/omie-backfill'
     | '/clientes'
+    | '/estoque'
     | '/produtos'
     | '/vendedores'
     | '/admin/usuarios/$id'
@@ -388,6 +434,7 @@ export interface FileRouteTypes {
     | '/_authenticated/_shell'
     | '/_authenticated/_shell/admin'
     | '/_authenticated/_shell/cockpit'
+    | '/_authenticated/_shell/estoque'
     | '/_authenticated/_shell/explorar'
     | '/_authenticated/_shell/financeiro'
     | '/_authenticated/_shell/forecast'
@@ -401,11 +448,14 @@ export interface FileRouteTypes {
     | '/_authenticated/_shell/admin_/auditoria'
     | '/_authenticated/_shell/admin_/empresas'
     | '/_authenticated/_shell/clientes/$customerId'
+    | '/_authenticated/_shell/estoque/posicoes'
+    | '/_authenticated/_shell/estoque/simulacao'
     | '/_authenticated/_shell/produtos/$productId'
     | '/_authenticated/_shell/vendedores/$sellerId'
     | '/api/public/jobs/flight-plan-snapshots'
     | '/api/public/jobs/omie-backfill'
     | '/_authenticated/_shell/clientes/'
+    | '/_authenticated/_shell/estoque/'
     | '/_authenticated/_shell/produtos/'
     | '/_authenticated/_shell/vendedores/'
     | '/_authenticated/_shell/admin_/usuarios/$id'
@@ -479,6 +529,13 @@ declare module '@tanstack/react-router' {
       path: '/cockpit'
       fullPath: '/cockpit'
       preLoaderRoute: typeof AuthenticatedShellCockpitRouteImport
+      parentRoute: typeof AuthenticatedShellRoute
+    }
+    '/_authenticated/_shell/estoque': {
+      id: '/_authenticated/_shell/estoque'
+      path: '/estoque'
+      fullPath: '/estoque'
+      preLoaderRoute: typeof AuthenticatedShellEstoqueRouteImport
       parentRoute: typeof AuthenticatedShellRoute
     }
     '/_authenticated/_shell/explorar': {
@@ -579,6 +636,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedShellClientesCustomerIdRouteImport
       parentRoute: typeof AuthenticatedShellRoute
     }
+    '/_authenticated/_shell/estoque/': {
+      id: '/_authenticated/_shell/estoque/'
+      path: '/'
+      fullPath: '/estoque/'
+      preLoaderRoute: typeof AuthenticatedShellEstoqueIndexRouteImport
+      parentRoute: typeof AuthenticatedShellEstoqueRoute
+    }
+    '/_authenticated/_shell/estoque/posicoes': {
+      id: '/_authenticated/_shell/estoque/posicoes'
+      path: '/posicoes'
+      fullPath: '/estoque/posicoes'
+      preLoaderRoute: typeof AuthenticatedShellEstoquePosicoesRouteImport
+      parentRoute: typeof AuthenticatedShellEstoqueRoute
+    }
+    '/_authenticated/_shell/estoque/simulacao': {
+      id: '/_authenticated/_shell/estoque/simulacao'
+      path: '/simulacao'
+      fullPath: '/estoque/simulacao'
+      preLoaderRoute: typeof AuthenticatedShellEstoqueSimulacaoRouteImport
+      parentRoute: typeof AuthenticatedShellEstoqueRoute
+    }
     '/_authenticated/_shell/produtos/': {
       id: '/_authenticated/_shell/produtos/'
       path: '/produtos'
@@ -645,9 +723,30 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedShellEstoqueRouteChildren {
+  AuthenticatedShellEstoquePosicoesRoute: typeof AuthenticatedShellEstoquePosicoesRoute
+  AuthenticatedShellEstoqueSimulacaoRoute: typeof AuthenticatedShellEstoqueSimulacaoRoute
+  AuthenticatedShellEstoqueIndexRoute: typeof AuthenticatedShellEstoqueIndexRoute
+}
+
+const AuthenticatedShellEstoqueRouteChildren: AuthenticatedShellEstoqueRouteChildren =
+  {
+    AuthenticatedShellEstoquePosicoesRoute:
+      AuthenticatedShellEstoquePosicoesRoute,
+    AuthenticatedShellEstoqueSimulacaoRoute:
+      AuthenticatedShellEstoqueSimulacaoRoute,
+    AuthenticatedShellEstoqueIndexRoute: AuthenticatedShellEstoqueIndexRoute,
+  }
+
+const AuthenticatedShellEstoqueRouteWithChildren =
+  AuthenticatedShellEstoqueRoute._addFileChildren(
+    AuthenticatedShellEstoqueRouteChildren,
+  )
+
 interface AuthenticatedShellRouteChildren {
   AuthenticatedShellAdminRoute: typeof AuthenticatedShellAdminRoute
   AuthenticatedShellCockpitRoute: typeof AuthenticatedShellCockpitRoute
+  AuthenticatedShellEstoqueRoute: typeof AuthenticatedShellEstoqueRouteWithChildren
   AuthenticatedShellExplorarRoute: typeof AuthenticatedShellExplorarRoute
   AuthenticatedShellFinanceiroRoute: typeof AuthenticatedShellFinanceiroRoute
   AuthenticatedShellForecastRoute: typeof AuthenticatedShellForecastRoute
@@ -674,6 +773,7 @@ interface AuthenticatedShellRouteChildren {
 const AuthenticatedShellRouteChildren: AuthenticatedShellRouteChildren = {
   AuthenticatedShellAdminRoute: AuthenticatedShellAdminRoute,
   AuthenticatedShellCockpitRoute: AuthenticatedShellCockpitRoute,
+  AuthenticatedShellEstoqueRoute: AuthenticatedShellEstoqueRouteWithChildren,
   AuthenticatedShellExplorarRoute: AuthenticatedShellExplorarRoute,
   AuthenticatedShellFinanceiroRoute: AuthenticatedShellFinanceiroRoute,
   AuthenticatedShellForecastRoute: AuthenticatedShellForecastRoute,

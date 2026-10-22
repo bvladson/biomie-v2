@@ -17,7 +17,10 @@ export type GrantablePermission =
   | "finance.view_titles" // Títulos
   | "finance.view_customer_details" // Financeiro do cliente
   | "finance.view_overdue" // Inadimplência
-  | "finance.export"; // Exportar financeiro
+  | "finance.export" // Exportar financeiro
+  | "stock.view_cost" // Estoque: ver custo (CMC) e simular
+  | "stock.classify" // Estoque: classificar curvas
+  | "stock.export"; // Estoque: exportar
 export type UserStatus = "ACTIVE" | "BLOCKED" | "INVITED" | "NEVER_SIGNED_IN";
 export type AccessDelivery = "INVITE_LINK" | "TEMP_PASSWORD";
 

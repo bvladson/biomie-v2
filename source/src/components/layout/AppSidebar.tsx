@@ -58,7 +58,9 @@ export function AppSidebar() {
       <SidebarContent>
         {NAV_GROUPS.map((group) => {
           const items = group.items.filter(
-            (i) => !i.permission || hasPermission(ctx.roles, i.permission),
+            (i) =>
+              (!i.permission || hasPermission(ctx.roles, i.permission)) &&
+              (!i.feature || (ctx.features ?? []).includes(i.feature)),
           );
           if (!items.length) return null;
           return (

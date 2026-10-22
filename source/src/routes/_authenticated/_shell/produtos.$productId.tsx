@@ -1,6 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ProductStockCard } from "@/estoque/components/ProductStockCard";
+import { canOpenStock } from "@/estoque/lib/hooks";
 import {
   Bar,
   CartesianGrid,
@@ -13,7 +15,7 @@ import {
   YAxis,
 } from "recharts";
 import { useGlobalFilters } from "@/hooks/use-filters";
-import { product360Query } from "@/lib/queries";
+import { appContextQuery, product360Query } from "@/lib/queries";
 import { formatValue } from "@/domain/format";
 import { FpKpi } from "@/components/flight-plan/parts";
 import { DataTable } from "@/components/analytics/DataTable";
@@ -40,6 +42,7 @@ function Product360Page() {
   const { productId } = Route.useParams();
   const { resolved } = useGlobalFilters();
   const navigate = useNavigate();
+  const { data: ctx } = useSuspenseQuery(appContextQuery());
   const [grain, setGrain] = useState<"month" | "week">("month");
   const q = { ...resolved!, product: productId, grain };
   const { data, isPending, error } = useQuery({ ...product360Query(q), enabled: !!resolved });
@@ -87,6 +90,7 @@ function Product360Page() {
         <FpKpi metricKey="product_units" label="Vendedores" value={k.sellers} />
         <FpKpi metricKey="orders" label="NFs" value={k.invoices} />
       </section>
+      {canOpenStock(ctx) && <ProductStockCard productId={productId} companyId={resolved.company} />}
       <Panel
         title="Histórico do produto"
         actions={

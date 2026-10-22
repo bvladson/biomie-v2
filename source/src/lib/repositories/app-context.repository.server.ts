@@ -1,12 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { AppRole } from "@/domain/rbac";
+import { features as loadFeatures } from "./stock.repository.server";
 
 export interface AppContextDTO {
   user: { id: string; email: string | null; fullName: string | null };
   roles: AppRole[];
   companies: { id: string; name: string; isDemo: boolean; dataAsOf: string }[];
   defaultCompanyId: string | null;
+  /** Módulos liberados para este usuário (ex.: "stock"); vazio enquanto nada foi liberado. */
+  features: string[];
 }
 
 export async function loadAppContext(
@@ -26,9 +29,10 @@ export async function loadAppContext(
   }
   const profile = profileResult.data;
 
-  const [roles, companies] = await Promise.all([
+  const [roles, companies, features] = await Promise.all([
     supabase.from("user_roles").select("role").eq("user_id", userId),
     supabase.from("companies").select("id,name,is_demo").order("name"),
+    loadFeatures(supabase),
   ]);
   if (roles.error || companies.error)
     throw new Error("Não foi possível carregar suas permissões e empresas.");
@@ -53,5 +57,6 @@ export async function loadAppContext(
       dataAsOf: asOf[index]!,
     })),
     defaultCompanyId: profile.default_company_id,
+    features,
   };
 }

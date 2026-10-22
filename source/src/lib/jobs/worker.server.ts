@@ -4,6 +4,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { bootstrapDependencies, runBootstrap } from "@/lib/omie/bootstrap.server";
 import { runBackfillTick } from "@/lib/omie/sync-tx.server";
+import {
+  enqueueStockReadings,
+  readStockSchedule,
+  runStockStep,
+  stockStepDeps,
+} from "@/lib/omie/stock.server";
 import type { OmieEntity } from "@/lib/omie/adapters";
 import { runSnapshotJob } from "./flight-plan-snapshots.server";
 import type { WorkerControl, WorkerDeps } from "./worker-core";
@@ -217,5 +223,18 @@ export function workerDependencies(admin: Admin, signal: AbortSignal): WorkerDep
         return false;
       }
     },
+
+    // Estoque (migração 0041): só lê quando a leitura está ligada no banco.
+    stockSchedule: () => readStockSchedule(admin),
+    enqueueStock: async (slot, kind, day) => {
+      const created = await enqueueStockReadings(admin, slot, kind, day);
+      log({ event: "stock_enqueued", slot, kind, created });
+      return created;
+    },
+    runStockStep: () =>
+      runStockStep(
+        stockStepDeps(admin, (event) => (heartbeat(), log(event))),
+        15_000,
+      ),
   };
 }

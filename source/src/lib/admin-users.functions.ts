@@ -28,6 +28,9 @@ const permission = z.enum([
   "finance.view_customer_details",
   "finance.view_overdue",
   "finance.export",
+  "stock.view_cost",
+  "stock.classify",
+  "stock.export",
 ]);
 const status = z.enum(["ACTIVE", "BLOCKED", "INVITED", "NEVER_SIGNED_IN"]);
 const delivery = z.enum(["INVITE_LINK", "TEMP_PASSWORD"]);

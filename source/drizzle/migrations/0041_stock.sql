@@ -692,7 +692,8 @@ end $$;
 
 -- A curva vale para o produto inteiro na empresa: todos os locais mudam juntos.
 create or replace function stock_internal.set_curve(p_position_ids text[], p_curve text) returns jsonb
-language plpgsql security definer set search_path = pg_catalog, public, pg_temp as $$
+language plpgsql security definer set search_path = pg_catalog, public, pg_temp
+  set client_min_messages = warning as $$
 declare
   v_caps jsonb := stock_internal.require('classify');
   v_scope uuid[] := stock_internal.scope('all');

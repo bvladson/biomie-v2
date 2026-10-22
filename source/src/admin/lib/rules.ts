@@ -83,6 +83,9 @@ export const PERMISSION_LABELS: Record<GrantablePermission, string> = {
   "finance.view_customer_details": "Financeiro do cliente",
   "finance.view_overdue": "Inadimplência",
   "finance.export": "Exportar financeiro",
+  "stock.view_cost": "Estoque: ver custo e simular",
+  "stock.classify": "Estoque: classificar curvas",
+  "stock.export": "Estoque: exportar",
 };
 export const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS) as GrantablePermission[];
 export const STATUS_LABELS: Record<UserStatus, string> = {

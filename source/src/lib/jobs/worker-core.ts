@@ -46,6 +46,15 @@ export interface StepOutcome {
   done?: boolean;
 }
 
+/** Leitura do estoque (migração 0041): desligada até a validação com o Omie. */
+export interface StockSchedule {
+  readingEnabled: boolean;
+  /** "HH:MM" locais das leituras do dia. */
+  slots: string[];
+  /** "HH:MM" local do fechamento diário (fica no histórico). */
+  closeSlot: string;
+}
+
 export interface WorkerDeps {
   now(): Date;
   readControl(): Promise<WorkerControl>;
@@ -57,6 +66,10 @@ export interface WorkerDeps {
   enqueueRecurring(kind: "transactions" | "dimensions" | "replay", today: string): Promise<number>;
   runSnapshot(): Promise<boolean>;
   log(event: Record<string, unknown>): void;
+  /** Estoque: opcional e isolado — uma falha aqui nunca interrompe as cargas existentes. */
+  stockSchedule?(): Promise<StockSchedule | null>;
+  enqueueStock?(slot: string, kind: "intraday" | "close", day: string): Promise<number>;
+  runStockStep?(): Promise<StepOutcome>;
 }
 
 export interface WorkerState {
@@ -65,6 +78,7 @@ export interface WorkerState {
   lastDimensionsDay: string | null;
   lastReplayDay: string | null;
   lastSnapshotDay: string | null;
+  lastStockSlot: string | null;
 }
 
 export const initialWorkerState = (): WorkerState => ({
@@ -73,6 +87,7 @@ export const initialWorkerState = (): WorkerState => ({
   lastDimensionsDay: null,
   lastReplayDay: null,
   lastSnapshotDay: null,
+  lastStockSlot: null,
 });
 
 function integer(
@@ -124,6 +139,26 @@ export function transactionSlot(
   if (start === undefined) return null;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${local.day} ${pad(local.hour)}:${pad(start)}`;
+}
+
+/**
+ * Horário de leitura do estoque aberto agora ("YYYY-MM-DD HH:MM" local + tipo), ou null.
+ * O fechamento diário vence uma leitura do dia marcada no mesmo minuto.
+ */
+export function stockSlot(
+  local: { day: string; hour: number; minute: number },
+  schedule: StockSchedule,
+): { key: string; kind: "intraday" | "close" } | null {
+  const minuteOfDay = local.hour * 60 + local.minute;
+  const open = (slot: string) => {
+    const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(slot);
+    if (!match) return false;
+    const start = Number(match[1]) * 60 + Number(match[2]);
+    return minuteOfDay >= start && minuteOfDay < start + SLOT_WINDOW_MINUTES;
+  };
+  if (open(schedule.closeSlot)) return { key: `${local.day} ${schedule.closeSlot}`, kind: "close" };
+  const slot = schedule.slots.find(open);
+  return slot ? { key: `${local.day} ${slot}`, kind: "intraday" } : null;
 }
 
 export function workerConfig(env: Record<string, string | undefined>): WorkerConfig {
@@ -258,6 +293,26 @@ export async function workerTick(
 
   const local = localParts(deps.now(), cfg.snapshotTimeZone);
   let enqueued = 0;
+  let stock: StockSchedule | null = null;
+  if (deps.stockSchedule) {
+    try {
+      stock = await deps.stockSchedule();
+    } catch {
+      stock = null;
+      deps.log({ event: "stock_schedule_unavailable" });
+    }
+  }
+  if (control.recurring && stock?.readingEnabled && deps.enqueueStock) {
+    const slot = stockSlot(local, stock);
+    if (slot && slot.key !== state.lastStockSlot) {
+      try {
+        enqueued += await deps.enqueueStock(slot.key, slot.kind, local.day);
+      } catch {
+        deps.log({ event: "stock_enqueue_failed", slot: slot.key });
+      }
+      state.lastStockSlot = slot.key;
+    }
+  }
   if (control.recurring) {
     // Fixed local slots keep Omie calls in the quiet minutes of the legacy
     // BIomie, which shares the same Omie applications (sync every 15 min).
@@ -297,6 +352,20 @@ export async function workerTick(
     steps++;
     lastJob = dimension.jobId;
   }
+  let stockStatus: string | null = null;
+  if (stock?.readingEnabled && deps.runStockStep) {
+    try {
+      const step = await deps.runStockStep();
+      if (step.jobId) {
+        steps++;
+        lastJob = step.jobId;
+        stockStatus = step.status ?? null;
+      }
+    } catch {
+      deps.log({ event: "stock_step_failed" });
+      stockStatus = "ERROR";
+    }
+  }
   while (deps.now().getTime() - started < cfg.tickBudgetMs) {
     if (hostTooBusy(deps.loadAverage(), cfg.maxLoadPerCpu)) break;
     deps.heartbeat();
@@ -306,6 +375,14 @@ export async function workerTick(
     lastJob = step.jobId;
   }
   const resultState = steps ? "RUNNING" : "IDLE";
-  await deps.reportStatus({ ...base, state: resultState, steps, enqueued, snapshot, lastJob });
+  await deps.reportStatus({
+    ...base,
+    state: resultState,
+    steps,
+    enqueued,
+    snapshot,
+    lastJob,
+    ...(stock ? { stock: { readingEnabled: stock.readingEnabled, lastStep: stockStatus } } : {}),
+  });
   return { state: resultState, steps, enqueued, snapshot };
 }

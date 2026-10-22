@@ -3,8 +3,10 @@ import {
   initialWorkerState,
   parseBlackouts,
   parseSlotMinutes,
+  stockSlot,
   workerConfig,
   workerTick,
+  type StockSchedule,
   type WorkerDeps,
 } from "./worker-core";
 
@@ -143,6 +145,101 @@ describe("worker tick", () => {
     advance(60 * 60_000);
     await workerTick(config, deps, state);
     expect(calls.snapshots).toBe(1);
+  });
+});
+
+const SCHEDULE: StockSchedule = {
+  readingEnabled: true,
+  slots: ["07:40", "12:40", "17:40"],
+  closeSlot: "23:50",
+};
+
+describe("stock reading in the worker tick", () => {
+  function stockHarness(options: {
+    enabled?: boolean;
+    recurring?: boolean;
+    at: string;
+    failStep?: boolean;
+    failSchedule?: boolean;
+    failEnqueue?: boolean;
+    jobs?: number;
+  }) {
+    const base = harness({
+      recurring: options.recurring ?? true,
+      at: options.at,
+      jobs: options.jobs ?? 0,
+    });
+    const stock = { enqueued: [] as string[], steps: 0 };
+    base.deps.stockSchedule = async () => {
+      if (options.failSchedule) throw new Error("rpc ausente");
+      return { ...SCHEDULE, readingEnabled: options.enabled ?? true };
+    };
+    base.deps.enqueueStock = async (slot, kind, day) => {
+      if (options.failEnqueue) throw new Error("falhou");
+      stock.enqueued.push(`${slot}|${kind}|${day}`);
+      return 2;
+    };
+    base.deps.runStockStep = async () => {
+      if (options.failStep) throw new Error("falhou");
+      stock.steps++;
+      return { jobId: "stock-1", status: "RUNNING", done: false };
+    };
+    return { ...base, stock };
+  }
+
+  it("stays idle while the reading is off (default after the migration)", async () => {
+    // 10:41Z = 07:41 em America/Fortaleza, dentro do horário 07:40.
+    const h = stockHarness({ enabled: false, at: "2026-10-21T10:41:00Z" });
+    await workerTick(h.config, h.deps, initialWorkerState());
+    expect(h.stock.enqueued).toEqual([]);
+    expect(h.stock.steps).toBe(0);
+  });
+
+  it("enqueues once per slot and runs one stock step per tick", async () => {
+    const h = stockHarness({ at: "2026-10-21T10:41:00Z" });
+    const state = initialWorkerState();
+    await workerTick(h.config, h.deps, state);
+    h.advance(60_000);
+    await workerTick(h.config, h.deps, state);
+    expect(h.stock.enqueued).toEqual(["2026-10-21 07:40|intraday|2026-10-21"]);
+    expect(h.stock.steps).toBe(2);
+    expect(h.calls.status.at(-1)?.["stock"]).toEqual({ readingEnabled: true, lastStep: "RUNNING" });
+  });
+
+  it("does not schedule when recurring loads are off, but still finishes queued readings", async () => {
+    const h = stockHarness({ recurring: false, at: "2026-10-21T10:41:00Z" });
+    await workerTick(h.config, h.deps, initialWorkerState());
+    expect(h.stock.enqueued).toEqual([]);
+    expect(h.stock.steps).toBe(1);
+  });
+
+  it("marks the 23:50 reading as the daily close", async () => {
+    // 02:51Z de 22/10 = 23:51 de 21/10 em Fortaleza.
+    const h = stockHarness({ at: "2026-10-22T02:51:00Z" });
+    await workerTick(h.config, h.deps, initialWorkerState());
+    expect(h.stock.enqueued).toEqual(["2026-10-21 23:50|close|2026-10-21"]);
+  });
+
+  it("never lets a stock failure stop the existing loads", async () => {
+    for (const failure of [{ failSchedule: true }, { failStep: true }, { failEnqueue: true }]) {
+      const h = stockHarness({ ...failure, at: "2026-10-21T10:41:00Z", jobs: 2 });
+      const result = await workerTick(h.config, h.deps, initialWorkerState());
+      expect(h.calls.steps).toBe(2);
+      expect(result.state).toBe("RUNNING");
+    }
+  });
+});
+
+describe("stock slots", () => {
+  it("opens each slot for five minutes and prefers the daily close", () => {
+    const at = (hour: number, minute: number) => ({ day: "2026-10-21", hour, minute });
+    expect(stockSlot(at(7, 39), SCHEDULE)).toBeNull();
+    expect(stockSlot(at(7, 40), SCHEDULE)).toEqual({ key: "2026-10-21 07:40", kind: "intraday" });
+    expect(stockSlot(at(7, 44), SCHEDULE)).toEqual({ key: "2026-10-21 07:40", kind: "intraday" });
+    expect(stockSlot(at(7, 45), SCHEDULE)).toBeNull();
+    expect(stockSlot(at(23, 52), SCHEDULE)).toEqual({ key: "2026-10-21 23:50", kind: "close" });
+    expect(stockSlot(at(12, 40), { ...SCHEDULE, closeSlot: "12:40" })?.kind).toBe("close");
+    expect(stockSlot(at(7, 40), { ...SCHEDULE, slots: ["7:40"] })).toBeNull();
   });
 });
 

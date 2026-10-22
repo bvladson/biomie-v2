@@ -14,6 +14,7 @@ import {
   Users,
   UserSquare2,
   Wallet,
+  Warehouse,
   type LucideIcon,
 } from "lucide-react";
 import type { Permission } from "@/domain/rbac";
@@ -23,6 +24,8 @@ export interface NavItem {
   label: string;
   icon: LucideIcon;
   permission?: Permission;
+  /** Módulo com liberação gradual: só aparece quando o banco o libera para o usuário. */
+  feature?: string;
   ready?: boolean;
 }
 
@@ -36,6 +39,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/vendedores", label: "Vendedores", icon: UserSquare2, ready: true },
       { to: "/clientes", label: "Clientes", icon: Users, ready: true },
       { to: "/produtos", label: "Produtos", icon: Boxes, ready: true },
+      { to: "/estoque", label: "Estoque", icon: Warehouse, feature: "stock", ready: true },
       { to: "/financeiro", label: "Financeiro", icon: Wallet, ready: true },
       { to: "/geografia", label: "Geografia", icon: Map },
       { to: "/forecast", label: "Forecast", icon: LineChart },

@@ -1,0 +1,332 @@
+import { describe, expect, it } from "vitest";
+import { OmieError, type OmiePage } from "./omie-client";
+import { StockRecordError, stockPageParams, toLocationEntry, toStockRow } from "./stock-adapter";
+import { runStockStep, type StockPageReader, type StockStepDeps } from "./stock.server";
+
+describe("stock adapter (ListarPosEstoque)", () => {
+  it("maps a position like the original project: físico × CMC, reservado e pendente à parte", () => {
+    const row = toStockRow({
+      nCodProd: 123456,
+      codigo_local_estoque: 4,
+      cCodigo: "MAG-001",
+      cDescricao: "Cadeira York presidente",
+      fisico: 10,
+      nSaldo: 8,
+      reservado: 2,
+      nPendente: 3,
+      estoque_minimo: 5,
+      nCMC: 520.5,
+      nPrecoUnitario: 899,
+    });
+    expect(row).toEqual({
+      omie_product_id: "123456",
+      location_code: "4",
+      sku: "MAG-001",
+      name: "Cadeira York presidente",
+      physical_qty: 10,
+      balance_qty: 8,
+      reserved_qty: 2,
+      pending_qty: 3,
+      min_qty: 5,
+      unit_cost: 520.5,
+      sale_price: 899,
+    });
+  });
+
+  it("falls back to nSaldo, keeps negative balances and fills optional fields", () => {
+    const row = toStockRow({ nCodProd: "77", nSaldo: -3.5, nCMC: "12.25" });
+    expect(row.physical_qty).toBe(-3.5);
+    expect(row.location_code).toBe("total");
+    expect(row.sku).toBe("77");
+    expect(row.name).toBe("77");
+    expect(row.reserved_qty).toBe(0);
+    expect(row.pending_qty).toBe(0);
+    expect(row.min_qty).toBeNull();
+    expect(row.sale_price).toBe(0);
+    expect(row.unit_cost).toBe(12.25);
+  });
+
+  it("rejects records that cannot be stored", () => {
+    expect(() => toStockRow({ fisico: 1, nCMC: 1 })).toThrow(StockRecordError);
+    expect(() => toStockRow({ nCodProd: 1, fisico: 1, nCMC: -1 })).toThrow(StockRecordError);
+    expect(() => toStockRow({ nCodProd: 1, fisico: "abc", nCMC: 1 })).toThrow(StockRecordError);
+    expect(() => toStockRow({ nCodProd: 1, fisico: 1 })).toThrow(StockRecordError);
+    expect(() =>
+      toStockRow({ nCodProd: 1, fisico: 1, nCMC: 1, codigo_local_estoque: "x" }),
+    ).toThrow(StockRecordError);
+  });
+
+  it("asks for every location and product with movement history, 100 per page", () => {
+    expect(stockPageParams(3, "21/10/2026")).toEqual({
+      nPagina: 3,
+      nRegPorPagina: 100,
+      dDataPosicao: "21/10/2026",
+      cExibeTodos: "S",
+      lista_local_estoque: "TODOS",
+    });
+    expect(() => stockPageParams(201, "21/10/2026")).toThrow(/20.000/);
+    expect(() => stockPageParams(1, "2026-10-21")).toThrow(StockRecordError);
+  });
+
+  it("maps stock locations with name and sale availability", () => {
+    expect(
+      toLocationEntry({
+        codigo_local_estoque: 9,
+        codigo: "DEP",
+        descricao: "Depósito central",
+        tipo: "1",
+        padrao: "S",
+        inativo: "N",
+        dispVenda: "S",
+      }),
+    ).toEqual([
+      "9",
+      {
+        name: "Depósito central",
+        code: "DEP",
+        type: "1",
+        defaultLocation: true,
+        forSale: true,
+        inactive: false,
+      },
+    ]);
+    expect(toLocationEntry({ descricao: "sem código" })).toBeNull();
+  });
+});
+
+type Call = { name: string; args: Record<string, unknown> | undefined };
+
+function page(
+  records: Record<string, unknown>[],
+  pageNumber: number,
+  totalPages: number,
+  total: number | null,
+): OmiePage<unknown> {
+  return { page: pageNumber, totalPages, totalRecords: total, records };
+}
+
+const position = (id: number, local = 1) => ({
+  nCodProd: id,
+  codigo_local_estoque: local,
+  cCodigo: `SKU-${id}`,
+  cDescricao: `Produto ${id}`,
+  fisico: id,
+  nCMC: 10,
+  nPrecoUnitario: 20,
+});
+
+function harness(options: {
+  claim?: Record<string, unknown> | null;
+  pages?: Record<number, OmiePage<unknown> | Error>;
+  locations?: OmiePage<unknown> | Error;
+  saveResult?: (page: number) => Record<string, unknown>;
+  lease?: boolean;
+  budget?: number;
+}) {
+  const calls: Call[] = [];
+  let clock = 0;
+  let released = false;
+  const reader: StockPageReader = {
+    async listPage<T>(path: string, _call: string, params: Record<string, unknown>) {
+      clock += 1_000;
+      if (path === "estoque/local/") {
+        const l = options.locations ?? page([], 1, 1, 0);
+        if (l instanceof Error) throw l;
+        return l as OmiePage<T>;
+      }
+      const p = options.pages?.[Number(params["nPagina"])];
+      if (!p) throw new Error("página inesperada");
+      if (p instanceof Error) throw p;
+      return p as OmiePage<T>;
+    },
+  };
+  const deps: StockStepDeps = {
+    rpc: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "stock_worker_claim")
+        return {
+          data:
+            options.claim === undefined
+              ? {
+                  id: "r1",
+                  companyId: "c1",
+                  positionDate: "21/10/2026",
+                  nextPage: 1,
+                  locationsLoaded: false,
+                }
+              : options.claim,
+          error: null,
+        };
+      if (name === "stock_worker_save_page") {
+        const n = Number(args?.["p_page"]);
+        return {
+          data: options.saveResult?.(n) ?? {
+            restarted: false,
+            done: n >= Number(args?.["p_pages_total"]),
+          },
+          error: null,
+        };
+      }
+      if (name === "stock_worker_finish")
+        return { data: { published: true, positions: 3 }, error: null };
+      return { data: { ok: true }, error: null };
+    },
+    acquireLease: async () =>
+      options.lease === false
+        ? null
+        : async () => {
+            released = true;
+          },
+    loadCredentials: async () => ({ appKey: "123456", appSecret: "segredo-super-secreto" }),
+    client: () => reader,
+    now: () => clock,
+    log: () => {},
+  };
+  return { deps, calls, released: () => released, budget: options.budget ?? 15_000 };
+}
+
+describe("stock reading step (worker)", () => {
+  it("does nothing when the queue is empty", async () => {
+    const h = harness({ claim: null });
+    expect(await runStockStep(h.deps, h.budget)).toEqual({ jobId: null });
+    expect(h.calls.map((c) => c.name)).toEqual(["stock_worker_claim"]);
+  });
+
+  it("reads locations and every page, then asks the database to publish", async () => {
+    const h = harness({
+      locations: page([{ codigo_local_estoque: 1, descricao: "Depósito" }], 1, 1, 1),
+      pages: {
+        1: page([position(1), position(2)], 1, 2, 3),
+        2: page([position(3)], 2, 2, 3),
+      },
+    });
+    const result = await runStockStep(h.deps, h.budget);
+    expect(result).toEqual({ jobId: "r1", status: "SUCCESS", done: true });
+    expect(h.calls.map((c) => c.name)).toEqual([
+      "stock_worker_claim",
+      "stock_worker_save_locations",
+      "stock_worker_save_page",
+      "stock_worker_save_page",
+      "stock_worker_finish",
+    ]);
+    expect(h.calls[1]?.args?.["p_locations"]).toEqual({
+      "1": expect.objectContaining({ name: "Depósito" }),
+    });
+    expect(h.calls[2]?.args).toMatchObject({ p_page: 1, p_pages_total: 2, p_records_total: 3 });
+    expect((h.calls[3]?.args?.["p_rows"] as unknown[]).length).toBe(1);
+    expect(h.released()).toBe(true);
+  });
+
+  it("publishes an empty stock as a complete reading", async () => {
+    const h = harness({ pages: { 1: page([], 1, 0, 0) } });
+    const result = await runStockStep(h.deps, h.budget);
+    expect(result.status).toBe("SUCCESS");
+    expect(h.calls.find((c) => c.name === "stock_worker_save_page")?.args).toMatchObject({
+      p_page: 1,
+      p_pages_total: 1,
+      p_records_total: 0,
+    });
+  });
+
+  it("continues from the claimed page and stops at the time budget", async () => {
+    const h = harness({
+      claim: {
+        id: "r1",
+        companyId: "c1",
+        positionDate: "21/10/2026",
+        nextPage: 2,
+        locationsLoaded: true,
+      },
+      pages: {
+        2: page([position(1)], 2, 5, 5),
+        3: page([position(2)], 3, 5, 5),
+        4: page([position(3)], 4, 5, 5),
+      },
+      budget: 2_000,
+    });
+    const result = await runStockStep(h.deps, h.budget);
+    expect(result).toEqual({ jobId: "r1", status: "RUNNING", done: false });
+    const pages = h.calls
+      .filter((c) => c.name === "stock_worker_save_page")
+      .map((c) => c.args?.["p_page"]);
+    expect(pages).toEqual([2, 3]);
+    expect(h.calls.some((c) => c.name === "stock_worker_save_locations")).toBe(false);
+  });
+
+  it("puts the reading back in the queue on an Omie block, waiting 30 minutes", async () => {
+    const h = harness({
+      pages: { 1: new OmieError("rate_limit", "Consumo redundante detectado.", true) },
+    });
+    const result = await runStockStep(h.deps, h.budget);
+    expect(result).toEqual({ jobId: "r1", status: "RETRY", done: false });
+    expect(h.calls.at(-1)).toEqual({
+      name: "stock_worker_fail",
+      args: {
+        p_reading: "r1",
+        p_error: "Consumo redundante detectado.",
+        p_retry_after_seconds: 1800,
+        p_final: false,
+      },
+    });
+    expect(h.released()).toBe(true);
+  });
+
+  it("ends the reading on refused credentials without leaking them", async () => {
+    const h = harness({
+      pages: {
+        1: new OmieError(
+          "auth",
+          "Credenciais recusadas pelo Omie: app_secret segredo-super-secreto",
+          false,
+        ),
+      },
+    });
+    const result = await runStockStep(h.deps, h.budget);
+    expect(result).toEqual({ jobId: "r1", status: "FAILED", done: true });
+    const fail = h.calls.at(-1);
+    expect(fail?.args?.["p_final"]).toBe(true);
+    expect(String(fail?.args?.["p_error"])).not.toContain("segredo-super-secreto");
+  });
+
+  it("ends the reading on a record that cannot be stored", async () => {
+    const h = harness({ pages: { 1: page([{ nCodProd: 1, fisico: 1, nCMC: -5 }], 1, 1, 1) } });
+    const result = await runStockStep(h.deps, h.budget);
+    expect(result.status).toBe("FAILED");
+    expect(h.calls.at(-1)?.args?.["p_error"]).toContain("custo médio contábil");
+  });
+
+  it("keeps reading when location names are not available", async () => {
+    const h = harness({
+      locations: new OmieError("client", "Omie recusou a requisição: método indisponível", false),
+      pages: { 1: page([position(1)], 1, 1, 1) },
+    });
+    expect((await runStockStep(h.deps, h.budget)).status).toBe("SUCCESS");
+    expect(h.calls[1]).toEqual({
+      name: "stock_worker_save_locations",
+      args: { p_reading: "r1", p_locations: {} },
+    });
+  });
+
+  it("stops when the database restarts the reading (total changed in the middle)", async () => {
+    const h = harness({
+      pages: { 1: page([position(1)], 1, 2, 2), 2: page([position(2)], 2, 2, 2) },
+      saveResult: () => ({ restarted: true }),
+    });
+    expect(await runStockStep(h.deps, h.budget)).toEqual({
+      jobId: "r1",
+      status: "RESTARTED",
+      done: false,
+    });
+    expect(h.calls.filter((c) => c.name === "stock_worker_save_page")).toHaveLength(1);
+  });
+
+  it("waits when another process holds the company lease", async () => {
+    const h = harness({ lease: false });
+    expect(await runStockStep(h.deps, h.budget)).toEqual({
+      jobId: "r1",
+      status: "BUSY",
+      done: false,
+    });
+    expect(h.calls.map((c) => c.name)).toEqual(["stock_worker_claim"]);
+  });
+});
