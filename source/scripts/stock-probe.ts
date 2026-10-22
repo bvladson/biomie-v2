@@ -13,6 +13,8 @@ import {
   LOCATIONS_CALL,
   LOCATIONS_LIST_KEYS,
   LOCATIONS_PATH,
+  MAX_STOCK_PAGES,
+  MAX_STOCK_POSITIONS,
   STOCK_CALL,
   STOCK_LIST_KEYS,
   STOCK_PATH,
@@ -105,7 +107,8 @@ async function main([slug]: string[]) {
       negativeOnFirstPage: negative,
       zeroOnFirstPage: zero,
       locationsOnFirstPage: locations.size,
-      withinLimit: page.totalPages <= 200,
+      withinLimit:
+        (page.totalRecords ?? 0) <= MAX_STOCK_POSITIONS && page.totalPages <= MAX_STOCK_PAGES,
     };
   } catch (e) {
     report["positions"] = {

@@ -1,6 +1,7 @@
 \set ON_ERROR_STOP on
--- Estoque (migração 0041): liberação, papéis, escopo de empresa, custo, curva, cenários, pedido
--- de leitura e o ciclo do worker (página fora de ordem, total que muda, posição repetida, falha).
+-- Estoque (migrações 0041 e 0042): liberação, papéis, escopo de empresa, custo, curva, cenários,
+-- pedido de leitura e o ciclo do worker (página fora de ordem, total que muda, posição repetida,
+-- falha, leitura longa que avança, leitura parada e leitura de mais de 3 h).
 -- Empresas e usuários sintéticos; tudo é desfeito no fim. Rodar no banco de TESTE.
 begin;
 do $$
@@ -564,6 +565,96 @@ begin
 end $$;
 reset role;
 
+-- 10b. Leitura longa (0042): recomeça só se ficar 30 min sem avançar ou passar de 3 h desde o início.
+--      MAG Filial em 22/10/2026: 11.088 posições em 222 páginas de 50, mais de 30 min de leitura.
+do $$
+declare rid uuid;
+begin
+  if exists (select 1 from private.stock_readings where status in ('queued', 'running')) then
+    raise exception 'FALHOU: fila do teste deveria estar vazia antes da leitura longa';
+  end if;
+  insert into private.stock_readings (company_id, kind, trigger, status, position_date, pages_total, pages_done,
+      records_expected, records_received, locations, attempts, started_at, progress_at)
+    values (current_setting('stk.cb')::uuid, 'intraday', 'manual', 'running', current_date, 222, 150,
+      11088, 0, '{}', 1, now() - interval '40 minutes', now() - interval '1 minute')
+    returning id into rid;
+  perform set_config('stk.long', rid::text, true);
+end $$;
+
+select set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
+set local role service_role;
+do $$
+declare v jsonb;
+begin
+  -- 40 min desde o início, avançou há 1 min: continua da página 151.
+  v := public.stock_worker_claim();
+  if (v->>'id')::uuid <> current_setting('stk.long')::uuid or (v->>'nextPage')::integer <> 151 then
+    raise exception 'FALHOU: leitura longa que avança foi recomeçada: %', v;
+  end if;
+  perform public.stock_worker_save_page((v->>'id')::uuid, 151, 222, 11088, '[]');
+end $$;
+reset role;
+
+do $$
+begin
+  if (select progress_at from private.stock_readings where id = current_setting('stk.long')::uuid)
+     < now() - interval '1 second' then
+    raise exception 'FALHOU: página gravada não marcou o avanço';
+  end if;
+  -- Sem avançar há 31 min.
+  update private.stock_readings set progress_at = now() - interval '31 minutes'
+    where id = current_setting('stk.long')::uuid;
+end $$;
+
+select set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
+set local role service_role;
+do $$
+declare v jsonb;
+begin
+  v := public.stock_worker_claim();
+  if (v->>'id')::uuid <> current_setting('stk.long')::uuid or (v->>'nextPage')::integer <> 1
+     or (v->>'locationsLoaded')::boolean then
+    raise exception 'FALHOU: leitura parada não recomeçou do início: %', v;
+  end if;
+end $$;
+reset role;
+
+do $$
+declare r private.stock_readings;
+begin
+  select * into r from private.stock_readings where id = current_setting('stk.long')::uuid;
+  if r.error <> 'Leitura parada por mais de 30 minutos; recomeçando.' or r.pages_done <> 0
+     or r.progress_at is null or r.attempts <> 2 then
+    raise exception 'FALHOU: recomeço por parada sem motivo ou contagem: % % % %', r.error, r.pages_done,
+      r.progress_at, r.attempts;
+  end if;
+  -- Avançando, mas iniciada há mais de 3 h.
+  update private.stock_readings set started_at = now() - interval '3 hours 1 minute',
+      progress_at = now() - interval '1 minute', pages_done = 10, pages_total = 222, records_expected = 11088
+    where id = current_setting('stk.long')::uuid;
+end $$;
+
+select set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
+set local role service_role;
+do $$
+declare v jsonb;
+begin
+  v := public.stock_worker_claim();
+  if (v->>'id')::uuid <> current_setting('stk.long')::uuid or (v->>'nextPage')::integer <> 1 then
+    raise exception 'FALHOU: leitura de mais de 3 h não recomeçou: %', v;
+  end if;
+  perform public.stock_worker_fail((v->>'id')::uuid, 'Teste encerrado.', 60, true);
+end $$;
+reset role;
+
+do $$
+begin
+  if (select status || ' ' || error from private.stock_readings where id = current_setting('stk.long')::uuid)
+     <> 'failed Teste encerrado.' then
+    raise exception 'FALHOU: leitura longa não encerrou';
+  end if;
+end $$;
+
 -- 11. Permissões extras do Estoque no Admin 2.0.
 select set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('stk.su'), 'role', 'authenticated')::text, true);
 set local role authenticated;
@@ -582,7 +673,7 @@ do $$
 begin
   if not (public.stock_capabilities()->>'export')::boolean then raise exception 'FALHOU: permissão extra de exportar'; end if;
   perform public.stock_positions('{"companyId": "all", "page": -1}');
-  raise notice 'PASS Estoque: liberação, papéis, escopo, custo, curva, cenários, leitura e worker';
+  raise notice 'PASS Estoque: liberação, papéis, escopo, custo, curva, cenários, leitura (inclusive longa) e worker';
 end $$;
 reset role;
 

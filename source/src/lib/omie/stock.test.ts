@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { OmieError, type OmiePage } from "./omie-client";
-import { StockRecordError, stockPageParams, toLocationEntry, toStockRow } from "./stock-adapter";
+import {
+  MAX_STOCK_PAGES,
+  StockRecordError,
+  checkStockTotal,
+  stockPageParams,
+  toLocationEntry,
+  toStockRow,
+} from "./stock-adapter";
 import { runStockStep, type StockPageReader, type StockStepDeps } from "./stock.server";
 
 describe("stock adapter (ListarPosEstoque)", () => {
@@ -64,8 +71,18 @@ describe("stock adapter (ListarPosEstoque)", () => {
       cExibeTodos: "S",
       lista_local_estoque: "TODOS",
     });
-    expect(() => stockPageParams(201, "21/10/2026")).toThrow(/20.000/);
     expect(() => stockPageParams(1, "2026-10-21")).toThrow(StockRecordError);
+  });
+
+  it("allows 20.000 positions at the 50 per page the Omie really returns", () => {
+    // MAG Filial em 22/10/2026: 11.088 posições em 222 páginas de 50.
+    expect(MAX_STOCK_PAGES).toBe(400);
+    expect(stockPageParams(222, "22/10/2026")["nPagina"]).toBe(222);
+    expect(stockPageParams(400, "22/10/2026")["nPagina"]).toBe(400);
+    expect(() => stockPageParams(401, "22/10/2026")).toThrow(/20.000/);
+    expect(() => checkStockTotal(11_088)).not.toThrow();
+    expect(() => checkStockTotal(20_000)).not.toThrow();
+    expect(() => checkStockTotal(20_001)).toThrow(/20\.001 posições/);
   });
 
   it("maps stock locations with name and sale availability", () => {
@@ -293,6 +310,38 @@ describe("stock reading step (worker)", () => {
     const result = await runStockStep(h.deps, h.budget);
     expect(result.status).toBe("FAILED");
     expect(h.calls.at(-1)?.args?.["p_error"]).toContain("custo médio contábil");
+  });
+
+  it("ends on the first page when the Omie declares more than 20.000 positions", async () => {
+    const h = harness({ pages: { 1: page([position(1)], 1, 401, 20_001) } });
+    const result = await runStockStep(h.deps, h.budget);
+    expect(result).toEqual({ jobId: "r1", status: "FAILED", done: true });
+    expect(h.calls.some((c) => c.name === "stock_worker_save_page")).toBe(false);
+    expect(h.calls.at(-1)).toMatchObject({
+      name: "stock_worker_fail",
+      args: { p_final: true, p_error: expect.stringContaining("acima do limite de 20.000") },
+    });
+  });
+
+  it("reads past page 200 (MAG Filial: 222 pages of 50)", async () => {
+    const h = harness({
+      claim: {
+        id: "r1",
+        companyId: "c1",
+        positionDate: "22/10/2026",
+        nextPage: 221,
+        locationsLoaded: true,
+      },
+      pages: {
+        221: page([position(1)], 221, 222, 11_088),
+        222: page([position(2)], 222, 222, 11_088),
+      },
+    });
+    expect(await runStockStep(h.deps, h.budget)).toEqual({
+      jobId: "r1",
+      status: "SUCCESS",
+      done: true,
+    });
   });
 
   it("keeps reading when location names are not available", async () => {

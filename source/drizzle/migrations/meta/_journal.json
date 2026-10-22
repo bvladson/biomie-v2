@@ -288,6 +288,13 @@
       "when": 1792414600000,
       "tag": "0041_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792414700000,
+      "tag": "0042_stock_progress",
+      "breakpoints": true
     }
   ]
 }

@@ -15,9 +15,19 @@
 export const STOCK_PATH = "estoque/consulta/";
 export const STOCK_CALL = "ListarPosEstoque";
 export const STOCK_LIST_KEYS = ["produtos"];
+/**
+ * Pedimos 100 por página, mas o Omie devolve no máximo 50 em ListarPosEstoque e calcula o
+ * total de páginas com 50 (sonda nas 5 empresas em 22/10/2026). A leitura segue as páginas que
+ * o Omie declara, então o tamanho real não muda o resultado. Pedir 100 mantém o pedido
+ * diferente dos serviços do site da MAG (50 e 49), que usam a mesma chave do Omie: pedidos
+ * idênticos em menos de 60 s colidem como "consumo redundante".
+ */
 export const STOCK_PAGE_SIZE = 100;
-/** 200 páginas de 100 = 20.000 posições, o mesmo teto do projeto de origem. */
-export const MAX_STOCK_PAGES = 200;
+export const OMIE_STOCK_PAGE_CAP = 50;
+/** Teto do projeto de origem: 20.000 posições, sem publicação parcial. */
+export const MAX_STOCK_POSITIONS = 20_000;
+/** 400 páginas de 50 = 20.000 posições. */
+export const MAX_STOCK_PAGES = MAX_STOCK_POSITIONS / OMIE_STOCK_PAGE_CAP;
 
 export const LOCATIONS_PATH = "estoque/local/";
 export const LOCATIONS_CALL = "ListarLocaisEstoque";
@@ -74,6 +84,14 @@ export function stockPageParams(page: number, positionDate: string): Record<stri
     cExibeTodos: "S",
     lista_local_estoque: "TODOS",
   };
+}
+
+/** Total declarado pelo Omie acima do teto: encerra já na primeira página, sem gastar chamadas. */
+export function checkStockTotal(declared: number): void {
+  if (declared > MAX_STOCK_POSITIONS)
+    throw new StockRecordError(
+      `O Omie informou ${declared.toLocaleString("pt-BR")} posições de estoque, acima do limite de 20.000; nada foi publicado.`,
+    );
 }
 
 export function locationsPageParams(page: number): Record<string, unknown> {

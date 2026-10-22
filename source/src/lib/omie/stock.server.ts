@@ -22,6 +22,7 @@ import {
   STOCK_LIST_KEYS,
   STOCK_PATH,
   StockRecordError,
+  checkStockTotal,
   locationsPageParams,
   stockPageParams,
   toLocationEntry,
@@ -219,6 +220,7 @@ export async function runStockStep(
       const declared = result.totalRecords ?? (result.totalPages <= 1 ? rows.length : null);
       if (declared === null)
         throw new OmieError("incomplete", "O Omie não informou o total de posições.", true);
+      checkStockTotal(declared);
       const saved = await must<{ restarted?: boolean; done?: boolean }>(
         deps.rpc,
         "stock_worker_save_page",

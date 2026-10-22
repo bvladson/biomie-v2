@@ -227,12 +227,16 @@ os dados de exemplo (`src/estoque/dev/mock-api.ts`) ficam só para os testes.
   enxerga `stock_*` e `my_features` (SECURITY INVOKER). Custo (CMC) segue a regra do Financeiro, curva
   com quem decide compras, VIEWER sem acesso. Permissões extras no Admin 2.0: `stock.view_cost`,
   `stock.classify`, `stock.export`. Curva, cenário, pedido de leitura e liberação vão para a Auditoria.
-- **Leitura:** só o worker chama o Omie (`ListarLocaisEstoque` + `ListarPosEstoque`, 100 por página,
-  até 20.000 posições por empresa). Agenda 07:40, 12:40 e 17:40 + fechamento 23:50 (histórico de
+- **Leitura:** só o worker chama o Omie (`ListarLocaisEstoque` + `ListarPosEstoque`, até 20.000
+  posições por empresa). Pedimos 100 por página, mas o Omie devolve no máximo 50 e conta as
+  páginas com 50 (sonda de 22/10/2026: MAG Filial 11.088 posições = 222 páginas, 7 locais; as
+  demais ~1.600 = 32–33 páginas). Agenda 07:40, 12:40 e 17:40 + fechamento 23:50 (histórico de
   400 dias; leituras do dia saem quando chega a próxima). Só vira a posição exibida a leitura com
-  páginas e total conferidos; total que muda no meio, posição repetida ou parada de mais de 30 min
-  recomeçam do zero; bloqueio 425 espera 30 min; credencial recusada encerra sem tocar na posição
-  publicada. Uma falha do estoque nunca interrompe as cargas existentes.
+  páginas e total conferidos; total que muda no meio, posição repetida, 30 min sem gravar página
+  ou mais de 3 h desde o início recomeçam do zero (`0042`; antes contava 30 min desde o início, o
+  que a MAG Filial não cumpre); total declarado acima de 20.000 encerra na primeira página;
+  bloqueio 425 espera 30 min; credencial recusada encerra sem tocar na posição publicada. Uma
+  falha do estoque nunca interrompe as cargas existentes.
 - **Estado depois da migração:** módulo `off` (menu escondido; o Super admin abre pela URL) e leitura
   desligada. Nada chama o Omie até o passo 3.
 - **Padrões adotados para as decisões em aberto** (mudam só no banco, sem nova tela): curva por
