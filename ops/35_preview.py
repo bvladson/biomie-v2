@@ -37,6 +37,9 @@ if command == 'up':
     release = BASE / 'releases' / short
     meta = json.loads((release / 'RELEASE.json').read_text())
     env = {**os.environ, 'RELEASE_ID': short, 'SOURCE_DIR': str(release), 'BIOMIE_GIT_COMMIT': meta['commit']}
+    # The release's own compose definition (same project name), so the preview runs with the
+    # environment the release will have in production (e.g. PUBLIC_SUPABASE_URL, 22/10/2026).
+    COMPOSE = COMPOSE[:-1] + [str(release / 'deploy/vps/compose.yml')]
     started = time.time()
     run(COMPOSE + ['build', 'web'], env=env)
     revision = run(['docker', 'image', 'inspect', '--format', '{{index .Config.Labels "org.opencontainers.image.revision"}}',

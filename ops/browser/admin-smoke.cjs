@@ -32,9 +32,31 @@ async function step(name, fn) {
   }
 }
 
+const upstream = process.env.BIOMIE_TEST_UPSTREAM;
+const tunnelFailures = [];
+
 async function open(browser) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const page = await context.newPage();
+  // Prévia (29_smoke.py --pre-cutover --upstream-port N): o endereço público abre, mas as
+  // páginas vêm do web privado pelo túnel; /supabase/ continua indo para a API pública.
+  if (upstream) {
+    await page.route(base + '/**', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.startsWith('/supabase/')) return route.continue();
+      const headers = { ...route.request().headers() };
+      if (headers.origin) headers.origin = upstream;
+      if (headers.referer) headers.referer = headers.referer.replace(base, upstream);
+      delete headers.host;
+      try {
+        const response = await route.fetch({ url: upstream + url.pathname + url.search, headers, timeout: 90000 });
+        await route.fulfill({ response });
+      } catch (e) {
+        tunnelFailures.push({ path: url.pathname, error: redact(e.message).split(/\r?\n/)[0].slice(0, 200) });
+        await route.abort().catch(() => {});
+      }
+    });
+  }
   page.on('pageerror', (e) => problems.errors.push(redact(e.message).slice(0, 200)));
   page.on('console', (m) => {
     const text = m.text();
@@ -188,6 +210,7 @@ async function createViaWizard(page, { name, email, delivery }) {
   await v.context.close();
 
   await browser.close();
-  console.log(JSON.stringify({ steps, ...problems }, null, 2));
-  if (steps.some((s) => !s.ok) || problems.serverFailures.length || problems.csp.length) process.exitCode = 1;
+  console.log(JSON.stringify({ upstream: upstream ? 'prévia' : 'site público', steps, ...problems, tunnelFailures }, null, 2));
+  if (steps.some((s) => !s.ok) || problems.serverFailures.length || problems.csp.length || tunnelFailures.length)
+    process.exitCode = 1;
 })();
