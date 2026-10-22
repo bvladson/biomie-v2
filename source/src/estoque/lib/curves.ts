@@ -65,16 +65,19 @@ export function incompleteLabel(reason: IncompleteReason | null | undefined, p?:
   return "";
 }
 
-/** Texto da última venda: data, ou "sem venda desde ..." quando nunca vendeu no histórico. */
+/**
+ * Texto da última venda: data e dias; quem nunca vendeu no histórico mostra desde quando — a
+ * chegada do produto, se veio depois do início do histórico, ou o próprio início do histórico.
+ */
 export function lastSaleText(p: StockPosition): string {
-  if (p.lastSale) {
-    const days = p.daysWithoutSale;
-    return days === null || days === undefined
-      ? shortDate(p.lastSale)
-      : `${shortDate(p.lastSale)} · há ${days} dia${days === 1 ? "" : "s"}`;
-  }
-  if (p.salesFrom) return `Sem venda desde ${shortDate(p.salesFrom)}`;
-  return "Sem venda no histórico";
+  const days = p.daysWithoutSale;
+  const ago = days === null || days === undefined ? "" : ` · ${days} dia${days === 1 ? "" : "s"}`;
+  if (p.lastSale) return `${shortDate(p.lastSale)}${ago.replace(" · ", " · há ")}`;
+  const since = p.idleSince ?? p.salesFrom;
+  if (!since) return "Sem venda no histórico";
+  return since === p.arrivedOn && p.salesFrom && since > p.salesFrom
+    ? `Sem venda desde a chegada (${shortDate(since)})${ago}`
+    : `Sem venda desde ${shortDate(since)} (início do histórico)${ago}`;
 }
 
 export const percent = (share: number | null | undefined) =>

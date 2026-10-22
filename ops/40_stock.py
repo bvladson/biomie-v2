@@ -82,7 +82,7 @@ pr as (
     min(x.registered_at) as registered, min(x.arrived_on) as arrived, bool_or(x.is_new) as is_new,
     min(x.incomplete_reason) as incomplete, min(x.elsewhere_company) as elsewhere,
     min(x.elsewhere_last_sale) as elsewhere_sale, min(x.curves_as_of) as as_of, min(x.sales_from) as sales_from,
-    min(x.window_start) as window_start, count(*) as locations
+    min(x.window_start) as window_start, count(*) as locations, min(x.idle_since) as idle_since
   from x group by x.omie_product_id),
 run as (select r.* from c, private.stock_curve_runs r where r.company_id = c.id order by r.finished_at desc limit 5)
 select json_build_object(
@@ -113,14 +113,13 @@ select json_build_object(
       'entryLast90d', count(*) filter (where pr.last_entry >= pr.as_of - 90))
     from pr where pr.curve = 'D' and pr.qty > 0),
   'aging', (select json_object_agg(b.band, json_build_object('products', b.n, 'value', b.v)) from (
-      select case when coalesce(pr.as_of - pr.last_sale, pr.as_of - pr.sales_from + 1) >= 365 then '365'
-                  when coalesce(pr.as_of - pr.last_sale, pr.as_of - pr.sales_from + 1) >= 180 then '180'
-                  when coalesce(pr.as_of - pr.last_sale, pr.as_of - pr.sales_from + 1) >= 90 then '90'
-                  when coalesce(pr.as_of - pr.last_sale, pr.as_of - pr.sales_from + 1) >= 30 then '30'
+      select case when pr.days >= 365 then '365' when pr.days >= 180 then '180'
+                  when pr.days >= 90 then '90' when pr.days >= 30 then '30'
                   else 'recente' end as band, count(*) as n, round(sum(pr.value), 2) as v
-      from pr where pr.qty > 0 and pr.as_of is not null group by 1) b),
+      from pr where pr.qty > 0 and pr.as_of is not null and pr.days is not null group by 1) b),
   'topD', (select json_agg(json_build_object('sku', t.sku, 'name', t.name, 'qty', t.qty, 'value', t.value,
-      'lastSale', t.last_sale, 'lastEntry', t.last_entry, 'lastEntryOp', t.last_op, 'registered', t.registered,
+      'lastSale', t.last_sale, 'idleSince', t.idle_since, 'idleDays', t.days, 'lastEntry', t.last_entry,
+      'lastEntryOp', t.last_op, 'registered', t.registered,
       'arrived', t.arrived, 'new', t.is_new, 'incomplete', t.incomplete, 'elsewhere', t.elsewhere,
       'elsewhereSale', t.elsewhere_sale, 'locations', t.locations) order by t.value desc)
     from (select * from pr where pr.curve = 'D' and pr.qty > 0 order by pr.value desc limit 15) t),

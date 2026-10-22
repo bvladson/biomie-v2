@@ -62,8 +62,11 @@ async function login(page, label) {
   await page.waitForURL('**/cockpit**', { timeout: 60000 });
 }
 
-const menuHasStock = (page) =>
-  page.getByRole('link', { name: 'Estoque', exact: true }).count().then((n) => n > 0);
+// Espera o menu lateral carregar (o Cockpit aparece para todos) antes de contar o Estoque.
+const menuHasStock = async (page) => {
+  await page.getByRole('link', { name: 'Cockpit', exact: true }).first().waitFor({ timeout: 45000 });
+  return (await page.getByRole('link', { name: 'Estoque', exact: true }).count()) > 0;
+};
 
 async function screen(page, path, heading) {
   await page.goto(base + path);
@@ -117,12 +120,12 @@ async function screen(page, path, heading) {
         await sup.page.getByRole('link', { name: /Histórico incompleto/ }).first().click();
         await sup.page.waitForURL(/\/estoque\/posicoes/, { timeout: 45000 });
         await sup.page.getByRole('columnheader', { name: 'Indicadores' }).waitFor({ timeout: 45000 });
-        await sup.page.getByText(/produtos · página/).waitFor({ timeout: 45000 });
+        await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 45000 });
         return { heading, url: new URL(sup.page.url()).search, shot: await shot(sup.page, 'curva-d-historico-incompleto') };
       });
       await step('super: curva manual com justificativa e volta para a automática', async () => {
         await sup.page.goto(base + '/estoque/posicoes?curve=%22D%22&view=%22product%22');
-        await sup.page.getByText(/produtos · página/).waitFor({ timeout: 45000 });
+        await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 45000 });
         const first = sup.page.locator('table tbody tr').first();
         const name = (await first.locator('td').nth(1).innerText()).split('\n')[0];
         await first.getByRole('checkbox').click();

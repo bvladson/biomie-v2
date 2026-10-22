@@ -43,8 +43,18 @@ describe("curva automática na tela", () => {
       "12/09/2026 · há 40 dias",
     );
     expect(lastSaleText({ ...base, lastSale: null, salesFrom: "2026-01-01" })).toBe(
-      "Sem venda desde 01/01/2026",
+      "Sem venda desde 01/01/2026 (início do histórico)",
     );
+    expect(
+      lastSaleText({
+        ...base,
+        lastSale: null,
+        salesFrom: "2026-01-01",
+        arrivedOn: "2026-10-02",
+        idleSince: "2026-10-02",
+        daysWithoutSale: 21,
+      }),
+    ).toBe("Sem venda desde a chegada (02/10/2026) · 21 dias");
   });
 
   it("histórico incompleto explica o motivo", () => {

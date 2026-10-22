@@ -219,12 +219,18 @@ begin
      or p->'rows'->0->>'incompleteHistory' <> 'product' then
     raise exception 'FALHOU: histórico incompleto pelo produto em 180 dias: %', p->'rows';
   end if;
-  -- Tempo sem venda (independente da janela): 90+ dias = gaveteiro + os que nunca venderam com saldo.
+  -- Tempo sem venda (independente da janela): 90+ dias = gaveteiro (100) + estante e painel (desde o
+  -- início do histórico, 301) + nicho (desde a chegada, 121). A poltrona chegou há 20 dias: não entra.
   p := public.stock_positions(jsonb_build_object('companyId', current_setting('crv.ca'), 'page', 0, 'view', 'product',
     'minDaysWithoutSale', 90));
   if (select string_agg(x->>'omieProductId', ',' order by x->>'omieProductId') from jsonb_array_elements(p->'rows') x)
-     <> '1004,1006,1007,1010,1011' then
+     <> '1004,1006,1010,1011' then
     raise exception 'FALHOU: sem venda há 90+ dias: %', p->'rows';
+  end if;
+  if (select x->>'idleSince' from jsonb_array_elements(p->'rows') x where x->>'omieProductId' = '1011')::date
+       <> t - 120
+     or (select (x->>'daysWithoutSale')::integer from jsonb_array_elements(p->'rows') x where x->>'omieProductId' = '1011') <> 121 then
+    raise exception 'FALHOU: tempo sem venda do nicho conta da chegada: %', p->'rows';
   end if;
   begin perform public.stock_positions(jsonb_build_object('companyId', 'all', 'page', 0, 'window', '7d'));
     raise exception 'FALHOU: janela inválida aceita';
@@ -257,12 +263,14 @@ begin
   if (v->'dAnalysis'->>'confirmedProducts')::integer <> 4 or (v->'curves'->0->>'incompleteHistory')::boolean then
     raise exception 'FALHOU: curva D aberta (90 dias): %', v->'dAnalysis';
   end if;
-  -- Faixas por produto com saldo: 30 = cadeiras (40 dias); 90 = gaveteiro (100); 180 = nunca venderam
-  -- no histórico de 300 dias (estante, poltrona nova, painel, nicho), 3 deles incompletos (não novos).
+  -- Faixas por produto com saldo: 30 = cadeiras (40 dias); 90 = gaveteiro (100) e nicho (121, desde a
+  -- chegada); 180 = estante e painel (nunca venderam, já estavam antes do histórico: incompletos);
+  -- a poltrona nova (21 dias) não entra em faixa nenhuma.
   a := v->'aging';
-  if (a->0->>'band') <> '30' or (a->0->>'products')::integer <> 2 or (a->1->>'products')::integer <> 1
-     or (a->2->>'products')::integer <> 4 or (a->2->>'newProducts')::integer <> 1
-     or (a->2->>'incompleteProducts')::integer <> 3 or (a->3->>'products')::integer <> 0 then
+  if (a->0->>'band') <> '30' or (a->0->>'products')::integer <> 2 or (a->1->>'products')::integer <> 2
+     or (a->1->>'incompleteProducts')::integer <> 0 or (a->2->>'products')::integer <> 2
+     or (a->2->>'newProducts')::integer <> 0 or (a->2->>'incompleteProducts')::integer <> 2
+     or (a->3->>'products')::integer <> 0 then
     raise exception 'FALHOU: faixas de tempo sem venda: %', a;
   end if;
 end $$;

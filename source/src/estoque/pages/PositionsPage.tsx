@@ -590,8 +590,15 @@ export function PositionsPage() {
           </Table>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t p-4 text-sm">
             <p aria-live="polite">
-              {data.total} {view === "product" ? "produtos" : "posições"} · página {page + 1} de{" "}
-              {Math.max(1, Math.ceil(data.total / 100))}
+              {data.total}{" "}
+              {view === "product"
+                ? data.total === 1
+                  ? "produto"
+                  : "produtos"
+                : data.total === 1
+                  ? "posição"
+                  : "posições"}{" "}
+              · página {page + 1} de {Math.max(1, Math.ceil(data.total / 100))}
             </p>
             <div className="flex gap-2">
               <Button

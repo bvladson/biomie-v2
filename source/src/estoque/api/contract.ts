@@ -57,6 +57,7 @@ export interface StockPosition {
   lastSale?: string | null | undefined; // última venda no histórico disponível (até 12 meses)
   daysWithoutSale?: number | null | undefined;
   salesFrom?: string | null | undefined; // início do histórico de vendas do BIOMIE
+  idleSince?: string | null | undefined; // desde quando não vende (última venda, chegada ou início do histórico)
   lastEntry?: string | null | undefined; // última entrada (movimentações do Omie)
   lastEntryOperation?: string | null | undefined; // 21 compra, 22 importação, 00 ajuste...
   firstEntry?: string | null | undefined;

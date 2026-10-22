@@ -391,7 +391,8 @@ returns table (company_id uuid, company_name text, omie_product_id text, locatio
   window_revenue numeric, window_share numeric, product_qty numeric, last_sale date,
   days_without_sale integer, last_entry date, last_entry_operation text, first_entry date,
   registered_at date, is_new boolean, incomplete_reason text, elsewhere_company text,
-  elsewhere_last_sale date, curves_as_of date, sales_from date, window_start date, arrived_on date)
+  elsewhere_last_sale date, curves_as_of date, sales_from date, window_start date, arrived_on date,
+  idle_since date)
 language sql stable security definer set search_path = pg_catalog, public, pg_temp as $$
   with base as (
     select sp.*, c.name as company_name, r.finished_at as read_at, r.locations,
@@ -441,14 +442,22 @@ language sql stable security definer set search_path = pg_catalog, public, pg_te
          when x.auto_curve is not null or (x.as_of is not null and x.total_qty > 0) then 'auto' end,
     x.manual_reason, x.manual_at, x.manual_by,
     case when x.as_of is not null then coalesce(x.auto_revenue, 0) end, x.auto_share, x.total_qty,
-    x.f_last_sale, case when x.f_last_sale is not null then (x.as_of - x.f_last_sale)::integer end,
+    x.f_last_sale,
+    -- Tempo sem venda: da última venda; quem nunca vendeu no histórico conta da chegada do produto ou
+    -- do início do histórico, o que vier depois (produto novo não aparece como parado há meses).
+    case when x.as_of is null then null
+         when x.f_last_sale is not null then (x.as_of - x.f_last_sale)::integer
+         when x.sales_from is null then null
+         else (x.as_of - greatest(x.sales_from, coalesce(x.f_arrived, x.sales_from)) + 1)::integer end,
     x.f_last_entry, x.f_last_op, x.f_first_entry, x.f_registered, x.fresh,
     -- Sem venda na janela, mas sem histórico para afirmar isso: vendas do BIOMIE começam depois do
     -- início da janela ('sales') ou o produto chegou/foi cadastrado depois dele ('product').
     case when x.as_of is null or x.auto_curve is not null or x.fresh then null
          when x.sales_from is null or x.win_start < x.sales_from then 'sales'
          when x.f_arrived > x.win_start then 'product' end,
-    x.f_elsewhere, x.f_elsewhere_sale, x.as_of, x.sales_from, x.win_start, x.f_arrived
+    x.f_elsewhere, x.f_elsewhere_sale, x.as_of, x.sales_from, x.win_start, x.f_arrived,
+    case when x.f_last_sale is not null then x.f_last_sale
+         when x.sales_from is not null then greatest(x.sales_from, coalesce(x.f_arrived, x.sales_from)) end
   from x
 $$;
 
@@ -493,7 +502,8 @@ begin
       sum(x.physical_qty) as qty, sum(x.physical_qty * x.unit_cost) as value,
       bool_or(x.is_new) as is_new, min(x.incomplete_reason) as incomplete_reason,
       bool_or(x.elsewhere_company is not null) as elsewhere,
-      min(x.last_sale) as last_sale, min(x.curves_as_of) as as_of, min(x.sales_from) as sales_from
+      min(x.last_sale) as last_sale, min(x.curves_as_of) as as_of, min(x.sales_from) as sales_from,
+      min(x.days_without_sale) as idle_days, min(x.arrived_on) as arrived_on
     from x group by x.company_id, x.omie_product_id),
   d as (
     select count(*)::integer as products, coalesce(sum(pr.value), 0) as value,
@@ -508,10 +518,8 @@ begin
     from pr where pr.curve = 'D' and pr.qty > 0),
   -- Tempo sem venda (independente da janela): só produtos com saldo positivo e curva calculada.
   ag as (
-    select pr.*,
-      coalesce(pr.as_of - pr.last_sale, pr.as_of - pr.sales_from + 1) as days,
-      pr.last_sale is null as never
-    from pr where pr.qty > 0 and pr.as_of is not null),
+    select pr.*, pr.idle_days as days, pr.last_sale is null as never
+    from pr where pr.qty > 0 and pr.as_of is not null and pr.idle_days is not null),
   agb as (
     select case when ag.days >= 365 then '365' when ag.days >= 180 then '180'
                 when ag.days >= 90 then '90' when ag.days >= 30 then '30' end as band, ag.*
@@ -598,9 +606,11 @@ begin
       left join (
         select agb.band, count(*)::integer as products, sum(agb.value) as value,
           count(*) filter (where agb.is_new)::integer as new_products,
-          -- Nunca vendeu no histórico disponível, mais curto que 12 meses: o tempo real sem venda
-          -- pode ser maior do que o histórico mostra.
-          count(*) filter (where not agb.is_new and agb.never and agb.days < 365)::integer as incomplete_products
+          -- Nunca vendeu e já estava no estoque antes do histórico começar (mais curto que 12 meses):
+          -- o tempo real sem venda pode ser maior do que o histórico mostra.
+          count(*) filter (where not agb.is_new and agb.never and agb.days < 365
+                           and (agb.arrived_on is null or agb.arrived_on < agb.sales_from))::integer
+            as incomplete_products
         from agb where agb.band is not null group by agb.band) a on a.band = k.band),
     'byCompany', coalesce((select jsonb_agg(jsonb_build_object('companyId', co.company_id,
         'companyName', co.company_name, 'positions', co.positions,
@@ -672,7 +682,7 @@ begin
       and (not v_confirmed or (r.product_qty > 0 and r.curves_as_of is not null and r.window_revenue = 0
            and not r.is_new and r.incomplete_reason is null))
       and (v_min_days is null or (r.product_qty > 0 and r.curves_as_of is not null
-           and (r.last_sale is null or r.days_without_sale >= v_min_days)))
+           and r.days_without_sale >= v_min_days))
       and (v_product is null or r.product_id::text = v_product)),
   -- Visão por produto: todos os locais somados (a curva é do produto na empresa).
   g as (
@@ -693,7 +703,7 @@ begin
       min(x.first_entry) as first_entry, min(x.registered_at) as registered_at, min(x.arrived_on) as arrived_on,
       bool_or(x.is_new) as is_new, min(x.incomplete_reason) as incomplete_reason,
       min(x.elsewhere_company) as elsewhere_company, min(x.elsewhere_last_sale) as elsewhere_last_sale,
-      min(x.sales_from) as sales_from
+      min(x.sales_from) as sales_from, min(x.idle_since) as idle_since
     from x
     group by x.company_id, x.omie_product_id, x.loc_key),
   o as (
@@ -726,6 +736,7 @@ begin
       'windowRevenue', case when v_cost then o.window_revenue end,
       'windowShare', case when v_cost then o.window_share end,
       'lastSale', o.last_sale, 'daysWithoutSale', o.days_without_sale, 'salesFrom', o.sales_from,
+      'idleSince', o.idle_since,
       'lastEntry', o.last_entry, 'lastEntryOperation', o.last_entry_operation, 'firstEntry', o.first_entry,
       'registeredAt', o.registered_at, 'arrivedOn', o.arrived_on, 'isNew', o.is_new,
       'incompleteHistory', o.incomplete_reason,
