@@ -56,7 +56,7 @@ begin
   exception when others then if sqlerrm not like '%Somente o Super admin%' then raise; end if; end;
   if has_function_privilege('authenticated', 'public.stock_worker_claim()', 'EXECUTE')
      or has_function_privilege('authenticated', 'public.stock_worker_finish(uuid)', 'EXECUTE')
-     or has_function_privilege('authenticated', 'stock_internal.current_rows(uuid[])', 'EXECUTE')
+     or has_function_privilege('authenticated', 'stock_internal.current_rows(uuid[], text)', 'EXECUTE')
      or has_function_privilege('authenticated', 'stock_internal.caps()', 'EXECUTE') then
     raise exception 'FALHOU: função interna do Estoque executável pela API';
   end if;

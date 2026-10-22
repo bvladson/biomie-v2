@@ -653,7 +653,8 @@ begin
   end if;
 
   with x as (
-    select r.*, r.physical_qty * r.unit_cost as cost_value
+    select r.*, r.physical_qty * r.unit_cost as cost_value,
+      case when v_view = 'product' then '*' else r.location_code end as loc_key
     from stock_internal.current_rows(v_scope, v_window) r
     where (v_search is null or strpos(stock_internal.fold(r.name || ' ' || r.sku), v_search) > 0)
       and (v_curve = 'all' or r.curve = v_curve)
@@ -671,12 +672,10 @@ begin
       and (v_product is null or r.product_id::text = v_product)),
   -- Visão por produto: todos os locais somados (a curva é do produto na empresa).
   g as (
-    select
-      case when v_view = 'product' then x.company_id::text || ':' || x.omie_product_id || ':*'
-           else x.company_id::text || ':' || x.omie_product_id || ':' || x.location_code end as id,
+    select x.company_id::text || ':' || x.omie_product_id || ':' || x.loc_key as id,
       x.company_id, min(x.company_name) as company_name, min(x.product_id::text) as product_id,
       x.omie_product_id, min(x.sku) as sku, min(x.name) as name, min(x.family) as family,
-      case when v_view = 'product' then '*' else min(x.location_code) end as location_code,
+      x.loc_key as location_code,
       case when v_view = 'product' then null else min(x.location_name) end as location_name,
       count(*)::integer as locations, min(x.curve) as curve, min(x.curve_source) as curve_source,
       min(x.curve_reason) as curve_reason, min(x.curve_set_at) as curve_set_at, min(x.curve_set_by) as curve_set_by,
@@ -692,7 +691,7 @@ begin
       min(x.elsewhere_company) as elsewhere_company, min(x.elsewhere_last_sale) as elsewhere_last_sale,
       min(x.sales_from) as sales_from
     from x
-    group by x.company_id, x.omie_product_id, case when v_view = 'product' then '*' else x.location_code end),
+    group by x.company_id, x.omie_product_id, x.loc_key),
   o as (
     select g.*, count(*) over () as total_count,
       row_number() over (order by
