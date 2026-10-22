@@ -7,6 +7,8 @@
     python ops/29_smoke.py --stock [--stock-mode off|pilot|on]
                                         # Estoque: telas, empresas, card no produto, celular,
                                         # menu por liberação e vendedor sem custo
+    ... --hml                           # na HOMOLOGAÇÃO (41_homolog.py): túnel local 3150, contas
+                                        # criadas e apagadas só lá; a produção não é tocada
 
 Passwords are generated in memory, sent to the VPS over the SSH stdin and to the
 browser through the environment; they are never printed or written. The accounts
@@ -33,11 +35,17 @@ REMOTE = r'''
 import json, subprocess, sys, urllib.request, urllib.error
 req = json.loads(sys.stdin.read())
 B = '/opt/biomie-v2'
+HML = req.get('hml', False)
 env = dict(l.split('=', 1) for l in open(B + '/shared/stack.env').read().splitlines() if '=' in l)
-H = {'Authorization': 'Bearer ' + env['SERVICE_ROLE_KEY'], 'apikey': env['SERVICE_ROLE_KEY'], 'Content-Type': 'application/json'}
-C = ['docker', 'compose', '--env-file', B + '/shared/stack.env', '-f', B + '/compose.yml', 'exec', '-T', 'db', 'psql', '-X', '-U', 'postgres', '-d', 'biomie_v2', '-At', '-v', 'ON_ERROR_STOP=1']
+if HML:
+    env.update(dict(l.split('=', 1) for l in open(B + '/hml/hml.env').read().splitlines() if '=' in l))
+KEY = env['HML_SERVICE_KEY'] if HML else env['SERVICE_ROLE_KEY']
+AUTH = 'http://127.0.0.1:3151/auth/v1' if HML else 'http://127.0.0.1:3141/auth/v1'
+DBNAME = 'biomie_v2_hml' if HML else 'biomie_v2'
+H = {'Authorization': 'Bearer ' + KEY, 'apikey': KEY, 'Content-Type': 'application/json'}
+C = ['docker', 'compose', '--env-file', B + '/shared/stack.env', '-f', B + '/compose.yml', 'exec', '-T', 'db', 'psql', '-X', '-U', 'postgres', '-d', DBNAME, '-At', '-v', 'ON_ERROR_STOP=1']
 def http(method, path, body=None):
-    r = urllib.request.Request('http://127.0.0.1:3141/auth/v1' + path, method=method, headers=H,
+    r = urllib.request.Request(AUTH + path, method=method, headers=H,
                                data=json.dumps(body).encode() if body is not None else None)
     try:
         with urllib.request.urlopen(r, timeout=30) as resp: return resp.status, json.loads(resp.read() or b'{}')
@@ -93,6 +101,9 @@ def remote(payload):
 
 
 stamp = time.strftime('%Y%m%d%H%M%S')
+# --hml: homologação (41_homolog.py). O navegador abre http://127.0.0.1:3150 por um túnel com a MESMA
+# porta local (o endereço da API está embutido no pacote do navegador da homologação).
+HML_MODE = '--hml' in sys.argv
 ADMIN_MODE = '--admin' in sys.argv  # Admin 2.0 end-to-end (ops/browser/admin-smoke.cjs)
 # --stock [--stock-mode off|pilot|on]: Estoque (0041) com Super admin, Gestor e Vendedor da MAG Filial.
 STOCK_MODE = '--stock' in sys.argv
@@ -122,10 +133,10 @@ accounts = [
 report = {}
 tunnel = None
 try:
-    report['create'] = remote({'action': 'create', 'accounts': accounts})
+    report['create'] = remote({'action': 'create', 'accounts': accounts, 'hml': HML_MODE})
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
            'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp,
-           'BIOMIE_STOCK_MODE': STOCK_EXPECTED}
+           'BIOMIE_STOCK_MODE': STOCK_EXPECTED, 'BIOMIE_STOCK_CURVES': '1' if '--curves' in sys.argv else '0'}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
@@ -133,7 +144,17 @@ try:
     port = sys.argv[sys.argv.index('--upstream-port') + 1] if '--upstream-port' in sys.argv else '3130'
     if not port.isdigit():
         raise SystemExit('invalid --upstream-port')
-    if '--pre-cutover' in sys.argv:
+    if HML_MODE:
+        with socket.socket() as s:
+            if s.connect_ex(('127.0.0.1', 3150)) == 0:
+                raise SystemExit('porta local 3150 ocupada: feche o outro túnel da homologação')
+        tunnel = subprocess.Popen(SSH[:-1] + ['-N', '-o', 'ExitOnForwardFailure=yes',
+                                              '-L', '3150:127.0.0.1:3150', SSH[-1]])
+        time.sleep(4)
+        if tunnel.poll() is not None:
+            raise SystemExit(f'túnel para a homologação falhou (exit {tunnel.returncode})')
+        env['BIOMIE_TEST_URL'] = 'http://127.0.0.1:3150'
+    elif '--pre-cutover' in sys.argv:
         # Free local port + ExitOnForwardFailure: never ride on a stale tunnel to another web.
         with socket.socket() as s:
             s.bind(('127.0.0.1', 0))
@@ -148,7 +169,8 @@ try:
         with urllib.request.urlopen(f'http://127.0.0.1:{local}/auth', timeout=30) as r:
             found = re.search(r'/assets/styles-[A-Za-z0-9_-]+[.]css', r.read().decode('utf-8', 'replace'))
         report['upstream_styles'] = found.group(0) if found else None
-    report['mode'] = f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site'
+    report['mode'] = ('homologação (127.0.0.1:3150 via túnel)' if HML_MODE else
+                      f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site')
     (BASE / 'ops' / 'logs').mkdir(exist_ok=True)
     script = 'stock-smoke.cjs' if STOCK_MODE else 'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs'
     p = subprocess.run(['node', str(BASE / 'ops/browser' / script)], cwd=BASE / 'ops/browser', env=env,
@@ -162,5 +184,5 @@ try:
 finally:
     if tunnel:
         tunnel.terminate()
-    report['cleanup'] = remote({'action': 'delete'})
+    report['cleanup'] = remote({'action': 'delete', 'hml': HML_MODE})
 print(json.dumps(report, indent=1, ensure_ascii=False))

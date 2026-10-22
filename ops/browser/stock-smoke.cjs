@@ -9,6 +9,16 @@ const { chromium } = require('playwright');
 const base = process.env.BIOMIE_TEST_URL || 'https://biomie.magmoveiscorporativos.com.br';
 const accounts = JSON.parse(process.env.BIOMIE_SMOKE_ACCOUNTS || '[]');
 const mode = process.env.BIOMIE_STOCK_MODE || 'off';
+// BIOMIE_STOCK_CURVES=1 (29_smoke.py --curves): passos da curva automática (migração 0043).
+const curves = process.env.BIOMIE_STOCK_CURVES === '1';
+const shotsDir = process.env.BIOMIE_SMOKE_SHOTS;
+const shotPrefix = process.env.BIOMIE_SMOKE_SHOT_PREFIX;
+async function shot(page, name) {
+  if (!shotsDir || !shotPrefix) return null;
+  const file = require('node:path').join(shotsDir, `${shotPrefix}-${name}.png`);
+  await page.screenshot({ path: file, fullPage: true });
+  return file;
+}
 const account = (label) => accounts.find((a) => a.label === label);
 const redact = (text) => String(text)
   .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, 'Bearer [redacted]')
@@ -89,6 +99,55 @@ async function screen(page, path, heading) {
       await sup.page.locator('table tbody tr td').first().click({ timeout: 45000 });
       await sup.page.getByRole('heading', { name: 'Estoque por local' }).waitFor({ timeout: 45000 });
     });
+    if (curves) {
+      await step('super: janela da curva', async () => {
+        await sup.page.goto(base + '/estoque');
+        await sup.page.getByText(/Distribuição por curva/).first().waitFor({ timeout: 45000 });
+        await sup.page.getByRole('radio', { name: '90 dias' }).click();
+        await sup.page.getByText('Distribuição por curva · 90 dias').waitFor({ timeout: 45000 });
+        await sup.page.getByRole('radio', { name: '12 meses' }).click();
+        await sup.page.getByText('Distribuição por curva · 12 meses').waitFor({ timeout: 45000 });
+        const info = await sup.page.getByText(/Curva automática de 12 meses/).first().innerText();
+        return { info: info.slice(0, 200), shot: await shot(sup.page, 'visao-geral-12m') };
+      });
+      await step('super: curva D aberta e tempo sem venda', async () => {
+        await sup.page.getByRole('heading', { name: /Curva D aberta/ }).waitFor({ timeout: 45000 });
+        await sup.page.getByRole('heading', { name: /Tempo sem venda/ }).waitFor({ timeout: 45000 });
+        const heading = await sup.page.getByRole('heading', { name: /Curva D aberta/ }).innerText();
+        await sup.page.getByRole('link', { name: /Histórico incompleto/ }).first().click();
+        await sup.page.waitForURL(/\/estoque\/posicoes/, { timeout: 45000 });
+        await sup.page.getByRole('columnheader', { name: 'Indicadores' }).waitFor({ timeout: 45000 });
+        await sup.page.getByText(/produtos · página/).waitFor({ timeout: 45000 });
+        return { heading, url: new URL(sup.page.url()).search, shot: await shot(sup.page, 'curva-d-historico-incompleto') };
+      });
+      await step('super: curva manual com justificativa e volta para a automática', async () => {
+        await sup.page.goto(base + '/estoque/posicoes?curve=%22D%22&view=%22product%22');
+        await sup.page.getByText(/produtos · página/).waitFor({ timeout: 45000 });
+        const first = sup.page.locator('table tbody tr').first();
+        const name = (await first.locator('td').nth(1).innerText()).split('\n')[0];
+        await first.getByRole('checkbox').click();
+        await sup.page.getByRole('button', { name: /Classificar 1 selecionada/ }).click();
+        await sup.page.getByRole('combobox', { name: 'Nova curva' }).click();
+        await sup.page.getByRole('option', { name: 'Curva A (manual)' }).click();
+        const confirm = sup.page.getByRole('button', { name: 'Confirmar classificação' });
+        if (await confirm.isEnabled()) throw new Error('confirmou curva manual sem justificativa');
+        await sup.page.getByLabel('Justificativa da curva').fill('Teste automático da homologação');
+        const dialogShot = await shot(sup.page, 'classificar-com-justificativa');
+        await confirm.click();
+        await sup.page.getByText(/com curva manual A/).first().waitFor({ timeout: 45000 });
+        await sup.page.goto(base + '/estoque/posicoes?onlyManual=true&view=%22product%22');
+        await sup.page.getByText(/Manual · /).first().waitFor({ timeout: 45000 });
+        const manualShot = await shot(sup.page, 'curva-manual');
+        const row = sup.page.locator('table tbody tr').first();
+        await row.getByRole('checkbox').click();
+        await sup.page.getByRole('button', { name: /Classificar 1 selecionada/ }).click();
+        await sup.page.getByRole('combobox', { name: 'Nova curva' }).click();
+        await sup.page.getByRole('option', { name: 'Automática (voltar ao cálculo)' }).click();
+        await sup.page.getByRole('button', { name: 'Confirmar classificação' }).click();
+        await sup.page.getByText(/voltaram para a curva automática/).first().waitFor({ timeout: 45000 });
+        return { product: name.slice(0, 80), shots: [dialogShot, manualShot] };
+      });
+    }
     const mobile = await open(browser, 390);
     await step('super: celular sem rolagem lateral', async () => {
       await login(mobile.page, 'super');
@@ -126,6 +185,8 @@ async function screen(page, path, heading) {
       await ven.page.getByText(/Posições de estoque|A primeira leitura/).first().waitFor({ timeout: 45000 });
       if (await ven.page.getByRole('columnheader', { name: 'CMC' }).count())
         throw new Error('vendedor viu a coluna CMC');
+      if (curves && (await ven.page.getByRole('columnheader', { name: /Faturamento/ }).count()))
+        throw new Error('vendedor viu o faturamento da curva');
       return { mode };
     });
   } finally {
