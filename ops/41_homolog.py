@@ -5,6 +5,9 @@
     python ops/remote.py ops/41_homolog.py status
     python ops/remote.py ops/41_homolog.py down                     # para os contêineres (a cópia fica)
     python ops/remote.py ops/41_homolog.py drop                     # apaga contêineres, cópia, chaves e imagem
+    python ops/remote.py ops/41_homolog.py movements-probe <empresa-slug> [dias]   # 1 página do Omie, nada gravado
+    python ops/remote.py ops/41_homolog.py movements-load [minutos]   # processa a fila de movimentações
+                                                                      # da cópia (só LÊ o Omie)
 
 Para olhar no navegador: túnel SSH local 3150 -> 127.0.0.1:3150 (29_smoke.py --hml já faz isso).
 
@@ -349,6 +352,29 @@ def up(short):
             'containers': containers(), 'seconds': round(time.time() - started)}
 
 
+def oneoff(args, timeout):
+    """Contêiner avulso da imagem da homologação, na rede dela, com as chaves dela e a chave das
+    credenciais do Omie (para LER o Omie); o arquivo de ambiente é apagado em seguida."""
+    image = run(['docker', 'inspect', f'{PROJECT}-hml-web-1', '--format', '{{.Config.Image}}'])
+    stack, env = read_env(STACK_ENV), read_env(HML_ENV)
+    values = {'SUPABASE_URL': 'http://hml-gateway:8000', 'SUPABASE_SERVICE_ROLE_KEY': env['HML_SERVICE_KEY'],
+              'SUPABASE_PUBLISHABLE_KEY': env['HML_ANON_KEY'],
+              'BIOMIE_CREDENTIALS_KEY': stack.get('BIOMIE_CREDENTIALS_KEY', ''),
+              'APP_ENV': 'production', 'BIOMIE_PROCESS_ROLE': 'worker', 'OMIE_GLOBAL_PER_MINUTE': '30',
+              'OMIE_KEY_METHOD_PER_MINUTE': '10', 'OMIE_MAX_CONCURRENT': '1', 'OMIE_CIRCUIT_OPEN_MS': '1800000'}
+    env_file = HML / 'oneoff.env'
+    write_private(env_file, ''.join(f'{k}={v}' + chr(10) for k, v in values.items()))
+    try:
+        p = subprocess.run(['docker', 'run', '--rm', '--network', f'{PROJECT}_hml', '--env-file', str(env_file),
+                            image, 'node'] + args, capture_output=True, text=True, timeout=timeout)
+    finally:
+        env_file.unlink(missing_ok=True)
+    out = p.stdout[-30000:]
+    for value in secret_values():
+        out = out.replace(value, '[REDACTED]')
+    return {'exit': p.returncode, 'stdout': out, 'stderr': p.stderr[-1500:]}
+
+
 def down():
     if (HML / 'compose.yml').exists() and COMPOSE_ENV.exists():
         run(HML_COMPOSE + ['down', '--remove-orphans'], check=False)
@@ -399,6 +425,15 @@ elif command == 'drop':
     out = drop()
 elif command == 'status':
     out = status()
+elif command == 'movements-probe':
+    if len(sys.argv) < 3:
+        raise SystemExit('uso: movements-probe <empresa-slug> [dias]')
+    out = oneoff(['.output/stock-movements-probe.mjs', sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else '30'], 300)
+elif command == 'movements-load':
+    minutes = sys.argv[2] if len(sys.argv) > 2 else '90'
+    if not minutes.isdigit():
+        raise SystemExit('minutos: número inteiro')
+    out = oneoff(['.output/stock-movements-load.mjs', f'--minutes={minutes}'], int(minutes) * 60 + 600)
 else:
     raise SystemExit(__doc__)
 print(json.dumps(out, indent=1, ensure_ascii=False, default=str))

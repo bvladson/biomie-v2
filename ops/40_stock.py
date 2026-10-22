@@ -20,6 +20,8 @@
     python ops/remote.py ops/40_stock.py movements-status          # blocos, cobertura e registros
     python ops/remote.py ops/40_stock.py movements-probe <empresa-slug> [dias]
                                                                    # 1 página do Omie, nada gravado
+    python ops/remote.py ops/40_stock.py movements-backfill <empresa-slug> [dias]
+                                                                   # carga (re)feita em blocos de 31 dias
 
 Ordem da ativação (runbook, seção 12): release com a 0041 -> probe em cada empresa -> reading on
 -> validate (bate com o Omie?) -> mode pilot -> teste no navegador -> mode on. Retorno: mode off
@@ -302,6 +304,29 @@ select json_build_object(
       'lastError', (select error from private.stock_movement_jobs where company_id = c.id and error is not null
                     order by coalesce(finished_at, created_at) desc limit 1)) order by c.name), '[]')
     from public.companies c where not c.is_demo));"""), indent=1, ensure_ascii=False, default=str))
+elif command == 'movements-backfill':
+    slug = slug_arg()
+    days = sys.argv[3] if len(sys.argv) > 3 else '365'
+    if not days.isdigit() or not 30 <= int(days) <= 730:
+        raise SystemExit('dias: de 30 a 730')
+    print(json.dumps(psql(f"""
+with c as (select id from public.companies where slug = '{slug}' and not is_demo),
+s as (select movements_chunk_days as chunk from private.stock_settings),
+busy as (select 1 from private.stock_movement_jobs j join c on j.company_id = c.id
+         where j.status in ('queued', 'running')),
+y as (select (now() at time zone 'America/Fortaleza')::date - 1 as yesterday),
+ins as (insert into private.stock_movement_jobs (company_id, trigger, period_from, period_to)
+        select c.id, 'backfill', g::date, least(g::date + s.chunk - 1, y.yesterday)
+        from c, s, y, generate_series(y.yesterday - {days} + 1, y.yesterday, make_interval(days => s.chunk)) g
+        where not exists (select 1 from busy)
+        returning id),
+a as (insert into public.audit_log (actor_id, action, entity, entity_id, payload)
+      select null, 'stock.movements.backfill', 'stock', c.id::text,
+             jsonb_build_object('dias', {days}, 'blocos', (select count(*) from ins), 'origem', 'ops')
+      from c where exists (select 1 from ins))
+select json_build_object('company', '{slug}', 'found', exists (select 1 from c),
+  'chunks', (select count(*) from ins), 'alreadyInQueue', exists (select 1 from busy));""", write=True),
+        indent=1))
 elif command == 'movements-probe':
     slug = slug_arg()
     days = sys.argv[3] if len(sys.argv) > 3 else '30'
