@@ -11,7 +11,13 @@ import {
   toMovementRow,
   toStockRow,
 } from "./stock-adapter";
-import { runStockStep, type StockPageReader, type StockStepDeps } from "./stock.server";
+import {
+  failureDetail,
+  runStockStep,
+  safeStockMessage,
+  type StockPageReader,
+  type StockStepDeps,
+} from "./stock.server";
 import { runStockMovementsStep } from "./stock-movements.server";
 
 describe("stock adapter (ListarPosEstoque)", () => {
@@ -604,5 +610,30 @@ describe("curve recalculation after a published reading", () => {
       name: "stock_worker_curve_failed",
       args: { p_company: "c1" },
     });
+  });
+});
+
+describe("failure messages (database and logs)", () => {
+  const creds = { appKey: "123456", appSecret: "segredo-super-secreto" };
+
+  it("keeps the module's own storage messages and hides anything unexpected", () => {
+    expect(safeStockMessage(new Error("Falha ao gravar as movimentações do estoque."))).toBe(
+      "Falha ao gravar as movimentações do estoque.",
+    );
+    expect(safeStockMessage(new Error("connect ECONNREFUSED 10.0.0.5:5432"))).toBe(
+      "Falha inesperada na leitura do estoque.",
+    );
+  });
+
+  it("logs the technical detail of unexpected failures without credentials", () => {
+    expect(
+      failureDetail(new OmieError("network", "Falha de rede ao chamar o Omie.", true)),
+    ).toBeNull();
+    const detail = failureDetail(
+      new Error("PGRST003 Timed out acquiring connection; app_secret segredo-super-secreto"),
+      creds,
+    );
+    expect(detail).toContain("PGRST003");
+    expect(detail).not.toContain("segredo-super-secreto");
   });
 });

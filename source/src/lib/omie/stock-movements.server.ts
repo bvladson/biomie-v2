@@ -18,6 +18,7 @@ import {
 import {
   refreshCurves,
   safeStockMessage,
+  failureDetail,
   type StockStepDeps,
   type StockStepResult,
 } from "./stock.server";
@@ -124,6 +125,7 @@ export async function runStockMovementsStep(
       job: claim.id,
       final,
       message,
+      detail: failureDetail(failure, credentials),
       recorded: !failError,
     });
     return { jobId: claim.id, status: final ? "FAILED" : "RETRY", done: final };

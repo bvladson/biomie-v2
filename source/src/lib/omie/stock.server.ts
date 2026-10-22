@@ -180,7 +180,17 @@ function isFinal(error: unknown): boolean {
 export function safeStockMessage(error: unknown, credentials?: OmieCredentials): string {
   if (error instanceof OmieError || error instanceof StockRecordError)
     return redact(error.message, credentials).slice(0, 300);
+  // Mensagens escritas por este módulo (gravação, fila) não carregam dados sensíveis.
+  if (error instanceof Error && /^Falha ao (gravar|concluir|consultar) /.test(error.message))
+    return error.message.slice(0, 300);
   return "Falha inesperada na leitura do estoque.";
+}
+
+/** Motivo técnico para o log (nunca vai para o banco nem para a tela), sem credenciais. */
+export function failureDetail(error: unknown, credentials?: OmieCredentials): string | null {
+  if (error instanceof OmieError || error instanceof StockRecordError) return null;
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return redact(raw, credentials).slice(0, 200);
 }
 
 /**
@@ -295,7 +305,14 @@ export async function runStockStep(
       p_retry_after_seconds: retryAfterSeconds(failure),
       p_final: final,
     });
-    deps.log({ event: "stock_failed", reading: claim.id, final, message, recorded: !failError });
+    deps.log({
+      event: "stock_failed",
+      reading: claim.id,
+      final,
+      message,
+      detail: failureDetail(failure, credentials),
+      recorded: !failError,
+    });
     return { jobId: claim.id, status: final ? "FAILED" : "RETRY", done: final };
   } finally {
     await release();
