@@ -60,7 +60,7 @@ begin
      or has_function_privilege('authenticated', 'stock_internal.caps()', 'EXECUTE') then
     raise exception 'FALHOU: função interna do Estoque executável pela API';
   end if;
-  if has_function_privilege('anon', 'public.stock_overview(text)', 'EXECUTE')
+  if has_function_privilege('anon', 'public.stock_overview(text, text)', 'EXECUTE')
      or has_function_privilege('anon', 'public.my_features()', 'EXECUTE') then
     raise exception 'FALHOU: visitante sem sessão executa função do Estoque';
   end if;
@@ -298,23 +298,26 @@ set local role authenticated;
 do $$
 declare v jsonb;
 begin
-  v := public.stock_set_curve(array[current_setting('stk.ca') || ':101:1'], 'A');
+  begin perform public.stock_set_curve(array[current_setting('stk.ca') || ':101:1'], 'A');
+    raise exception 'FALHOU: curva manual sem justificativa aceita';
+  exception when others then if sqlerrm not like '%Informe a justificativa%' then raise; end if; end;
+  v := public.stock_set_curve(array[current_setting('stk.ca') || ':101:1'], 'A', 'Teste automático: curva manual');
   if (v->>'updated')::integer <> 2 then raise exception 'FALHOU: curva não valeu para os 2 locais: %', v; end if;
   if (public.stock_positions('{"companyId": "all", "page": 0, "curve": "A"}')->>'total')::integer <> 2 then
     raise exception 'FALHOU: posições da curva A';
   end if;
-  begin perform public.stock_set_curve(array[current_setting('stk.cb') || ':201:1'], 'A');
+  begin perform public.stock_set_curve(array[current_setting('stk.cb') || ':201:1'], 'A', 'Teste automático: curva manual');
     raise exception 'FALHOU: classificou produto de empresa sem acesso';
   exception when others then if sqlerrm not like '%Selecione posições válidas%' then raise; end if; end;
-  begin perform public.stock_set_curve(array['lixo'], 'A'); raise exception 'FALHOU: id inválido aceito';
+  begin perform public.stock_set_curve(array['lixo'], 'A', 'Teste automático: curva manual'); raise exception 'FALHOU: id inválido aceito';
   exception when others then if sqlerrm not like '%Selecione posições válidas%' then raise; end if; end;
-  begin perform public.stock_set_curve(array[current_setting('stk.ca') || ':999:1'], 'A');
+  begin perform public.stock_set_curve(array[current_setting('stk.ca') || ':999:1'], 'A', 'Teste automático: curva manual');
     raise exception 'FALHOU: posição inexistente aceita';
   exception when others then if sqlerrm not like '%Selecione posições válidas%' then raise; end if; end;
   begin perform public.stock_set_curve(array[current_setting('stk.ca') || ':101:1'], 'X');
     raise exception 'FALHOU: curva X aceita';
   exception when others then if sqlerrm not like '%Selecione posições válidas%' then raise; end if; end;
-  v := public.stock_set_curve(array[current_setting('stk.ca') || ':102:1'], 'D');
+  v := public.stock_set_curve(array[current_setting('stk.ca') || ':102:1'], 'D', 'Teste automático: curva manual');
   if (v->>'updated')::integer <> 1 then raise exception 'FALHOU: curva D: %', v; end if;
   v := public.stock_set_curve(array[current_setting('stk.ca') || ':102:1'], 'U');
   if (public.stock_positions('{"companyId": "all", "page": 0, "curve": "U"}')->>'total')::integer <> 2 then
@@ -481,7 +484,7 @@ begin
     raise exception 'FALHOU: falha derrubou a posição ou não apareceu ao admin: %', v->'readings';
   end if;
   -- Curva antes da leitura nova.
-  perform public.stock_set_curve(array[current_setting('stk.ca') || ':103:1'], 'C');
+  perform public.stock_set_curve(array[current_setting('stk.ca') || ':103:1'], 'C', 'Teste automático: curva manual');
 end $$;
 reset role;
 
