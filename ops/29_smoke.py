@@ -4,6 +4,9 @@
     python ops/29_smoke.py --admin      # Admin 2.0 de ponta a ponta (Super admin, Admin da
                                         # MAG Filial e Vendedor): convite, senha temporária,
                                         # bloqueio, exclusão e as travas de cada perfil
+    python ops/29_smoke.py --stock [--stock-mode off|pilot|on]
+                                        # Estoque: telas, empresas, card no produto, celular,
+                                        # menu por liberação e vendedor sem custo
 
 Passwords are generated in memory, sent to the VPS over the SSH stdin and to the
 browser through the environment; they are never printed or written. The accounts
@@ -91,7 +94,19 @@ def remote(payload):
 
 stamp = time.strftime('%Y%m%d%H%M%S')
 ADMIN_MODE = '--admin' in sys.argv  # Admin 2.0 end-to-end (ops/browser/admin-smoke.cjs)
+# --stock [--stock-mode off|pilot|on]: Estoque (0041) com Super admin, Gestor e Vendedor da MAG Filial.
+STOCK_MODE = '--stock' in sys.argv
+STOCK_EXPECTED = sys.argv[sys.argv.index('--stock-mode') + 1] if '--stock-mode' in sys.argv else 'off'
+if STOCK_EXPECTED not in ('off', 'pilot', 'on'):
+    raise SystemExit('invalid --stock-mode')
 accounts = [
+    {'label': 'super', 'email': f'smoke-super-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'SUPER_ADMIN', 'fullName': 'Smoke Super'},
+    {'label': 'gestor', 'email': f'smoke-gestor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'GESTOR', 'fullName': 'Smoke Gestor', 'companies': ['mag-filial']},
+    {'label': 'vendor', 'email': f'smoke-vendor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'VENDEDOR', 'fullName': 'Smoke Vendor', 'companies': ['mag-filial']},
+] if STOCK_MODE else [
     {'label': 'super', 'email': f'smoke-super-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'SUPER_ADMIN', 'fullName': 'Smoke Super'},
     {'label': 'tenant', 'email': f'smoke-tenant-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
@@ -109,7 +124,8 @@ tunnel = None
 try:
     report['create'] = remote({'action': 'create', 'accounts': accounts})
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
-           'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp}
+           'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp,
+           'BIOMIE_STOCK_MODE': STOCK_EXPECTED}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
@@ -134,11 +150,11 @@ try:
         report['upstream_styles'] = found.group(0) if found else None
     report['mode'] = f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site'
     (BASE / 'ops' / 'logs').mkdir(exist_ok=True)
-    script = 'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs'
+    script = 'stock-smoke.cjs' if STOCK_MODE else 'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs'
     p = subprocess.run(['node', str(BASE / 'ops/browser' / script)], cwd=BASE / 'ops/browser', env=env,
                        capture_output=True, text=True, timeout=900)
     try:
-        start = p.stdout.index('{' if ADMIN_MODE else '[')
+        start = p.stdout.index('{' if ADMIN_MODE or STOCK_MODE else '[')
         report['browser'] = json.loads(redact(p.stdout[start:]))
     except ValueError:
         report['browser_error'] = redact((p.stderr or p.stdout)[-1500:])

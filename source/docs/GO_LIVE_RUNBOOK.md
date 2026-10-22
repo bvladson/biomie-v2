@@ -216,3 +216,38 @@ Branch `feature/admin-2`, migração `0040_admin_users` (somente acréscimos; `0
 - **Sessões:** encerrar sessões e bloquear removem a renovação na hora; o acesso já emitido vale até
   1 hora (`GOTRUE_JWT_EXP`). A tela avisa isso.
 
+
+## 12. Estoque (posição do Omie, curvas e simulação de liquidação)
+
+Branch `feature/estoque` (sobre a `feature/admin-2`), migração `0041_stock` (somente acréscimos).
+Telas do pacote do Lovable em `src/estoque`, ligadas ao servidor por `src/estoque/api/server-client.ts`;
+os dados de exemplo (`src/estoque/dev/mock-api.ts`) ficam só para os testes.
+
+- **Onde ficam as regras:** esquema `stock_internal` (SECURITY DEFINER, `search_path` fixo); a API só
+  enxerga `stock_*` e `my_features` (SECURITY INVOKER). Custo (CMC) segue a regra do Financeiro, curva
+  com quem decide compras, VIEWER sem acesso. Permissões extras no Admin 2.0: `stock.view_cost`,
+  `stock.classify`, `stock.export`. Curva, cenário, pedido de leitura e liberação vão para a Auditoria.
+- **Leitura:** só o worker chama o Omie (`ListarLocaisEstoque` + `ListarPosEstoque`, 100 por página,
+  até 20.000 posições por empresa). Agenda 07:40, 12:40 e 17:40 + fechamento 23:50 (histórico de
+  400 dias; leituras do dia saem quando chega a próxima). Só vira a posição exibida a leitura com
+  páginas e total conferidos; total que muda no meio, posição repetida ou parada de mais de 30 min
+  recomeçam do zero; bloqueio 425 espera 30 min; credencial recusada encerra sem tocar na posição
+  publicada. Uma falha do estoque nunca interrompe as cargas existentes.
+- **Estado depois da migração:** módulo `off` (menu escondido; o Super admin abre pela URL) e leitura
+  desligada. Nada chama o Omie até o passo 3.
+- **Padrões adotados para as decisões em aberto** (mudam só no banco, sem nova tela): curva por
+  produto na empresa; cenários por usuário (até 5); vendedor só com quantidades; leitura 3 vezes ao
+  dia mais o fechamento.
+- **Ativação (cada passo com o autorizo do responsável):**
+  1. Release com a `0041` (ativação normal; antes, `22_test_database` com `verify_stock.sql`).
+  2. `python ops/remote.py ops/40_stock.py probe <empresa>` nas 5 empresas: formato e conversão, nada
+     gravado.
+  3. `40_stock.py reading on` e esperar o próximo horário (ou `40_stock.py refresh <empresa>`);
+     `40_stock.py status` mostra o andamento.
+  4. `40_stock.py validate`: posições, unidades e total a custo por empresa e por local, e 20 produtos
+     fixos. **Portão:** bater com o relatório de posição de estoque do Omie na mesma data.
+  5. `29_smoke.py --stock` (modo off): telas pela URL como Super admin, card no Produto 360, celular.
+  6. `40_stock.py mode pilot` → `29_smoke.py --stock --stock-mode pilot` → `mode on` →
+     `29_smoke.py --stock --stock-mode on` (gestor com menu, vendedor sem custo nem simulação).
+- **Retorno:** `40_stock.py mode off` (o menu some; dados, curvas e cenários ficam) e, se preciso,
+  `reading off`. A release anterior funciona com a `0041` aplicada, porque ela só acrescenta objetos.
