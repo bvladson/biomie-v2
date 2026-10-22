@@ -79,7 +79,8 @@ create table if not exists private.stock_product_facts (
   last_entry date,
   last_entry_operation text,   -- 21 compra, 22 importação, 00 ajuste, 13 devolução de venda...
   last_entry_qty numeric,
-  last_exit date,
+  last_exit date,              -- última saída (venda, consumo da produção, remessa, ajuste...)
+  last_exit_operation text,
   elsewhere_company_id uuid,   -- mesma SKU vendida por outra empresa do grupo (12 meses)
   elsewhere_last_sale date,
   -- Chegada do produto: a primeira entrada só vale quando o histórico de movimentações lido começa
@@ -210,6 +211,22 @@ language sql stable security definer set search_path = pg_catalog, public, pg_te
   where (x->>'to')::date >= p_as_of - 3
 $$;
 
+-- Entradas que são chegada de mercadoria (22/10/2026, códigos reais do Omie): 00 ajuste manual,
+-- 13 devolução de venda, 21 compra, 22 importação, 24 retorno/nota de entrada, 28 entrada da ordem de
+-- produção. Ficam de fora 15 (conhecimento de transporte: frete, só custo), 26 (nota complementar)
+-- e as entradas de estorno (11 e 14 = cancelamento de venda e de remessa).
+create or replace function stock_internal.is_receipt(p_operation text) returns boolean
+language sql immutable set search_path = pg_catalog as $$
+  select coalesce(p_operation in ('00', '13', '21', '22', '24', '28'), false)
+$$;
+
+-- Saídas que mostram giro do produto: 00 ajuste manual, 11 e 12 venda, 14 remessa, 23 devolução ao
+-- fornecedor, 28 consumo da ordem de produção. Fora: 16 (nota complementar) e 24 (estorno de entrada).
+create or replace function stock_internal.is_exit(p_operation text) returns boolean
+language sql immutable set search_path = pg_catalog as $$
+  select coalesce(p_operation in ('00', '11', '12', '14', '23', '28'), false)
+$$;
+
 -- Início do histórico contínuo de movimentações lidas que chega à leitura mais recente (ou null).
 create or replace function stock_internal.movements_from(p_company uuid) returns date
 language sql stable security definer set search_path = pg_catalog, public, pg_temp as $$
@@ -323,10 +340,10 @@ begin
   v_movements_from := stock_internal.movements_from(p_company);
   delete from private.stock_product_facts f where f.company_id = p_company;
   insert into private.stock_product_facts (company_id, omie_product_id, registered_at, first_sale, last_sale,
-      first_entry, last_entry, last_entry_operation, last_entry_qty, last_exit, elsewhere_company_id,
-      elsewhere_last_sale, arrived_on)
+      first_entry, last_entry, last_entry_operation, last_entry_qty, last_exit, last_exit_operation,
+      elsewhere_company_id, elsewhere_last_sale, arrived_on)
   select p_company, sp.omie_product_id, reg.registered_at, sl.first_sale, sl.last_sale,
-    ent.first_entry, ent.last_entry, ent.last_operation, ent.last_qty, ex.last_exit,
+    ent.first_entry, ent.last_entry, ent.last_operation, ent.last_qty, ex.last_exit, ex.last_operation,
     other.company_id, other.last_sale,
     case when ent.first_entry is not null and v_movements_from is not null and reg.registered_at is not null
               and reg.registered_at >= v_movements_from then ent.first_entry
@@ -349,11 +366,13 @@ begin
       (array_agg(m.qty order by m.moved_on desc, m.movement_id desc))[1] as last_qty
     from private.stock_movements m
     where m.company_id = p_company and m.omie_product_id = sp.omie_product_id
-      and m.kind = 'entrada' and not m.canceled) ent on true
+      and m.kind = 'entrada' and not m.canceled and stock_internal.is_receipt(m.operation)) ent on true
   left join lateral (
-    select max(m.moved_on) as last_exit from private.stock_movements m
+    select max(m.moved_on) as last_exit,
+      (array_agg(m.operation order by m.moved_on desc, m.movement_id desc))[1] as last_operation
+    from private.stock_movements m
     where m.company_id = p_company and m.omie_product_id = sp.omie_product_id
-      and m.kind = 'saida' and not m.canceled) ex on true
+      and m.kind = 'saida' and not m.canceled and stock_internal.is_exit(m.operation)) ex on true
   left join lateral (
     select a.company_id, a.last_sale from private.stock_auto_curves a
     join public.companies oc on oc.id = a.company_id and not oc.is_demo
@@ -392,7 +411,7 @@ returns table (company_id uuid, company_name text, omie_product_id text, locatio
   days_without_sale integer, last_entry date, last_entry_operation text, first_entry date,
   registered_at date, is_new boolean, incomplete_reason text, elsewhere_company text,
   elsewhere_last_sale date, curves_as_of date, sales_from date, window_start date, arrived_on date,
-  idle_since date)
+  idle_since date, last_exit date, last_exit_operation text, recent_exit boolean)
 language sql stable security definer set search_path = pg_catalog, public, pg_temp as $$
   with base as (
     select sp.*, c.name as company_name, r.finished_at as read_at, r.locations,
@@ -415,6 +434,7 @@ language sql stable security definer set search_path = pg_catalog, public, pg_te
       f.last_sale as f_last_sale, f.last_entry as f_last_entry, f.last_entry_operation as f_last_op,
       f.first_entry as f_first_entry, f.registered_at as f_registered, ec.name as f_elsewhere,
       f.elsewhere_last_sale as f_elsewhere_sale, f.arrived_on as f_arrived,
+      f.last_exit as f_last_exit, f.last_exit_operation as f_last_exit_op,
       coalesce(f.arrived_on >= run.as_of - s.new_product_days, false) as fresh,
       p.id as p_id, coalesce(nullif(cp.family, ''), nullif(p.category, '')) as p_family
     from base b
@@ -457,7 +477,10 @@ language sql stable security definer set search_path = pg_catalog, public, pg_te
          when x.f_arrived > x.win_start then 'product' end,
     x.f_elsewhere, x.f_elsewhere_sale, x.as_of, x.sales_from, x.win_start, x.f_arrived,
     case when x.f_last_sale is not null then x.f_last_sale
-         when x.sales_from is not null then greatest(x.sales_from, coalesce(x.f_arrived, x.sales_from)) end
+         when x.sales_from is not null then greatest(x.sales_from, coalesce(x.f_arrived, x.sales_from)) end,
+    x.f_last_exit, x.f_last_exit_op,
+    -- Saída nos últimos 90 dias (consumo da produção, remessa, ajuste...): o produto gira mesmo sem venda.
+    coalesce(x.f_last_exit >= x.as_of - 89, false)
   from x
 $$;
 
@@ -501,7 +524,7 @@ begin
     select x.company_id, x.omie_product_id, min(x.curve) as curve, min(x.curve_source) as source,
       sum(x.physical_qty) as qty, sum(x.physical_qty * x.unit_cost) as value,
       bool_or(x.is_new) as is_new, min(x.incomplete_reason) as incomplete_reason,
-      bool_or(x.elsewhere_company is not null) as elsewhere,
+      bool_or(x.elsewhere_company is not null) as elsewhere, bool_or(x.recent_exit) as moving,
       min(x.last_sale) as last_sale, min(x.curves_as_of) as as_of, min(x.sales_from) as sales_from,
       min(x.days_without_sale) as idle_days, min(x.arrived_on) as arrived_on
     from x group by x.company_id, x.omie_product_id),
@@ -514,7 +537,9 @@ begin
       count(*) filter (where not pr.is_new and pr.incomplete_reason is null)::integer as confirmed_products,
       coalesce(sum(pr.value) filter (where not pr.is_new and pr.incomplete_reason is null), 0) as confirmed_value,
       count(*) filter (where pr.elsewhere)::integer as elsewhere_products,
-      coalesce(sum(pr.value) filter (where pr.elsewhere), 0) as elsewhere_value
+      coalesce(sum(pr.value) filter (where pr.elsewhere), 0) as elsewhere_value,
+      count(*) filter (where pr.moving)::integer as moving_products,
+      coalesce(sum(pr.value) filter (where pr.moving), 0) as moving_value
     from pr where pr.curve = 'D' and pr.qty > 0),
   -- Tempo sem venda (independente da janela): só produtos com saldo positivo e curva calculada.
   ag as (
@@ -597,7 +622,9 @@ begin
         'confirmedProducts', d.confirmed_products,
         'confirmedCostValue', case when v_cost then d.confirmed_value end,
         'elsewhereProducts', d.elsewhere_products,
-        'elsewhereCostValue', case when v_cost then d.elsewhere_value end) from d),
+        'elsewhereCostValue', case when v_cost then d.elsewhere_value end,
+        'movingProducts', d.moving_products,
+        'movingCostValue', case when v_cost then d.moving_value end) from d),
     'aging', (select jsonb_agg(jsonb_build_object('band', k.band, 'products', coalesce(a.products, 0),
         'costValue', case when v_cost then coalesce(a.value, 0) end,
         'newProducts', coalesce(a.new_products, 0), 'incompleteProducts', coalesce(a.incomplete_products, 0))
@@ -639,6 +666,7 @@ declare
   v_elsewhere boolean := coalesce((p_query->>'soldElsewhere')::boolean, false);
   v_manual boolean := coalesce((p_query->>'onlyManual')::boolean, false);
   v_confirmed boolean := coalesce((p_query->>'onlyConfirmed')::boolean, false);
+  v_moving boolean := coalesce((p_query->>'recentExit')::boolean, false);
   v_min_days integer := nullif(p_query->>'minDaysWithoutSale', '')::integer;
   v_product text := nullif(p_query->>'productId', '');
   v_sort text := coalesce(nullif(p_query->>'sortBy', ''), 'costValue');
@@ -678,6 +706,7 @@ begin
       and (not v_incomplete or r.incomplete_reason is not null)
       and (not v_elsewhere or r.elsewhere_company is not null)
       and (not v_manual or r.curve_source = 'manual')
+      and (not v_moving or r.recent_exit)
       -- Sem venda confirmada: sem venda na janela, com histórico suficiente e não é produto novo.
       and (not v_confirmed or (r.product_qty > 0 and r.curves_as_of is not null and r.window_revenue = 0
            and not r.is_new and r.incomplete_reason is null))
@@ -703,7 +732,9 @@ begin
       min(x.first_entry) as first_entry, min(x.registered_at) as registered_at, min(x.arrived_on) as arrived_on,
       bool_or(x.is_new) as is_new, min(x.incomplete_reason) as incomplete_reason,
       min(x.elsewhere_company) as elsewhere_company, min(x.elsewhere_last_sale) as elsewhere_last_sale,
-      min(x.sales_from) as sales_from, min(x.idle_since) as idle_since
+      min(x.sales_from) as sales_from, min(x.idle_since) as idle_since,
+      min(x.last_exit) as last_exit, min(x.last_exit_operation) as last_exit_operation,
+      bool_or(x.recent_exit) as recent_exit
     from x
     group by x.company_id, x.omie_product_id, x.loc_key),
   o as (
@@ -736,7 +767,8 @@ begin
       'windowRevenue', case when v_cost then o.window_revenue end,
       'windowShare', case when v_cost then o.window_share end,
       'lastSale', o.last_sale, 'daysWithoutSale', o.days_without_sale, 'salesFrom', o.sales_from,
-      'idleSince', o.idle_since,
+      'idleSince', o.idle_since, 'lastExit', o.last_exit, 'lastExitOperation', o.last_exit_operation,
+      'recentExit', o.recent_exit,
       'lastEntry', o.last_entry, 'lastEntryOperation', o.last_entry_operation, 'firstEntry', o.first_entry,
       'registeredAt', o.registered_at, 'arrivedOn', o.arrived_on, 'isNew', o.is_new,
       'incompleteHistory', o.incomplete_reason,

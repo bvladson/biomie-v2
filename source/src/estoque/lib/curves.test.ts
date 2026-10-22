@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StockPosition } from "../api/contract";
 import {
+  exitLabel,
   incompleteLabel,
   isCurveWindow,
   lastSaleText,
@@ -69,7 +70,9 @@ describe("curva automática na tela", () => {
 
   it("operações do Omie e participação em português", () => {
     expect(operationLabel("21")).toBe("Compra");
-    expect(operationLabel("00")).toBe("Ajuste de estoque");
+    expect(operationLabel("28")).toBe("Entrada da produção");
+    expect(exitLabel("28")).toBe("Consumo na produção");
+    expect(exitLabel("14")).toBe("Remessa");
     expect(operationLabel("99")).toBe("Operação 99");
     expect(percent(0.256)).toBe("25,6%");
   });
@@ -87,6 +90,9 @@ describe("curva automática na tela", () => {
       isNew: true,
       incompleteHistory: null,
       soldElsewhere: { companyName: "Expert", lastSale: "2026-10-01" },
+      lastExit: "2026-10-20",
+      lastExitOperation: "28",
+      recentExit: true,
     };
     const withCost = positionsCsv([row], true, "90d").split("\r\n");
     expect(withCost[0]).toContain("Curva (90 dias)");
@@ -94,6 +100,8 @@ describe("curva automática na tela", () => {
     expect(withCost[1]).toContain('"Manual"');
     expect(withCost[1]).toContain('"Produto estratégico"');
     expect(withCost[1]).toContain('"Expert (01/10/2026)"');
+    expect(withCost[0]).toContain("Última saída");
+    expect(withCost[1]).toContain('"Consumo na produção"');
     const noCost = positionsCsv([row], false).split("\r\n");
     expect(noCost[0]).not.toContain("Faturamento");
     expect(noCost[0]).not.toContain("CMC");

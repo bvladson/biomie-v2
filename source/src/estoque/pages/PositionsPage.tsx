@@ -33,6 +33,7 @@ import { quantity, money, errorMessage, downloadCsv, dateTime } from "../lib/for
 import {
   AGING_BANDS,
   WINDOW_LABELS,
+  exitLabel,
   incompleteLabel,
   lastSaleText,
   operationLabel,
@@ -44,13 +45,20 @@ import { Choice, CurveBadge, Status, Notice } from "../components/shared";
 const route = getRouteApi("/_authenticated/_shell/estoque/posicoes");
 
 type Flag =
-  "none" | "onlyNew" | "onlyIncomplete" | "onlyConfirmed" | "soldElsewhere" | "onlyManual";
+  | "none"
+  | "onlyNew"
+  | "onlyIncomplete"
+  | "onlyConfirmed"
+  | "soldElsewhere"
+  | "recentExit"
+  | "onlyManual";
 const FLAGS: { value: Flag; label: string }[] = [
   { value: "none", label: "Todos" },
   { value: "onlyConfirmed", label: "Sem venda confirmada" },
   { value: "onlyIncomplete", label: "Histórico incompleto" },
   { value: "onlyNew", label: "Produto novo" },
   { value: "soldElsewhere", label: "Vendido por outra empresa" },
+  { value: "recentExit", label: "Com saída nos últimos 90 dias" },
   { value: "onlyManual", label: "Curva manual" },
 ];
 const MIN_REASON = 10;
@@ -66,6 +74,14 @@ function Indicators({ p }: { p: StockPosition }) {
       {p.incompleteHistory && (
         <Badge variant="outline" title={incompleteLabel(p.incompleteHistory, p)}>
           Histórico incompleto
+        </Badge>
+      )}
+      {p.recentExit && (
+        <Badge
+          variant="secondary"
+          title={`Saída em ${shortDate(p.lastExit)}: ${exitLabel(p.lastExitOperation)}`}
+        >
+          {p.lastExitOperation === "28" ? "Consumo na produção" : "Saída recente"}
         </Badge>
       )}
       {p.soldElsewhere && (
@@ -96,7 +112,9 @@ export function PositionsPage() {
           ? "soldElsewhere"
           : incoming.onlyManual
             ? "onlyManual"
-            : "none";
+            : incoming.recentExit
+              ? "recentExit"
+              : "none";
   const [search, setSearch] = useState(""),
     [debounced, setDebounced] = useState(""),
     [hideZero, setHideZero] = useState(true),
@@ -146,6 +164,7 @@ export function PositionsPage() {
     onlyConfirmed: flag === "onlyConfirmed" || undefined,
     soldElsewhere: flag === "soldElsewhere" || undefined,
     onlyManual: flag === "onlyManual" || undefined,
+    recentExit: flag === "recentExit" || undefined,
     productId: incoming.productId,
     sortBy: sort as PositionQuery["sortBy"],
     sortDir: dir,
@@ -453,7 +472,7 @@ export function PositionsPage() {
                   </>
                 )}
                 <TableHead>Última venda</TableHead>
-                <TableHead>Última entrada</TableHead>
+                <TableHead>Última entrada / saída</TableHead>
                 <TableHead>Indicadores</TableHead>
                 <TableHead className="text-right">Reservado</TableHead>
                 <TableHead className="text-right">Pendente</TableHead>
@@ -570,6 +589,11 @@ export function PositionsPage() {
                       </>
                     ) : (
                       <span className="text-muted-foreground">—</span>
+                    )}
+                    {p.lastExit && (
+                      <span className="mt-1 block text-muted-foreground">
+                        Saída {shortDate(p.lastExit)} · {exitLabel(p.lastExitOperation)}
+                      </span>
                     )}
                   </TableCell>
                   <TableCell>

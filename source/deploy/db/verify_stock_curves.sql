@@ -75,7 +75,10 @@ begin
     (ca, 2, t - 5, 'entrada', '21', true, '1004', 9),
     (ca, 3, t - 250, 'entrada', '00', false, '1010', 6),
     (ca, 4, t - 240, 'saida', '11', false, '1010', 1),
-    (ca, 5, t - 90, 'entrada', '21', false, '1004', 4);
+    (ca, 5, t - 90, 'entrada', '21', false, '1004', 4),
+    (ca, 6, t - 3, 'entrada', '15', false, '1004', 0),
+    (ca, 7, t - 2, 'entrada', '11', false, '1004', 1),
+    (ca, 8, t - 30, 'saida', '28', false, '1006', 2);
   -- Posição publicada de A (duas linhas do mesmo produto em locais diferentes).
   insert into private.stock_readings (id, company_id, kind, trigger, status, position_date, pages_total, pages_done,
       records_expected, records_received, locations, attempts, finished_at)
@@ -191,7 +194,12 @@ begin
         or r->'soldElsewhere'->>'companyName' <> 'Curvas B (teste)') then
       raise exception 'FALHOU: poltrona nova (entrada há 15 dias, vendida em B): %', r; end if;
     if r->>'omieProductId' = '1004' and ((r->>'lastEntry')::date <> t - 90) then
-      raise exception 'FALHOU: entrada cancelada contou como última entrada: %', r; end if;
+      raise exception 'FALHOU: entrada cancelada, frete (15) ou estorno (11) contou como última entrada: %', r; end if;
+    if r->>'omieProductId' = '1006' and ((r->>'lastExit')::date <> t - 30 or r->>'lastExitOperation' <> '28'
+        or not (r->>'recentExit')::boolean) then
+      raise exception 'FALHOU: consumo da produção como saída recente: %', r; end if;
+    if r->>'omieProductId' = '1010' and (r->>'recentExit')::boolean then
+      raise exception 'FALHOU: saída de 240 dias não é recente: %', r; end if;
     if r->>'omieProductId' in ('1006', '1010', '1011') and r->>'incompleteHistory' <> 'sales' then
       raise exception 'FALHOU: 12 meses com histórico de 300 dias deveria ser incompleto: %', r; end if;
   end loop;
@@ -232,6 +240,11 @@ begin
      or (select (x->>'daysWithoutSale')::integer from jsonb_array_elements(p->'rows') x where x->>'omieProductId' = '1011') <> 121 then
     raise exception 'FALHOU: tempo sem venda do nicho conta da chegada: %', p->'rows';
   end if;
+  p := public.stock_positions(jsonb_build_object('companyId', current_setting('crv.ca'), 'page', 0, 'view', 'product',
+    'recentExit', true));
+  if (p->>'total')::integer <> 1 or p->'rows'->0->>'omieProductId' <> '1006' then
+    raise exception 'FALHOU: filtro de saída recente: %', p->'rows';
+  end if;
   begin perform public.stock_positions(jsonb_build_object('companyId', 'all', 'page', 0, 'window', '7d'));
     raise exception 'FALHOU: janela inválida aceita';
   exception when others then if sqlerrm not like '%Janela inválida%' then raise; end if; end;
@@ -249,6 +262,9 @@ declare v jsonb; a jsonb;
 begin
   v := public.stock_overview(current_setting('crv.ca'), '12m');
   -- D em 12 meses: estante (210), poltrona nova (80), painel (90), nicho (75) = 455.
+  if (v->'dAnalysis'->>'movingProducts')::integer <> 1 or (v->'dAnalysis'->>'movingCostValue')::numeric <> 210 then
+    raise exception 'FALHOU: curva D com saída recente: %', v->'dAnalysis';
+  end if;
   if (v->'dAnalysis'->>'products')::integer <> 4 or (v->'dAnalysis'->>'costValue')::numeric <> 455
      or (v->'dAnalysis'->>'newProducts')::integer <> 1 or (v->'dAnalysis'->>'newCostValue')::numeric <> 80
      or (v->'dAnalysis'->>'incompleteProducts')::integer <> 3 or (v->'dAnalysis'->>'confirmedProducts')::integer <> 0

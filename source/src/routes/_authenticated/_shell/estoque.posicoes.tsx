@@ -18,6 +18,7 @@ export interface PositionsSearch {
   onlyConfirmed?: boolean | undefined;
   soldElsewhere?: boolean | undefined;
   onlyManual?: boolean | undefined;
+  recentExit?: boolean | undefined;
 }
 
 const flag = (v: unknown) => (v === true ? true : undefined);
@@ -42,6 +43,7 @@ export const Route = createFileRoute("/_authenticated/_shell/estoque/posicoes")(
     onlyConfirmed: flag(search["onlyConfirmed"]),
     soldElsewhere: flag(search["soldElsewhere"]),
     onlyManual: flag(search["onlyManual"]),
+    recentExit: flag(search["recentExit"]),
   }),
   component: PositionsPage,
 });

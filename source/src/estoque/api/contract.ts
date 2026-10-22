@@ -60,6 +60,9 @@ export interface StockPosition {
   idleSince?: string | null | undefined; // desde quando não vende (última venda, chegada ou início do histórico)
   lastEntry?: string | null | undefined; // última entrada (movimentações do Omie)
   lastEntryOperation?: string | null | undefined; // 21 compra, 22 importação, 00 ajuste...
+  lastExit?: string | null | undefined; // última saída: venda, consumo da produção, remessa, ajuste
+  lastExitOperation?: string | null | undefined;
+  recentExit?: boolean | undefined; // saída nos últimos 90 dias: gira mesmo sem venda
   firstEntry?: string | null | undefined;
   registeredAt?: string | null | undefined; // inclusão no cadastro do Omie
   arrivedOn?: string | null | undefined; // chegada considerada para "produto novo"
@@ -86,6 +89,7 @@ export interface PositionQuery {
   soldElsewhere?: boolean | undefined;
   onlyManual?: boolean | undefined;
   onlyConfirmed?: boolean | undefined; // saldo positivo, sem venda na janela, histórico suficiente, não é novo
+  recentExit?: boolean | undefined; // saída nos últimos 90 dias (consumo da produção, remessa, ajuste)
   minDaysWithoutSale?: 30 | 90 | 180 | 365 | undefined; // saldo positivo e sem venda há N dias ou mais
   sortBy?:
     | "costValue"
@@ -134,6 +138,8 @@ export interface DAnalysis {
   confirmedCostValue: number | null;
   elsewhereProducts: number; // dentre os D, com a mesma SKU vendida por outra empresa do grupo
   elsewhereCostValue: number | null;
+  movingProducts?: number | undefined; // dentre os D, com saída nos últimos 90 dias
+  movingCostValue?: number | null | undefined;
 }
 
 /** Tempo sem venda dos produtos com saldo (independente da janela): faixas exclusivas. */

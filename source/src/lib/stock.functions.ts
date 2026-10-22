@@ -32,6 +32,7 @@ const filters = z
     soldElsewhere: z.boolean().optional(),
     onlyManual: z.boolean().optional(),
     onlyConfirmed: z.boolean().optional(),
+    recentExit: z.boolean().optional(),
     minDaysWithoutSale: z
       .union([z.literal(30), z.literal(90), z.literal(180), z.literal(365)])
       .optional(),

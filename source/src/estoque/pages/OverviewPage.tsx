@@ -203,7 +203,7 @@ export function OverviewPage() {
                 Antes de tratar como capital parado: produto novo não é encalhe, e histórico
                 incompleto não confirma falta de venda.
               </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 {[
                   {
                     key: "confirmed",
@@ -228,6 +228,14 @@ export function OverviewPage() {
                     value: d.newCostValue,
                     foot: "Chegaram há pouco: sem alerta",
                     search: { curve: "D" as const, onlyNew: true, view: "product" as const },
+                  },
+                  {
+                    key: "moving",
+                    title: "Com saída nos últimos 90 dias",
+                    products: d.movingProducts ?? 0,
+                    value: d.movingCostValue ?? null,
+                    foot: "Consumo na produção, remessa ou ajuste: há giro",
+                    search: { curve: "D" as const, recentExit: true, view: "product" as const },
                   },
                   {
                     key: "elsewhere",

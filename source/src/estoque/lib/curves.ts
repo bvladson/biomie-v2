@@ -28,23 +28,28 @@ export const AGING_BANDS: {
   { band: "365", days: 365, label: "Estoque sem vendas prolongado", range: "365 dias ou mais" },
 ];
 
-/** Operações do ListarMovimentoEstoque (documentação do Omie). */
-const OPERATIONS: Record<string, string> = {
-  "00": "Ajuste de estoque",
+/** Entradas do ListarMovimentoEstoque (origens reais do Omie, 22/10/2026). */
+const ENTRIES: Record<string, string> = {
+  "00": "Ajuste manual",
+  "13": "Devolução de venda",
+  "21": "Compra",
+  "22": "Importação",
+  "24": "Retorno / nota de entrada",
+  "28": "Entrada da produção",
+};
+/** Saídas que mostram giro (as demais são estornos ou notas complementares). */
+const EXITS: Record<string, string> = {
+  "00": "Ajuste manual",
   "11": "Venda",
   "12": "Venda pelo PDV",
-  "13": "Devolução de venda",
   "14": "Remessa",
-  "16": "Nota complementar de saída",
-  "21": "Compra",
-  "22": "Compra (importação)",
   "23": "Devolução ao fornecedor",
-  "24": "Retorno de remessa",
-  "26": "Nota complementar de entrada",
-  "28": "Ordem de produção",
+  "28": "Consumo na produção",
 };
 export const operationLabel = (code: string | null | undefined) =>
-  code ? (OPERATIONS[code] ?? `Operação ${code}`) : "";
+  code ? (ENTRIES[code] ?? `Operação ${code}`) : "";
+export const exitLabel = (code: string | null | undefined) =>
+  code ? (EXITS[code] ?? `Operação ${code}`) : "";
 
 /** Data "AAAA-MM-DD" do banco como "DD/MM/AAAA" (sem fuso: é uma data, não um instante). */
 export function shortDate(value: string | null | undefined): string {

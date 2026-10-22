@@ -6,7 +6,7 @@
 import type { CurveWindow, ScenarioInput, SimulationItem, StockPosition } from "../api/contract";
 import { csv, decimal } from "./format";
 import { ALL_CURVES, simulate } from "./simulation";
-import { WINDOW_LABELS, incompleteLabel, operationLabel, shortDate } from "./curves";
+import { WINDOW_LABELS, exitLabel, incompleteLabel, operationLabel, shortDate } from "./curves";
 
 const optional = (value: number | null | undefined) =>
   value === null || value === undefined ? "" : decimal(value);
@@ -40,6 +40,9 @@ export function positionsCsv(
       "Vendas no BIOMIE desde",
       "Última entrada",
       "Operação da última entrada",
+      "Última saída",
+      "Operação da última saída",
+      "Saída nos últimos 90 dias",
       "Cadastro no Omie",
       "Produto novo",
       "Histórico incompleto",
@@ -74,6 +77,9 @@ export function positionsCsv(
       date(p.salesFrom),
       date(p.lastEntry),
       operationLabel(p.lastEntryOperation),
+      date(p.lastExit),
+      exitLabel(p.lastExitOperation),
+      p.recentExit ? "Sim" : "",
       date(p.registeredAt),
       p.isNew ? "Sim" : "",
       incompleteLabel(p.incompleteHistory, p),
