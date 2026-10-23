@@ -73,6 +73,9 @@ describe("curva automática na tela", () => {
     expect(operationLabel("28")).toBe("Entrada da produção");
     expect(exitLabel("28")).toBe("Consumo na produção");
     expect(exitLabel("14")).toBe("Remessa");
+    expect(exitLabel("11")).toBe("Venda");
+    expect(exitLabel("11", true)).toBe("Venda para empresa do grupo");
+    expect(exitLabel("28", true)).toBe("Consumo na produção");
     expect(operationLabel("99")).toBe("Operação 99");
     expect(percent(0.256)).toBe("25,6%");
   });

@@ -234,7 +234,7 @@ export function OverviewPage() {
                     title: "Com saída nos últimos 90 dias",
                     products: d.movingProducts ?? 0,
                     value: d.movingCostValue ?? null,
-                    foot: "Consumo na produção, remessa ou ajuste: há giro",
+                    foot: "Teve saída do estoque: conferir antes de tratar como parado",
                     search: { curve: "D" as const, recentExit: true, view: "product" as const },
                   },
                   {

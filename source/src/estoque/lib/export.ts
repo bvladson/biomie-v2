@@ -78,7 +78,7 @@ export function positionsCsv(
       date(p.lastEntry),
       operationLabel(p.lastEntryOperation),
       date(p.lastExit),
-      exitLabel(p.lastExitOperation),
+      exitLabel(p.lastExitOperation, p.lastExitGroup),
       p.recentExit ? "Sim" : "",
       date(p.registeredAt),
       p.isNew ? "Sim" : "",

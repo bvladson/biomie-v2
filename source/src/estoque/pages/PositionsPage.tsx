@@ -79,9 +79,13 @@ function Indicators({ p }: { p: StockPosition }) {
       {p.recentExit && (
         <Badge
           variant="secondary"
-          title={`Saída em ${shortDate(p.lastExit)}: ${exitLabel(p.lastExitOperation)}`}
+          title={`Saída em ${shortDate(p.lastExit)}: ${exitLabel(p.lastExitOperation, p.lastExitGroup)}`}
         >
-          {p.lastExitOperation === "28" ? "Consumo na produção" : "Saída recente"}
+          {p.lastExitOperation === "28"
+            ? "Consumo na produção"
+            : p.lastExitGroup
+              ? "Venda para o grupo"
+              : "Saída recente"}
         </Badge>
       )}
       {p.soldElsewhere && (
@@ -592,7 +596,8 @@ export function PositionsPage() {
                     )}
                     {p.lastExit && (
                       <span className="mt-1 block text-muted-foreground">
-                        Saída {shortDate(p.lastExit)} · {exitLabel(p.lastExitOperation)}
+                        Saída {shortDate(p.lastExit)} ·{" "}
+                        {exitLabel(p.lastExitOperation, p.lastExitGroup)}
                       </span>
                     )}
                   </TableCell>

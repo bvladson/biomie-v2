@@ -123,6 +123,22 @@ async function screen(page, path, heading) {
         await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 45000 });
         return { heading, url: new URL(sup.page.url()).search, shot: await shot(sup.page, 'curva-d-historico-incompleto') };
       });
+      await step('super: curva D com saída recente', async () => {
+        await sup.page.goto(base + '/estoque');
+        await sup.page.getByRole('heading', { name: /Curva D aberta/ }).waitFor({ timeout: 45000 });
+        const card = sup.page.getByRole('link', { name: /Com saída nos últimos 90 dias/ }).first();
+        const text = (await card.innerText()).replace(/\s+/g, ' ');
+        await card.click();
+        await sup.page.waitForURL(/recentExit=true/, { timeout: 45000 });
+        await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 45000 });
+        const exitLine = sup.page.getByText(/^Saída \d{2}\/\d{2}\/\d{4} · /).first();
+        await exitLine.waitFor({ timeout: 45000 });
+        return {
+          card: text.slice(0, 160),
+          exit: (await exitLine.innerText()).slice(0, 80),
+          shot: await shot(sup.page, 'curva-d-saida-recente'),
+        };
+      });
       await step('super: curva manual com justificativa e volta para a automática', async () => {
         await sup.page.goto(base + '/estoque/posicoes?curve=%22D%22&view=%22product%22');
         await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 45000 });

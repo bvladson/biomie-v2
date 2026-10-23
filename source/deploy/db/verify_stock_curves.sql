@@ -79,6 +79,19 @@ begin
     (ca, 6, t - 3, 'entrada', '15', false, '1004', 0),
     (ca, 7, t - 2, 'entrada', '11', false, '1004', 1),
     (ca, 8, t - 30, 'saida', '28', false, '1006', 2);
+  -- Estornos (cancelamento no sentido oposto, com a marca e o mesmo documento): a venda do painel há
+  -- 12 dias e a nota de entrada do gaveteiro de ontem foram canceladas e não contam. O nicho saiu há 8
+  -- dias numa venda para outra empresa do grupo (nota do canal "outros", fora do faturamento).
+  insert into private.stock_movements (company_id, movement_id, moved_on, kind, operation, canceled,
+      omie_product_id, qty, document) values
+    (ca, 20, t - 12, 'saida', '11', false, '1010', 1, 'NF-77'),
+    (ca, 21, t - 11, 'entrada', '11', true, '1010', 1, 'NF-77'),
+    (ca, 22, t - 1, 'entrada', '24', false, '1004', 3, 'NE-5'),
+    (ca, 23, t - 1, 'saida', '24', true, '1004', 3, 'NE-5'),
+    (ca, 24, t - 8, 'saida', '11', false, '1011', 1, 'NF-G1');
+  insert into public.invoices (company_id, seller_id, customer_id, number, competence_date, total, source, external_id,
+      gross_amount, goods_amount, commercial_base_amount, operation_scope, business_channel, is_biomie_commercial_visible)
+    values (ca, s, cu, 'NF-G1', t - 8, 0, 'omie', 'crv-g1-' || ca, 0, 0, 0, 'commercial', 'outros', false);
   -- Posição publicada de A (duas linhas do mesmo produto em locais diferentes).
   insert into private.stock_readings (id, company_id, kind, trigger, status, position_date, pages_total, pages_done,
       records_expected, records_received, locations, attempts, finished_at)
@@ -194,12 +207,15 @@ begin
         or r->'soldElsewhere'->>'companyName' <> 'Curvas B (teste)') then
       raise exception 'FALHOU: poltrona nova (entrada há 15 dias, vendida em B): %', r; end if;
     if r->>'omieProductId' = '1004' and ((r->>'lastEntry')::date <> t - 90) then
-      raise exception 'FALHOU: entrada cancelada, frete (15) ou estorno (11) contou como última entrada: %', r; end if;
+      raise exception 'FALHOU: entrada cancelada, frete (15), estorno (11) ou nota de entrada estornada contou como última entrada: %', r; end if;
     if r->>'omieProductId' = '1006' and ((r->>'lastExit')::date <> t - 30 or r->>'lastExitOperation' <> '28'
-        or not (r->>'recentExit')::boolean) then
+        or not (r->>'recentExit')::boolean or (r->>'lastExitGroup')::boolean) then
       raise exception 'FALHOU: consumo da produção como saída recente: %', r; end if;
-    if r->>'omieProductId' = '1010' and (r->>'recentExit')::boolean then
-      raise exception 'FALHOU: saída de 240 dias não é recente: %', r; end if;
+    if r->>'omieProductId' = '1010' and ((r->>'recentExit')::boolean or (r->>'lastExit')::date <> t - 240) then
+      raise exception 'FALHOU: venda cancelada contou como saída (a última de verdade tem 240 dias): %', r; end if;
+    if r->>'omieProductId' = '1011' and ((r->>'lastExit')::date <> t - 8 or r->>'lastExitOperation' <> '11'
+        or not (r->>'recentExit')::boolean or not (r->>'lastExitGroup')::boolean) then
+      raise exception 'FALHOU: venda para empresa do grupo como saída recente marcada: %', r; end if;
     if r->>'omieProductId' in ('1006', '1010', '1011') and r->>'incompleteHistory' <> 'sales' then
       raise exception 'FALHOU: 12 meses com histórico de 300 dias deveria ser incompleto: %', r; end if;
   end loop;
@@ -242,7 +258,8 @@ begin
   end if;
   p := public.stock_positions(jsonb_build_object('companyId', current_setting('crv.ca'), 'page', 0, 'view', 'product',
     'recentExit', true));
-  if (p->>'total')::integer <> 1 or p->'rows'->0->>'omieProductId' <> '1006' then
+  if (select string_agg(x->>'omieProductId', ',' order by x->>'omieProductId') from jsonb_array_elements(p->'rows') x)
+     <> '1006,1011' then
     raise exception 'FALHOU: filtro de saída recente: %', p->'rows';
   end if;
   begin perform public.stock_positions(jsonb_build_object('companyId', 'all', 'page', 0, 'window', '7d'));
@@ -262,7 +279,8 @@ declare v jsonb; a jsonb;
 begin
   v := public.stock_overview(current_setting('crv.ca'), '12m');
   -- D em 12 meses: estante (210), poltrona nova (80), painel (90), nicho (75) = 455.
-  if (v->'dAnalysis'->>'movingProducts')::integer <> 1 or (v->'dAnalysis'->>'movingCostValue')::numeric <> 210 then
+  -- Com saída em 90 dias: estante (210, produção) e nicho (75, venda para o grupo); o painel não (estornada).
+  if (v->'dAnalysis'->>'movingProducts')::integer <> 2 or (v->'dAnalysis'->>'movingCostValue')::numeric <> 285 then
     raise exception 'FALHOU: curva D com saída recente: %', v->'dAnalysis';
   end if;
   if (v->'dAnalysis'->>'products')::integer <> 4 or (v->'dAnalysis'->>'costValue')::numeric <> 455

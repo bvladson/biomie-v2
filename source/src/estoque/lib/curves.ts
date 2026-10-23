@@ -48,8 +48,13 @@ const EXITS: Record<string, string> = {
 };
 export const operationLabel = (code: string | null | undefined) =>
   code ? (ENTRIES[code] ?? `Operação ${code}`) : "";
-export const exitLabel = (code: string | null | undefined) =>
-  code ? (EXITS[code] ?? `Operação ${code}`) : "";
+/** Venda para empresa do grupo (nota do canal "outros"): transferência, nunca faturamento. */
+export const exitLabel = (code: string | null | undefined, group?: boolean) =>
+  !code
+    ? ""
+    : group && (code === "11" || code === "12")
+      ? "Venda para empresa do grupo"
+      : (EXITS[code] ?? `Operação ${code}`);
 
 /** Data "AAAA-MM-DD" do banco como "DD/MM/AAAA" (sem fuso: é uma data, não um instante). */
 export function shortDate(value: string | null | undefined): string {

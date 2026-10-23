@@ -63,6 +63,7 @@ export interface StockPosition {
   lastExit?: string | null | undefined; // última saída: venda, consumo da produção, remessa, ajuste
   lastExitOperation?: string | null | undefined;
   recentExit?: boolean | undefined; // saída nos últimos 90 dias: gira mesmo sem venda
+  lastExitGroup?: boolean | undefined; // a última saída foi venda para empresa do grupo (canal "outros")
   firstEntry?: string | null | undefined;
   registeredAt?: string | null | undefined; // inclusão no cadastro do Omie
   arrivedOn?: string | null | undefined; // chegada considerada para "produto novo"

@@ -83,7 +83,8 @@ pr as (
     min(x.incomplete_reason) as incomplete, min(x.elsewhere_company) as elsewhere,
     min(x.elsewhere_last_sale) as elsewhere_sale, min(x.curves_as_of) as as_of, min(x.sales_from) as sales_from,
     min(x.window_start) as window_start, count(*) as locations, min(x.idle_since) as idle_since,
-    min(x.last_exit) as last_exit, min(x.last_exit_operation) as last_exit_op, bool_or(x.recent_exit) as moving
+    min(x.last_exit) as last_exit, min(x.last_exit_operation) as last_exit_op, bool_or(x.recent_exit) as moving,
+    bool_or(x.last_exit_group) as exit_group
   from x group by x.omie_product_id),
 run as (select r.* from c, private.stock_curve_runs r where r.company_id = c.id order by r.finished_at desc limit 5)
 select json_build_object(
@@ -112,6 +113,7 @@ select json_build_object(
       'elsewhereValue', round(coalesce(sum(pr.value) filter (where pr.elsewhere is not null), 0), 2),
       'withEntry', count(*) filter (where pr.last_entry is not null),
       'moving', count(*) filter (where pr.moving),
+      'movingToGroup', count(*) filter (where pr.moving and pr.exit_group),
       'movingValue', round(coalesce(sum(pr.value) filter (where pr.moving), 0), 2),
       'entryLast90d', count(*) filter (where pr.last_entry >= pr.as_of - 90))
     from pr where pr.curve = 'D' and pr.qty > 0),
@@ -122,7 +124,7 @@ select json_build_object(
       from pr where pr.qty > 0 and pr.as_of is not null and pr.days is not null group by 1) b),
   'topD', (select json_agg(json_build_object('sku', t.sku, 'name', t.name, 'qty', t.qty, 'value', t.value,
       'lastSale', t.last_sale, 'idleSince', t.idle_since, 'idleDays', t.days, 'lastEntry', t.last_entry,
-      'lastEntryOp', t.last_op, 'lastExit', t.last_exit, 'lastExitOp', t.last_exit_op, 'registered', t.registered,
+      'lastEntryOp', t.last_op, 'lastExit', t.last_exit, 'lastExitOp', t.last_exit_op, 'exitToGroup', t.exit_group, 'registered', t.registered,
       'arrived', t.arrived, 'new', t.is_new, 'incomplete', t.incomplete, 'elsewhere', t.elsewhere,
       'elsewhereSale', t.elsewhere_sale, 'locations', t.locations) order by t.value desc)
     from (select * from pr where pr.curve = 'D' and pr.qty > 0 order by pr.value desc limit 15) t),

@@ -81,6 +81,7 @@ create table if not exists private.stock_product_facts (
   last_entry_qty numeric,
   last_exit date,              -- última saída (venda, consumo da produção, remessa, ajuste...)
   last_exit_operation text,
+  last_exit_group boolean not null default false,  -- a última saída é venda para empresa do grupo
   elsewhere_company_id uuid,   -- mesma SKU vendida por outra empresa do grupo (12 meses)
   elsewhere_last_sale date,
   -- Chegada do produto: a primeira entrada só vale quando o histórico de movimentações lido começa
@@ -222,6 +223,9 @@ $$;
 
 -- Saídas que mostram giro do produto: 00 ajuste manual, 11 e 12 venda, 14 remessa, 23 devolução ao
 -- fornecedor, 28 consumo da ordem de produção. Fora: 16 (nota complementar) e 24 (estorno de entrada).
+-- Estornos: o Omie lança o cancelamento no sentido oposto, com cancelamento = S, a mesma operação e o
+-- mesmo documento (22/10/2026: 359 de 359 acham o original). O cancelamento nunca conta e o movimento
+-- estornado também não: venda cancelada não é saída, nota de entrada cancelada não é chegada.
 create or replace function stock_internal.is_exit(p_operation text) returns boolean
 language sql immutable set search_path = pg_catalog as $$
   select coalesce(p_operation in ('00', '11', '12', '14', '23', '28'), false)
@@ -341,9 +345,13 @@ begin
   delete from private.stock_product_facts f where f.company_id = p_company;
   insert into private.stock_product_facts (company_id, omie_product_id, registered_at, first_sale, last_sale,
       first_entry, last_entry, last_entry_operation, last_entry_qty, last_exit, last_exit_operation,
-      elsewhere_company_id, elsewhere_last_sale, arrived_on)
+      last_exit_group, elsewhere_company_id, elsewhere_last_sale, arrived_on)
   select p_company, sp.omie_product_id, reg.registered_at, sl.first_sale, sl.last_sale,
     ent.first_entry, ent.last_entry, ent.last_operation, ent.last_qty, ex.last_exit, ex.last_operation,
+    -- Venda para empresa do grupo: a nota do documento é do canal "outros" (regra oficial, 0031), que
+    -- nunca conta como faturamento. O estoque saiu, mas foi transferência dentro do grupo.
+    coalesce(ex.last_operation in ('11', '12') and ex.last_document in (
+      select i.number from public.invoices i where i.company_id = p_company and i.business_channel = 'outros'), false),
     other.company_id, other.last_sale,
     case when ent.first_entry is not null and v_movements_from is not null and reg.registered_at is not null
               and reg.registered_at >= v_movements_from then ent.first_entry
@@ -366,13 +374,20 @@ begin
       (array_agg(m.qty order by m.moved_on desc, m.movement_id desc))[1] as last_qty
     from private.stock_movements m
     where m.company_id = p_company and m.omie_product_id = sp.omie_product_id
-      and m.kind = 'entrada' and not m.canceled and stock_internal.is_receipt(m.operation)) ent on true
+      and m.kind = 'entrada' and not m.canceled and stock_internal.is_receipt(m.operation)
+      and not exists (select 1 from private.stock_movements r
+        where r.company_id = m.company_id and r.omie_product_id = m.omie_product_id and r.kind = 'saida'
+          and r.canceled and r.operation = m.operation and r.document = m.document)) ent on true
   left join lateral (
     select max(m.moved_on) as last_exit,
-      (array_agg(m.operation order by m.moved_on desc, m.movement_id desc))[1] as last_operation
+      (array_agg(m.operation order by m.moved_on desc, m.movement_id desc))[1] as last_operation,
+      (array_agg(m.document order by m.moved_on desc, m.movement_id desc))[1] as last_document
     from private.stock_movements m
     where m.company_id = p_company and m.omie_product_id = sp.omie_product_id
-      and m.kind = 'saida' and not m.canceled and stock_internal.is_exit(m.operation)) ex on true
+      and m.kind = 'saida' and not m.canceled and stock_internal.is_exit(m.operation)
+      and not exists (select 1 from private.stock_movements r
+        where r.company_id = m.company_id and r.omie_product_id = m.omie_product_id and r.kind = 'entrada'
+          and r.canceled and r.operation = m.operation and r.document = m.document)) ex on true
   left join lateral (
     select a.company_id, a.last_sale from private.stock_auto_curves a
     join public.companies oc on oc.id = a.company_id and not oc.is_demo
@@ -411,7 +426,7 @@ returns table (company_id uuid, company_name text, omie_product_id text, locatio
   days_without_sale integer, last_entry date, last_entry_operation text, first_entry date,
   registered_at date, is_new boolean, incomplete_reason text, elsewhere_company text,
   elsewhere_last_sale date, curves_as_of date, sales_from date, window_start date, arrived_on date,
-  idle_since date, last_exit date, last_exit_operation text, recent_exit boolean)
+  idle_since date, last_exit date, last_exit_operation text, recent_exit boolean, last_exit_group boolean)
 language sql stable security definer set search_path = pg_catalog, public, pg_temp as $$
   with base as (
     select sp.*, c.name as company_name, r.finished_at as read_at, r.locations,
@@ -434,7 +449,7 @@ language sql stable security definer set search_path = pg_catalog, public, pg_te
       f.last_sale as f_last_sale, f.last_entry as f_last_entry, f.last_entry_operation as f_last_op,
       f.first_entry as f_first_entry, f.registered_at as f_registered, ec.name as f_elsewhere,
       f.elsewhere_last_sale as f_elsewhere_sale, f.arrived_on as f_arrived,
-      f.last_exit as f_last_exit, f.last_exit_operation as f_last_exit_op,
+      f.last_exit as f_last_exit, f.last_exit_operation as f_last_exit_op, f.last_exit_group as f_last_exit_group,
       coalesce(f.arrived_on >= run.as_of - s.new_product_days, false) as fresh,
       p.id as p_id, coalesce(nullif(cp.family, ''), nullif(p.category, '')) as p_family
     from base b
@@ -480,7 +495,8 @@ language sql stable security definer set search_path = pg_catalog, public, pg_te
          when x.sales_from is not null then greatest(x.sales_from, coalesce(x.f_arrived, x.sales_from)) end,
     x.f_last_exit, x.f_last_exit_op,
     -- Saída nos últimos 90 dias (consumo da produção, remessa, ajuste...): o produto gira mesmo sem venda.
-    coalesce(x.f_last_exit >= x.as_of - 89, false)
+    coalesce(x.f_last_exit >= x.as_of - 89, false),
+    coalesce(x.f_last_exit_group, false)
   from x
 $$;
 
@@ -734,7 +750,7 @@ begin
       min(x.elsewhere_company) as elsewhere_company, min(x.elsewhere_last_sale) as elsewhere_last_sale,
       min(x.sales_from) as sales_from, min(x.idle_since) as idle_since,
       min(x.last_exit) as last_exit, min(x.last_exit_operation) as last_exit_operation,
-      bool_or(x.recent_exit) as recent_exit
+      bool_or(x.recent_exit) as recent_exit, bool_or(x.last_exit_group) as last_exit_group
     from x
     group by x.company_id, x.omie_product_id, x.loc_key),
   o as (
@@ -768,7 +784,7 @@ begin
       'windowShare', case when v_cost then o.window_share end,
       'lastSale', o.last_sale, 'daysWithoutSale', o.days_without_sale, 'salesFrom', o.sales_from,
       'idleSince', o.idle_since, 'lastExit', o.last_exit, 'lastExitOperation', o.last_exit_operation,
-      'recentExit', o.recent_exit,
+      'recentExit', o.recent_exit, 'lastExitGroup', o.last_exit_group,
       'lastEntry', o.last_entry, 'lastEntryOperation', o.last_entry_operation, 'firstEntry', o.first_entry,
       'registeredAt', o.registered_at, 'arrivedOn', o.arrived_on, 'isNew', o.is_new,
       'incompleteHistory', o.incomplete_reason,
