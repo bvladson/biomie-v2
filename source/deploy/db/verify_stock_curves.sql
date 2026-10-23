@@ -157,15 +157,19 @@ begin
   if (r->'totals'->'90d'->>'revenue')::numeric <> 900 or (r->'totals'->'30d'->>'revenue')::numeric <> 700 then
     raise exception 'FALHOU: totais por janela: %', r->'totals';
   end if;
+  r := public.stock_worker_refresh_curves(current_setting('crv.cb')::uuid);
+  if r->>'status' <> 'ok' then raise exception 'FALHOU: cálculo de B: %', r; end if;
+end $$;
+reset role;
+-- A foi calculada quando B ainda não tinha curva: a venda no grupo veio das vendas de B.
+do $$
+begin
   if (select f.elsewhere_company_id from private.stock_product_facts f
       where f.company_id = current_setting('crv.ca')::uuid and f.omie_product_id = '1007')
      is distinct from current_setting('crv.cb')::uuid then
     raise exception 'FALHOU: venda no grupo dependeu da ordem do cálculo (B ainda sem curva)';
   end if;
-  r := public.stock_worker_refresh_curves(current_setting('crv.cb')::uuid);
-  if r->>'status' <> 'ok' then raise exception 'FALHOU: cálculo de B: %', r; end if;
 end $$;
-reset role;
 
 -- 3. Pareto: o acumulado ANTES do produto decide; quem atravessa 80% fica em A; empate pelo id.
 do $$
