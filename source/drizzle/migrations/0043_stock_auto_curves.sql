@@ -343,6 +343,21 @@ begin
                                ('180d', s.r180, s.u180), ('12m', s.r365, s.u365)) as w(win, rev, units)
     where w.rev > 0) x;
 
+  -- Venda no grupo: a mesma SKU com venda válida em outra empresa nos últimos 12 meses, lida das
+  -- vendas (fact_sales, a mesma base da página Produtos) e não das curvas gravadas das outras
+  -- empresas, para não depender da ordem em que as empresas são calculadas.
+  create temporary table if not exists pg_temp.stock_group_sales (
+    company_id uuid, sku text, last_sale date) on commit drop;
+  delete from pg_temp.stock_group_sales;
+  insert into pg_temp.stock_group_sales
+  select oc.id, nullif(btrim(p.sku), ''), max(f.competence_date) filter (where f.amount > 0)
+  from public.companies oc
+  cross join lateral public.fact_sales(oc.id, v_as_of - 364, v_as_of) f
+  join public.products p on p.id = f.product_id
+  where oc.id <> p_company and not oc.is_demo and nullif(btrim(p.sku), '') is not null
+  group by oc.id, nullif(btrim(p.sku), '')
+  having sum(f.amount) > 0;
+
   -- Fatos de cada produto da posição publicada: cadastro, vendas, entradas e venda no grupo.
   v_movements_from := stock_internal.movements_from(p_company);
   delete from private.stock_product_facts f where f.company_id = p_company;
@@ -400,11 +415,9 @@ begin
           and r.operation = '00' and not r.canceled and r.moved_on = m.moved_on and abs(r.qty) = abs(m.qty)))
     ) ex on true
   left join lateral (
-    select a.company_id, a.last_sale from private.stock_auto_curves a
-    join public.companies oc on oc.id = a.company_id and not oc.is_demo
-    where sp.sku is not null and sp.sku <> sp.omie_product_id
-      and a.curve_window = '12m' and a.company_id <> p_company and a.sku = sp.sku
-    order by a.last_sale desc nulls last, a.company_id limit 1) other on true;
+    select g.company_id, g.last_sale from pg_temp.stock_group_sales g
+    where sp.sku is not null and sp.sku <> sp.omie_product_id and g.sku = sp.sku
+    order by g.last_sale desc nulls last, g.company_id limit 1) other on true;
 
   select coalesce(jsonb_object_agg(w.win, jsonb_build_object(
       'revenue', coalesce(t.revenue, 0), 'products', coalesce(t.products, 0),

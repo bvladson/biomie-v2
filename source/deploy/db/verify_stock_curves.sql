@@ -140,14 +140,13 @@ begin
 end $$;
 reset role;
 
--- 2. Cálculo pelo worker (service_role): B primeiro (para a venda no grupo), depois A.
+-- 2. Cálculo pelo worker (service_role): A primeiro, B depois. A venda no grupo (B vendeu a mesma
+--    SKU) vem das vendas de B, não das curvas de B: o resultado não depende da ordem do cálculo.
 select set_config('request.jwt.claims', jsonb_build_object('role', 'service_role')::text, true);
 set local role service_role;
 do $$
 declare r jsonb;
 begin
-  r := public.stock_worker_refresh_curves(current_setting('crv.cb')::uuid);
-  if r->>'status' <> 'ok' then raise exception 'FALHOU: cálculo de B: %', r; end if;
   r := public.stock_worker_refresh_curves(current_setting('crv.ca')::uuid);
   if r->>'status' <> 'ok' or (r->'totals'->'12m'->>'revenue')::numeric <> 1000
      or (r->'totals'->'12m'->>'products')::integer <> 5 or (r->'totals'->'12m'->>'A')::integer <> 2
@@ -158,6 +157,13 @@ begin
   if (r->'totals'->'90d'->>'revenue')::numeric <> 900 or (r->'totals'->'30d'->>'revenue')::numeric <> 700 then
     raise exception 'FALHOU: totais por janela: %', r->'totals';
   end if;
+  if (select f.elsewhere_company_id from private.stock_product_facts f
+      where f.company_id = current_setting('crv.ca')::uuid and f.omie_product_id = '1007')
+     is distinct from current_setting('crv.cb')::uuid then
+    raise exception 'FALHOU: venda no grupo dependeu da ordem do cálculo (B ainda sem curva)';
+  end if;
+  r := public.stock_worker_refresh_curves(current_setting('crv.cb')::uuid);
+  if r->>'status' <> 'ok' then raise exception 'FALHOU: cálculo de B: %', r; end if;
 end $$;
 reset role;
 
