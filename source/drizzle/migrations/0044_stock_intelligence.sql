@@ -188,7 +188,10 @@ begin
   if exists (select 1 from private.intel_runs r where r.status = 'running') then
     return jsonb_build_object('started', false, 'reason', 'Já existe uma execução em andamento.');
   end if;
-  insert into private.intel_runs (trigger, algorithm_version, as_of) values (p_trigger, p_version, v_as_of)
+  -- clock_timestamp: horário real do pedido (now() é o mesmo em toda a transação), para "a última
+  -- execução" ser sempre uma só.
+  insert into private.intel_runs (trigger, algorithm_version, as_of, started_at)
+    values (p_trigger, p_version, v_as_of, clock_timestamp())
     returning id into v_run;
   return jsonb_build_object('started', true, 'runId', v_run, 'asOf', v_as_of,
     'params', stock_internal.intel_params(),
@@ -334,7 +337,7 @@ begin
   select distinct m.company_id, v_run.id, now() from private.intel_product_metrics m where m.run_id = v_run.id
   on conflict (company_id) do update set run_id = excluded.run_id, published_at = excluded.published_at;
   get diagnostics v_companies = row_count;
-  update private.intel_runs set status = 'published', finished_at = now(), stats = p_stats where id = v_run.id;
+  update private.intel_runs set status = 'published', finished_at = clock_timestamp(), stats = p_stats where id = v_run.id;
   delete from private.intel_runs r
    where r.started_at < now() - make_interval(days => v_keep)
      and not exists (select 1 from private.intel_current c where c.run_id = r.id);
@@ -345,7 +348,7 @@ create or replace function stock_internal.intel_fail(p_run uuid, p_error text) r
 language plpgsql security definer set search_path = pg_catalog, public, pg_temp as $$
 begin
   -- Só uma execução ainda em andamento falha; uma já publicada nunca perde os resultados.
-  update private.intel_runs set status = 'failed', finished_at = now(), error = left(coalesce(p_error, 'falha'), 300)
+  update private.intel_runs set status = 'failed', finished_at = clock_timestamp(), error = left(coalesce(p_error, 'falha'), 300)
    where id = p_run and status = 'running';
   if found then
     delete from private.intel_product_metrics m where m.run_id = p_run;
