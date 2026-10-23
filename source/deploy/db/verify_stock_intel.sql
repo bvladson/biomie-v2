@@ -101,6 +101,8 @@ begin
 end $$;
 
 -- 3. Extração: produtos relevantes, vendas da base da página Produtos, devoluções, foto e histórico.
+--    (As chamadas do motor rodam como service_role; as conferências nas tabelas privadas, que o
+--    service_role não enxerga, rodam depois de "reset role".)
 do $$
 declare
   e jsonb;
@@ -124,11 +126,19 @@ begin
   if (select (p->>'capital')::numeric from jsonb_array_elements(e->'products') p where p->>'omieProductId' = '3002') <> 60 then
     raise exception 'FALHOU: capital a custo da cadeira (3 × 20): %', e->'products';
   end if;
-  if not (e->'capture'->>'captured')::boolean or (e->'capture'->>'day')::date <> t
-     or not exists (select 1 from private.stock_snapshots s where s.company_id = ca and s.day = t
-                    and (s.totals->'D'->>'capital')::numeric = 60 and (s.totals->'A'->>'products')::integer = 1) then
-    raise exception 'FALHOU: foto diária por curva: % %', e->'capture',
-      (select totals from private.stock_snapshots where company_id = ca);
+  if not (e->'capture'->>'captured')::boolean or (e->'capture'->>'day')::date <> t then
+    raise exception 'FALHOU: foto diária não registrada: %', e->'capture';
+  end if;
+end $$;
+reset role;
+do $$
+declare
+  ca uuid := current_setting('intel.ca')::uuid;
+  t date := current_setting('intel.t')::date;
+begin
+  if not exists (select 1 from private.stock_snapshots s where s.company_id = ca and s.day = t
+                 and (s.totals->'D'->>'capital')::numeric = 60 and (s.totals->'A'->>'products')::integer = 1) then
+    raise exception 'FALHOU: foto diária por curva: %', (select totals from private.stock_snapshots where company_id = ca);
   end if;
   if (select string_agg(h.omie_product_id || h.curve, ',' order by h.omie_product_id)
       from private.stock_curve_history h where h.company_id = ca) <> '3001A,3002D,3003A' then
@@ -138,6 +148,7 @@ begin
 end $$;
 
 -- 4. Lotes idempotentes, validados e invisíveis até o fim; o fim troca a execução de uma vez.
+set local role service_role;
 do $$
 declare
   run uuid := current_setting('intel.run1')::uuid;
@@ -158,10 +169,6 @@ begin
         'curve', jsonb_build_object('current', 'D', 'source', 'auto')))));
   n := n + public.stock_intel_publish(run, ca, 1, '[{"omieProductId": "3003", "state": "sem_saldo", "flags": [], "priority": null, "metrics": {}}]');
   n := n + public.stock_intel_publish(run, ca, 1, '[{"omieProductId": "3003", "state": "sem_saldo", "flags": ["demanda_recente"], "priority": null, "metrics": {}}]');
-  if (select count(*) from private.intel_product_metrics m where m.run_id = run) <> 3
-     or (select flags from private.intel_product_metrics m where m.run_id = run and m.omie_product_id = '3003') <> '{demanda_recente}' then
-    raise exception 'FALHOU: lote repetido deveria substituir, não duplicar';
-  end if;
   begin
     perform public.stock_intel_publish(run, ca, 2, '[{"omieProductId": "3004", "state": "inventado", "metrics": {}}]');
     raise exception 'FALHOU: estado inválido aceito';
@@ -170,12 +177,28 @@ begin
     perform public.stock_intel_publish(run, ca, 2, '[{"omieProductId": "3004", "state": "novo", "priority": 150, "metrics": {}}]');
     raise exception 'FALHOU: prioridade acima de 100 aceita';
   exception when check_violation then null; end;
+end $$;
+reset role;
+do $$
+declare
+  run uuid := current_setting('intel.run1')::uuid;
+  ca uuid := current_setting('intel.ca')::uuid;
+begin
+  if (select count(*) from private.intel_product_metrics m where m.run_id = run) <> 3
+     or (select flags from private.intel_product_metrics m where m.run_id = run and m.omie_product_id = '3003') <> '{demanda_recente}' then
+    raise exception 'FALHOU: lote repetido deveria substituir, não duplicar';
+  end if;
   if exists (select 1 from private.intel_current c where c.company_id = ca) then
     raise exception 'FALHOU: resultado visível antes do fim da execução';
   end if;
-  if not (public.stock_intel_finish(run, '{"teste": true}')->>'published')::boolean
-     or (select c.run_id from private.intel_current c where c.company_id = ca) <> run
-     or (select r.status from private.intel_runs r where r.id = run) <> 'published' then
+end $$;
+set local role service_role;
+do $$
+declare
+  run uuid := current_setting('intel.run1')::uuid;
+  ca uuid := current_setting('intel.ca')::uuid;
+begin
+  if not (public.stock_intel_finish(run, '{"teste": true}')->>'published')::boolean then
     raise exception 'FALHOU: fim da execução deveria publicar';
   end if;
   begin
@@ -183,39 +206,68 @@ begin
     raise exception 'FALHOU: gravou numa execução encerrada';
   exception when others then if sqlerrm not like '%encerrada%' then raise; end if; end;
 end $$;
+reset role;
+do $$
+declare
+  run uuid := current_setting('intel.run1')::uuid;
+  ca uuid := current_setting('intel.ca')::uuid;
+begin
+  if (select c.run_id from private.intel_current c where c.company_id = ca) <> run
+     or (select r.status from private.intel_runs r where r.id = run) <> 'published' then
+    raise exception 'FALHOU: fim da execução deveria trocar a execução em uso';
+  end if;
+end $$;
 
 -- 5. Falha mantém a execução anterior; falha atrasada não apaga o que já foi publicado;
 --    execução esquecida (sem fim há mais de 2 horas) é abandonada.
+set local role service_role;
+do $$
+declare
+  ca uuid := current_setting('intel.ca')::uuid;
+  run2 uuid;
+begin
+  run2 := (public.stock_intel_begin('ops', 'intel-test', true)->>'runId')::uuid;
+  perform set_config('intel.run2', run2::text, true);
+  perform public.stock_intel_publish(run2, ca, 0, '[{"omieProductId": "3001", "state": "novo", "priority": 1, "metrics": {}}]');
+  perform public.stock_intel_fail(run2, 'falha simulada');
+  perform public.stock_intel_fail(current_setting('intel.run1')::uuid, 'aviso atrasado');
+end $$;
+reset role;
 do $$
 declare
   ca uuid := current_setting('intel.ca')::uuid;
   run1 uuid := current_setting('intel.run1')::uuid;
-  run2 uuid;
-  v jsonb;
+  run2 uuid := current_setting('intel.run2')::uuid;
 begin
-  run2 := (public.stock_intel_begin('ops', 'intel-test', true)->>'runId')::uuid;
-  perform public.stock_intel_publish(run2, ca, 0, '[{"omieProductId": "3001", "state": "novo", "priority": 1, "metrics": {}}]');
-  perform public.stock_intel_fail(run2, 'falha simulada');
   if (select r.status from private.intel_runs r where r.id = run2) <> 'failed'
      or exists (select 1 from private.intel_product_metrics m where m.run_id = run2)
      or (select c.run_id from private.intel_current c where c.company_id = ca) <> run1 then
     raise exception 'FALHOU: falha deveria manter a execução anterior e apagar a nova';
   end if;
-  perform public.stock_intel_fail(run1, 'aviso atrasado');
   if (select r.status from private.intel_runs r where r.id = run1) <> 'published'
      or (select count(*) from private.intel_product_metrics m where m.run_id = run1) <> 3 then
     raise exception 'FALHOU: falha atrasada apagou uma execução publicada';
   end if;
   insert into private.intel_runs (trigger, algorithm_version, status, as_of, started_at)
     values ('ops', 'esquecida', 'running', current_setting('intel.t')::date, now() - interval '3 hours');
+end $$;
+set local role service_role;
+do $$
+declare v jsonb;
+begin
   v := public.stock_intel_begin('ops', 'intel-test', true);
-  if not (v->>'started')::boolean
-     or exists (select 1 from private.intel_runs r where r.algorithm_version = 'esquecida' and r.status <> 'abandoned') then
-    raise exception 'FALHOU: execução esquecida deveria ser abandonada: %', v;
+  if not (v->>'started')::boolean then
+    raise exception 'FALHOU: execução esquecida deveria ser abandonada e a nova começar: %', v;
   end if;
   perform public.stock_intel_fail((v->>'runId')::uuid, 'fim do teste');
 end $$;
 reset role;
+do $$
+begin
+  if exists (select 1 from private.intel_runs r where r.algorithm_version = 'esquecida' and r.status <> 'abandoned') then
+    raise exception 'FALHOU: execução esquecida deveria ficar como abandonada';
+  end if;
+end $$;
 
 -- 6. Dados oficiais intocados pelo motor.
 do $$

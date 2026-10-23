@@ -657,21 +657,24 @@ begin
 end $$;
 
 -- ===================================================================== wrappers e permissões
+-- Motor (service_role): SECURITY DEFINER no esquema public, como as funções do worker do estoque
+-- (0041) — o service_role não tem acesso ao esquema stock_internal. Só o service_role executa.
+-- Telas (authenticated): wrappers comuns; as regras ficam nas funções stock_internal.
 
 create or replace function public.stock_intel_begin(p_trigger text, p_version text, p_force boolean default false)
-returns jsonb language sql security invoker set search_path = pg_catalog, public as $$
+returns jsonb language sql security definer set search_path = pg_catalog, public, pg_temp as $$
   select stock_internal.intel_begin(p_trigger, p_version, p_force) $$;
 create or replace function public.stock_intel_extract(p_run uuid, p_company uuid)
-returns jsonb language sql security invoker set search_path = pg_catalog, public as $$
+returns jsonb language sql security definer set search_path = pg_catalog, public, pg_temp as $$
   select stock_internal.intel_extract(p_run, p_company) $$;
 create or replace function public.stock_intel_publish(p_run uuid, p_company uuid, p_chunk integer, p_rows jsonb)
-returns integer language sql security invoker set search_path = pg_catalog, public as $$
+returns integer language sql security definer set search_path = pg_catalog, public, pg_temp as $$
   select stock_internal.intel_publish(p_run, p_company, p_chunk, p_rows) $$;
 create or replace function public.stock_intel_finish(p_run uuid, p_stats jsonb)
-returns jsonb language sql security invoker set search_path = pg_catalog, public as $$
+returns jsonb language sql security definer set search_path = pg_catalog, public, pg_temp as $$
   select stock_internal.intel_finish(p_run, p_stats) $$;
 create or replace function public.stock_intel_fail(p_run uuid, p_error text)
-returns void language sql security invoker set search_path = pg_catalog, public as $$
+returns void language sql security definer set search_path = pg_catalog, public, pg_temp as $$
   select stock_internal.intel_fail(p_run, p_error) $$;
 create or replace function public.stock_intel_status()
 returns jsonb language sql security invoker set search_path = pg_catalog, public as $$
