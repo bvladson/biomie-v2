@@ -37,3 +37,4 @@ ops/operational-preview/
 
 # --- Logs de operacao (podem conter nomes de vendedores/clientes) ---
 ops/logs/
+**/.pytest_cache/

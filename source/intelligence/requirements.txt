@@ -1,0 +1,4 @@
+# BIOMIE Intelligence Engine: só o necessário (BSD). Sem statsforecast/numba nem scikit-learn por ora:
+# os dados (10 meses de vendas) e o servidor (2 CPUs compartilhadas) não justificam o peso.
+numpy==2.3.3
+pandas==2.3.3

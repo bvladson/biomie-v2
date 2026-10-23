@@ -8,6 +8,8 @@
     python ops/remote.py ops/41_homolog.py movements-probe <empresa-slug> [dias]   # 1 página do Omie, nada gravado
     python ops/remote.py ops/41_homolog.py movements-load [minutos]   # processa a fila de movimentações
                                                                       # da cópia (só LÊ o Omie)
+    python ops/remote.py ops/41_homolog.py intel-run [args do motor]  # BIOMIE Intelligence na cópia
+                                                                      # (ex.: run --trigger ops --force)
 
 Para olhar no navegador: túnel SSH local 3150 -> 127.0.0.1:3150 (29_smoke.py --hml já faz isso).
 
@@ -375,6 +377,36 @@ def oneoff(args, timeout):
     return {'exit': p.returncode, 'stdout': out, 'stderr': p.stderr[-1500:]}
 
 
+def intel_run(args, timeout):
+    """BIOMIE Intelligence (Python) na cópia: imagem própria da release em uso, contêiner avulso na rede
+    da homologação, só com a chave de serviço DELA, 0,5 CPU e 512 MB; não fala com o Omie."""
+    web_image = run(['docker', 'inspect', f'{PROJECT}-hml-web-1', '--format', '{{.Config.Image}}'])
+    short = web_image.rsplit('hml-', 1)[-1]
+    release = BASE / 'releases' / short
+    meta = json.loads((release / 'RELEASE.json').read_text())
+    image = f'biomie-v2-intel:hml-{short}'
+    started = time.time()
+    run(['docker', 'build', '-f', str(release / 'intelligence/Dockerfile'), '--build-arg', f"GIT_COMMIT={meta['commit']}",
+         '-t', image, str(release)], timeout=1800)
+    built = round(time.time() - started)
+    env = read_env(HML_ENV)
+    env_file = HML / 'intel.env'
+    write_private(env_file, f"SUPABASE_URL=http://hml-gateway:8000\nSUPABASE_SERVICE_ROLE_KEY={env['HML_SERVICE_KEY']}\n"
+                            'BIOMIE_INTEL_MAX_SECONDS=1200\n')
+    started = time.time()
+    try:
+        p = subprocess.run(['docker', 'run', '--rm', '--network', f'{PROJECT}_hml', '--cpus', '0.5', '--memory', '512m',
+                            '--env-file', str(env_file), image] + args, capture_output=True, text=True, timeout=timeout)
+    finally:
+        env_file.unlink(missing_ok=True)
+    out = p.stdout[-30000:]
+    err = p.stderr[-2000:]
+    for value in secret_values():
+        out, err = out.replace(value, '[REDACTED]'), err.replace(value, '[REDACTED]')
+    return {'image': image, 'buildSeconds': built, 'runSeconds': round(time.time() - started), 'exit': p.returncode,
+            'stdout': out, 'stderr': err}
+
+
 def down():
     if (HML / 'compose.yml').exists() and COMPOSE_ENV.exists():
         run(HML_COMPOSE + ['down', '--remove-orphans'], check=False)
@@ -434,6 +466,8 @@ elif command == 'movements-load':
     if not minutes.isdigit():
         raise SystemExit('minutos: número inteiro')
     out = oneoff(['.output/stock-movements-load.mjs', f'--minutes={minutes}'], int(minutes) * 60 + 600)
+elif command == 'intel-run':
+    out = intel_run(sys.argv[2:] or ['run', '--trigger', 'ops', '--force'], 1800)
 else:
     raise SystemExit(__doc__)
 print(json.dumps(out, indent=1, ensure_ascii=False, default=str))

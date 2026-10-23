@@ -164,5 +164,24 @@ services:
     mem_limit: 512m
     cpus: 0.75
     logging: *logging
+  # BIOMIE Intelligence Engine (migração 0044): contêiner avulso, perfil "jobs" — NÃO sobe com o
+  # `up -d`; roda sob demanda (`compose --profile jobs run --rm intelligence`), com limite de CPU e
+  # memória. Fala só com a API interna (gateway), nunca com o Omie; pode ser desligado no banco.
+  intelligence:
+    image: biomie-v2-intel:${RELEASE_ID}
+    build:
+      context: ${SOURCE_DIR}
+      dockerfile: intelligence/Dockerfile
+      args:
+        GIT_COMMIT: ${BIOMIE_GIT_COMMIT:-unknown}
+    profiles: [jobs]
+    depends_on: [gateway]
+    environment:
+      SUPABASE_URL: http://gateway:8000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      BIOMIE_INTEL_MAX_SECONDS: ${BIOMIE_INTEL_MAX_SECONDS:-1200}
+    mem_limit: 512m
+    cpus: 0.5
+    logging: *logging
 volumes:
   postgres_data:

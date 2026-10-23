@@ -1,0 +1,114 @@
+"""Uma execução do motor: uma por vez, empresa a empresa, publicada só quando termina inteira.
+
+Falha em qualquer empresa marca a execução como falha e apaga o que ela gravou; a tela continua
+vendo a execução anterior. O motor nunca chama o Omie nem altera dados oficiais.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from typing import Any, Callable
+
+import pandas as pd
+
+from . import VERSION
+from .api import RpcClient, RpcError
+from .metrics import (curve_history, month_list, monthly_series, product_metrics, returns_by_product,
+                      sales_frame, to_date, window_sums)
+from .states import classify, priority
+
+CHUNK = 400
+
+
+def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    as_of = to_date(extract["asOf"])
+    sales_from = to_date(extract.get("salesFrom"))
+    frame = sales_frame(extract.get("sales"))
+    sums = window_sums(frame, as_of)
+    months = month_list(as_of, sales_from)
+    series = monthly_series(frame, months)
+    returns = returns_by_product(extract.get("returns"))
+    history = curve_history(extract.get("curveHistory"))
+
+    items = []
+    for product in extract.get("products") or []:
+        omie = str(product["omieProductId"])
+        m = product_metrics(product, sums.get(omie, {}), series.get(omie, {}), months, returns.get(omie),
+                            history.get(omie), as_of, sales_from, params)
+        state, flags = classify(m, params)
+        items.append((product, m, state, flags))
+
+    capitals = pd.Series({i: m["capital"] for i, (_p, m, _s, _f) in enumerate(items)
+                          if (m["stock"]["qty"] or 0) > 0 and m["capital"] is not None}, dtype=float)
+    pct = capitals.rank(pct=True, method="average").to_dict() if not capitals.empty else {}
+
+    rows: list[dict[str, Any]] = []
+    by_state: dict[str, dict[str, Any]] = {}
+    for i, (product, m, state, flags) in enumerate(items):
+        score, parts = priority(m, state, pct.get(i), params)
+        rows.append({"omieProductId": str(product["omieProductId"]), "productId": product.get("productId"),
+                     "sku": product.get("sku"), "name": product.get("name"), "family": product.get("family"),
+                     "state": state, "flags": flags, "priority": score, "priorityParts": parts, "metrics": m})
+        bucket = by_state.setdefault(state, {"products": 0, "capital": 0.0})
+        bucket["products"] += 1
+        bucket["capital"] = round(bucket["capital"] + (m["capital"] or 0.0), 2)
+    stats = {
+        "products": len(rows),
+        "withStock": sum(1 for _p, m, _s, _f in items if (m["stock"]["qty"] or 0) > 0),
+        "unknownCost": sum(1 for _p, _m, _s, f in items if "custo_desconhecido" in f),
+        "byState": by_state,
+        "asOf": extract["asOf"], "salesFrom": extract.get("salesFrom"),
+    }
+    return rows, stats
+
+
+def _log(event: dict[str, Any]) -> None:
+    sys.stdout.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+    sys.stdout.flush()
+
+
+def run(client: RpcClient, trigger: str = "schedule", force: bool = False, company: str | None = None,
+        max_seconds: float = 1200.0, log: Callable[[dict[str, Any]], None] = _log,
+        clock: Callable[[], float] = time.monotonic) -> dict[str, Any]:
+    started = clock()
+    begin = client.call("stock_intel_begin", {"p_trigger": trigger, "p_version": VERSION, "p_force": force},
+                        retry=False)
+    if not begin or not begin.get("started"):
+        reason = (begin or {}).get("reason")
+        log({"event": "intel_skipped", "reason": reason})
+        return {"started": False, "reason": reason}
+    run_id, params = begin["runId"], begin["params"]
+    companies = [c for c in begin.get("companies") or [] if company in (None, c["id"], c["slug"])]
+    summary: dict[str, Any] = {}
+    try:
+        if company and not companies:
+            raise ValueError("Empresa não encontrada para a execução.")
+        for item in companies:
+            t0 = clock()
+            extract = client.call("stock_intel_extract", {"p_run": run_id, "p_company": item["id"]})
+            rows, stats = build_company_rows(extract, params)
+            for start in range(0, max(len(rows), 1), CHUNK):
+                client.call("stock_intel_publish", {"p_run": run_id, "p_company": item["id"],
+                                                    "p_chunk": start // CHUNK, "p_rows": rows[start:start + CHUNK]})
+            stats["seconds"] = round(clock() - t0, 1)
+            summary[item["slug"]] = stats
+            log({"event": "intel_company", "company": item["slug"], "products": stats["products"],
+                 "seconds": stats["seconds"]})
+            if clock() - started > max_seconds:
+                raise TimeoutError("Tempo máximo da execução esgotado.")
+        total = round(clock() - started, 1)
+        finish = client.call("stock_intel_finish", {"p_run": run_id, "p_stats": {
+            "version": VERSION, "seconds": total, "companies": summary}}, retry=False)
+        log({"event": "intel_published", "runId": run_id, "companies": (finish or {}).get("companies"),
+             "seconds": total})
+        return {"started": True, "runId": run_id, "published": True, "seconds": total, "companies": summary}
+    except Exception as error:  # noqa: BLE001 - qualquer falha encerra a execução sem publicar
+        message = client.redact(f"{type(error).__name__}: {error}")[:300]
+        try:
+            client.call("stock_intel_fail", {"p_run": run_id, "p_error": message}, retry=False)
+        except RpcError:
+            pass
+        log({"event": "intel_failed", "runId": run_id, "error": message})
+        raise
