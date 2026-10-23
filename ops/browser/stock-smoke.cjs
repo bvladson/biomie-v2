@@ -10,7 +10,9 @@ const base = process.env.BIOMIE_TEST_URL || 'https://biomie.magmoveiscorporativo
 const accounts = JSON.parse(process.env.BIOMIE_SMOKE_ACCOUNTS || '[]');
 const mode = process.env.BIOMIE_STOCK_MODE || 'off';
 // BIOMIE_STOCK_CURVES=1 (29_smoke.py --curves): passos da curva automática (migração 0043).
-const curves = process.env.BIOMIE_STOCK_CURVES === '1';
+// =ro (29_smoke.py --curves-readonly, para a PRODUÇÃO): os mesmos passos sem a curva manual (não grava nada).
+const curves = ['1', 'ro'].includes(process.env.BIOMIE_STOCK_CURVES);
+const curvesWrite = process.env.BIOMIE_STOCK_CURVES === '1';
 const shotsDir = process.env.BIOMIE_SMOKE_SHOTS;
 const shotPrefix = process.env.BIOMIE_SMOKE_SHOT_PREFIX;
 async function shot(page, name, fullPage = true) {
@@ -151,7 +153,7 @@ async function screen(page, path, heading) {
           shots: [full, detail, groupShot],
         };
       });
-      await step('super: curva manual com justificativa e volta para a automática', async () => {
+      if (curvesWrite) await step('super: curva manual com justificativa e volta para a automática', async () => {
         await sup.page.goto(base + '/estoque/posicoes?curve=%22D%22&view=%22product%22');
         await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 45000 });
         const first = sup.page.locator('table tbody tr').first();

@@ -4,9 +4,11 @@
     python ops/29_smoke.py --admin      # Admin 2.0 de ponta a ponta (Super admin, Admin da
                                         # MAG Filial e Vendedor): convite, senha temporária,
                                         # bloqueio, exclusão e as travas de cada perfil
-    python ops/29_smoke.py --stock [--stock-mode off|pilot|on]
+    python ops/29_smoke.py --stock [--stock-mode off|pilot|on] [--curves | --curves-readonly]
                                         # Estoque: telas, empresas, card no produto, celular,
-                                        # menu por liberação e vendedor sem custo
+                                        # menu por liberação e vendedor sem custo; --curves = curva
+                                        # automática (0043) com curva manual de teste (grava e desfaz);
+                                        # --curves-readonly = os mesmos passos sem gravar (produção)
     ... --hml                           # na HOMOLOGAÇÃO (41_homolog.py): túnel local 3150, contas
                                         # criadas e apagadas só lá; a produção não é tocada
 
@@ -136,7 +138,8 @@ try:
     report['create'] = remote({'action': 'create', 'accounts': accounts, 'hml': HML_MODE})
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
            'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp,
-           'BIOMIE_STOCK_MODE': STOCK_EXPECTED, 'BIOMIE_STOCK_CURVES': '1' if '--curves' in sys.argv else '0'}
+           'BIOMIE_STOCK_MODE': STOCK_EXPECTED,
+           'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0'}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
