@@ -135,6 +135,11 @@ accounts = [
     {'label': 'common', 'email': f'smoke-common-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'VIEWER', 'fullName': 'Smoke Common', 'companies': ['mag-filial'], 'legacy': {'mag-filial': ['licitacao']}},
 ]
+# Na homologação o teste de navegador é pesado: só na janela (ops/janela_testes.py).
+if HML_MODE:
+    sys.path.insert(0, str(BASE / 'ops'))
+    import janela_testes  # noqa: E402
+    sys.argv = [sys.argv[0]] + janela_testes.guard(pathlib.Path('29_smoke.py'), sys.argv[1:])
 report = {}
 tunnel = None
 try:

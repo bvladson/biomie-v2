@@ -63,6 +63,21 @@ def run(cmd, input=None, timeout=1800, check=True, env=None):
     return p.stdout.strip()
 
 
+# Builds da homologação num builder próprio limitado (o servidor tem 2 CPUs e atende a produção ao
+# mesmo tempo): 1 CPU e 3 GB. Parecer do monitoramento 1/3 (23/10/2026), item 3.
+BUILDER = 'biomie-hml-limitado'
+
+
+def build(args, timeout=3600):
+    if subprocess.run(['docker', 'buildx', 'inspect', BUILDER], capture_output=True).returncode:
+        run(['docker', 'buildx', 'create', '--name', BUILDER, '--driver', 'docker-container',
+             '--driver-opt', 'cpu-period=100000', '--driver-opt', 'cpu-quota=100000',
+             '--driver-opt', 'memory=3g'])
+    run(['docker', 'buildx', 'build', '--builder', BUILDER, '--load'] + args, timeout=timeout)
+    # O cache deste builder não entra na limpeza semanal do Docker: guarda só a última semana.
+    run(['docker', 'buildx', 'prune', '--builder', BUILDER, '--filter', 'until=168h', '-f'], check=False)
+
+
 def read_env(path):
     if not path.exists():
         return {}
@@ -160,6 +175,11 @@ begin
   end if;
 end $$;
 """)
+    # Limites da cópia no Postgres que ela divide com a produção (parecer de 23/10/2026, item 3): cada
+    # consulta da homologação usa no máximo 1 núcleo e para em 5 minutos. Valem para as novas sessões
+    # deste banco; a produção não muda.
+    psql(f"alter database {DB} set max_parallel_workers_per_gather = 0;"
+         f"alter database {DB} set statement_timeout = '300s';", db='postgres')
 
 
 def gateway_conf(release, env):
@@ -233,6 +253,7 @@ services:
       GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: {path}
     networks: [hml, prod]
     mem_limit: 256m
+    cpus: 0.25
   hml-rest:
     image: postgrest/postgrest:v14.18
     restart: unless-stopped
@@ -248,6 +269,7 @@ services:
       PGRST_DB_TX_END: commit
     networks: [hml, prod]
     mem_limit: 256m
+    cpus: 0.5
   hml-gateway:
     image: nginx:stable-alpine
     restart: unless-stopped
@@ -257,6 +279,7 @@ services:
       - {HML / 'gateway.conf'}:/etc/nginx/conf.d/default.conf:ro
     networks: [hml]
     mem_limit: 64m
+    cpus: 0.25
   hml-web:
     image: {image}
     restart: unless-stopped
@@ -280,7 +303,7 @@ services:
     init: true
     networks: [hml]
     mem_limit: 1536m
-    cpus: 1.0
+    cpus: 0.5
   hml-edge:
     image: nginx:stable-alpine
     restart: unless-stopped
@@ -290,6 +313,7 @@ services:
       - {HML / 'edge.conf'}:/etc/nginx/conf.d/default.conf:ro
     networks: [hml]
     mem_limit: 64m
+    cpus: 0.25
 networks:
   hml: {{}}
   prod:
@@ -329,7 +353,7 @@ def up(short):
     # 1. Migrações da release na cópia (as mesmas da ativação; a produção não é tocada).
     psql((release / 'deploy/db/00_supabase_compat.sql').read_text())
     rendered = run(['python3', str(release / 'scripts/render-vps-migrations.py')])
-    psql(rendered)
+    psql('set statement_timeout = 0;\n' + rendered)  # migrações não param no limite de 5 min da cópia
     neutralize()
     migrations = psql('select count(*) || \' / \' || max(name) from private.vps_schema_migrations;')
     # 2. Configurações da homologação (gateway com as chaves próprias e o "nginx público").
@@ -338,11 +362,11 @@ def up(short):
     (HML / 'edge.conf').write_text(EDGE_CONF)
     # 3. Imagem do web com o endereço e a chave pública da homologação embutidos no navegador.
     image = f'biomie-v2-web:hml-{short}'
-    run(['docker', 'build', '-f', str(release / 'deploy/vps/Dockerfile'),
-         '--build-arg', f'VITE_SUPABASE_URL={SITE}/supabase',
-         '--build-arg', f"VITE_SUPABASE_PUBLISHABLE_KEY={env['HML_ANON_KEY']}",
-         '--build-arg', f"GIT_COMMIT={meta['commit']}",
-         '-t', image, str(release)], timeout=3600)
+    build(['-f', str(release / 'deploy/vps/Dockerfile'),
+           '--build-arg', f'VITE_SUPABASE_URL={SITE}/supabase',
+           '--build-arg', f"VITE_SUPABASE_PUBLISHABLE_KEY={env['HML_ANON_KEY']}",
+           '--build-arg', f"GIT_COMMIT={meta['commit']}",
+           '-t', image, str(release)], timeout=3600)
     (HML / 'compose.yml').write_text(compose_yaml(image))
     stack = read_env(STACK_ENV)
     merged = {'AUTH_DB_PASSWORD': stack['AUTH_DB_PASSWORD'], 'REST_DB_PASSWORD': stack['REST_DB_PASSWORD'], **env}
@@ -386,8 +410,8 @@ def intel_run(args, timeout):
     meta = json.loads((release / 'RELEASE.json').read_text())
     image = f'biomie-v2-intel:hml-{short}'
     started = time.time()
-    run(['docker', 'build', '-f', str(release / 'intelligence/Dockerfile'), '--build-arg', f"GIT_COMMIT={meta['commit']}",
-         '-t', image, str(release)], timeout=1800)
+    build(['-f', str(release / 'intelligence/Dockerfile'), '--build-arg', f"GIT_COMMIT={meta['commit']}",
+           '-t', image, str(release)], timeout=1800)
     built = round(time.time() - started)
     env = read_env(HML_ENV)
     env_file = HML / 'intel.env'
