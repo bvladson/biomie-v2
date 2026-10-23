@@ -62,6 +62,18 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-curve-a: var(--curve-a);
+  --color-curve-b: var(--curve-b);
+  --color-curve-c: var(--curve-c);
+  --color-curve-d: var(--curve-d);
+  --color-curve-u: var(--curve-u);
+  --color-age-1: var(--age-1);
+  --color-age-2: var(--age-2);
+  --color-age-3: var(--age-3);
+  --color-age-4: var(--age-4);
+  --color-age-5: var(--age-5);
+  --color-age-6: var(--age-6);
+  --color-age-none: var(--age-none);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -123,6 +135,22 @@
   --chart-4: var(--brand-cyan); /* fills and highlights */
   --chart-5: var(--brand-light); /* fills and highlights */
 
+  /* Estoque: curvas A–D numa escala ordenada de um só azul (A mais forte) e "sem curva" neutro;
+     tempo sem venda numa escala de laranja (mais escuro = mais tempo). Validadas para contraste e
+     daltonismo (dataviz, 23/10/2026); o rótulo sempre acompanha a cor. */
+  --curve-a: #003981;
+  --curve-b: #0057bf;
+  --curve-c: #297cef;
+  --curve-d: #6ba5fb;
+  --curve-u: #8a99ab;
+  --age-1: #f2985f;
+  --age-2: #e27d36;
+  --age-3: #cd6505;
+  --age-4: #b05400;
+  --age-5: #924500;
+  --age-6: #753600;
+  --age-none: #a3b1c2;
+
   /* Sidebar */
   --sidebar: var(--brand-navy);
   --sidebar-foreground: #c7d5e8;
@@ -168,6 +196,19 @@
   --chart-3: var(--brand-cyan);
   --chart-4: var(--brand-cyan);
   --chart-5: var(--brand-light);
+  /* Escalas do Estoque no escuro: a ordem se inverte (mais forte = mais claro). */
+  --curve-a: #b0d5fe;
+  --curve-b: #7ab9ff;
+  --curve-c: #3698f9;
+  --curve-d: #0278d7;
+  --curve-u: #6b809c;
+  --age-1: #944e00;
+  --age-2: #b15f01;
+  --age-3: #ce7005;
+  --age-4: #e58631;
+  --age-5: #f5a15e;
+  --age-6: #ffbe8d;
+  --age-none: #5d7290;
   --sidebar: #000d24;
   --sidebar-foreground: #c7d5e8;
   --sidebar-primary: var(--brand-cyan);

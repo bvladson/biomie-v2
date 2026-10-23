@@ -13,22 +13,18 @@ import { AlertTriangle, PackageOpen } from "lucide-react";
 import type { Curve, StockReading } from "../api/contract";
 import { dateTime, errorMessage } from "../lib/format";
 const curveLabel = (c: Curve) => (c === "U" ? "Sem curva" : `Curva ${c}`);
+/** Classes completas (o Tailwind só gera as que aparecem escritas): cores em styles.css. */
+const CURVE_DOT: Record<Curve, string> = {
+  A: "bg-curve-a",
+  B: "bg-curve-b",
+  C: "bg-curve-c",
+  D: "bg-curve-d",
+  U: "bg-curve-u",
+};
 export function CurveBadge({ curve }: { curve: Curve }) {
   return (
     <Badge variant="outline" className="gap-2 whitespace-nowrap text-foreground">
-      <span
-        className={
-          curve === "A"
-            ? "size-2 rounded-full bg-chart-1"
-            : curve === "B"
-              ? "size-2 rounded-full bg-chart-3"
-              : curve === "C"
-                ? "size-2 rounded-full bg-chart-4"
-                : curve === "D"
-                  ? "size-2 rounded-full bg-chart-5"
-                  : "size-2 rounded-full bg-chart-2"
-        }
-      />
+      <span aria-hidden className={`size-2 rounded-full ${CURVE_DOT[curve]}`} />
       {curveLabel(curve)}
     </Badge>
   );
