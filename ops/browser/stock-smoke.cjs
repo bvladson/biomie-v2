@@ -13,10 +13,10 @@ const mode = process.env.BIOMIE_STOCK_MODE || 'off';
 const curves = process.env.BIOMIE_STOCK_CURVES === '1';
 const shotsDir = process.env.BIOMIE_SMOKE_SHOTS;
 const shotPrefix = process.env.BIOMIE_SMOKE_SHOT_PREFIX;
-async function shot(page, name) {
+async function shot(page, name, fullPage = true) {
   if (!shotsDir || !shotPrefix) return null;
   const file = require('node:path').join(shotsDir, `${shotPrefix}-${name}.png`);
-  await page.screenshot({ path: file, fullPage: true });
+  await page.screenshot({ path: file, fullPage });
   return file;
 }
 const account = (label) => accounts.find((a) => a.label === label);
@@ -133,10 +133,22 @@ async function screen(page, path, heading) {
         await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 45000 });
         const exitLine = sup.page.getByText(/^Saída \d{2}\/\d{2}\/\d{4} · /).first();
         await exitLine.waitFor({ timeout: 45000 });
+        const full = await shot(sup.page, 'curva-d-saida-recente');
+        // Colunas da direita (entrada/saída e indicadores): a tabela rola na horizontal.
+        await exitLine.scrollIntoViewIfNeeded();
+        const detail = await shot(sup.page, 'curva-d-saida-recente-detalhe', false);
+        const group = sup.page.getByText('Venda para o grupo').first();
+        const groupBadge = (await group.count()) > 0;
+        let groupShot = null;
+        if (groupBadge) {
+          await group.scrollIntoViewIfNeeded();
+          groupShot = await shot(sup.page, 'curva-d-venda-para-o-grupo', false);
+        }
         return {
           card: text.slice(0, 160),
           exit: (await exitLine.innerText()).slice(0, 80),
-          shot: await shot(sup.page, 'curva-d-saida-recente'),
+          groupBadge,
+          shots: [full, detail, groupShot],
         };
       });
       await step('super: curva manual com justificativa e volta para a automática', async () => {

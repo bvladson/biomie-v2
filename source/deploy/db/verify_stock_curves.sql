@@ -89,6 +89,11 @@ begin
     (ca, 22, t - 1, 'entrada', '24', false, '1004', 3, 'NE-5'),
     (ca, 23, t - 1, 'saida', '24', true, '1004', 3, 'NE-5'),
     (ca, 24, t - 8, 'saida', '11', false, '1011', 1, 'NF-G1');
+  -- Transferência do painel entre locais há 6 dias (ajuste manual em par): não é giro nem chegada.
+  insert into private.stock_movements (company_id, movement_id, moved_on, kind, operation, canceled,
+      omie_product_id, qty, location_code) values
+    (ca, 25, t - 6, 'saida', '00', false, '1010', -2, '1'),
+    (ca, 26, t - 6, 'entrada', '00', false, '1010', 2, '2');
   insert into public.invoices (company_id, seller_id, customer_id, number, competence_date, total, source, external_id,
       gross_amount, goods_amount, commercial_base_amount, operation_scope, business_channel, is_biomie_commercial_visible)
     values (ca, s, cu, 'NF-G1', t - 8, 0, 'omie', 'crv-g1-' || ca, 0, 0, 0, 'commercial', 'outros', false);
@@ -211,8 +216,9 @@ begin
     if r->>'omieProductId' = '1006' and ((r->>'lastExit')::date <> t - 30 or r->>'lastExitOperation' <> '28'
         or not (r->>'recentExit')::boolean or (r->>'lastExitGroup')::boolean) then
       raise exception 'FALHOU: consumo da produção como saída recente: %', r; end if;
-    if r->>'omieProductId' = '1010' and ((r->>'recentExit')::boolean or (r->>'lastExit')::date <> t - 240) then
-      raise exception 'FALHOU: venda cancelada contou como saída (a última de verdade tem 240 dias): %', r; end if;
+    if r->>'omieProductId' = '1010' and ((r->>'recentExit')::boolean or (r->>'lastExit')::date <> t - 240
+        or (r->>'lastEntry')::date <> t - 250) then
+      raise exception 'FALHOU: venda cancelada ou transferência entre locais contou como saída/entrada (as de verdade têm 240 e 250 dias): %', r; end if;
     if r->>'omieProductId' = '1011' and ((r->>'lastExit')::date <> t - 8 or r->>'lastExitOperation' <> '11'
         or not (r->>'recentExit')::boolean or not (r->>'lastExitGroup')::boolean) then
       raise exception 'FALHOU: venda para empresa do grupo como saída recente marcada: %', r; end if;

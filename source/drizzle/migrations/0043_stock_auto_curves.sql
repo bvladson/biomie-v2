@@ -226,6 +226,9 @@ $$;
 -- Estornos: o Omie lança o cancelamento no sentido oposto, com cancelamento = S, a mesma operação e o
 -- mesmo documento (22/10/2026: 359 de 359 acham o original). O cancelamento nunca conta e o movimento
 -- estornado também não: venda cancelada não é saída, nota de entrada cancelada não é chegada.
+-- Transferência entre locais: o Omie lança ajuste manual (00) de saída num local e de entrada no outro,
+-- no mesmo dia e com a mesma quantidade (MAG Filial, 23/10/2026: 459 de 951 saídas manuais). O par não
+-- é giro nem chegada; ajuste manual sem par continua contando.
 create or replace function stock_internal.is_exit(p_operation text) returns boolean
 language sql immutable set search_path = pg_catalog as $$
   select coalesce(p_operation in ('00', '11', '12', '14', '23', '28'), false)
@@ -377,7 +380,11 @@ begin
       and m.kind = 'entrada' and not m.canceled and stock_internal.is_receipt(m.operation)
       and not exists (select 1 from private.stock_movements r
         where r.company_id = m.company_id and r.omie_product_id = m.omie_product_id and r.kind = 'saida'
-          and r.canceled and r.operation = m.operation and r.document = m.document)) ent on true
+          and r.canceled and r.operation = m.operation and r.document = m.document)
+      and not (m.operation = '00' and exists (select 1 from private.stock_movements r
+        where r.company_id = m.company_id and r.omie_product_id = m.omie_product_id and r.kind = 'saida'
+          and r.operation = '00' and not r.canceled and r.moved_on = m.moved_on and abs(r.qty) = abs(m.qty)))
+    ) ent on true
   left join lateral (
     select max(m.moved_on) as last_exit,
       (array_agg(m.operation order by m.moved_on desc, m.movement_id desc))[1] as last_operation,
@@ -387,7 +394,11 @@ begin
       and m.kind = 'saida' and not m.canceled and stock_internal.is_exit(m.operation)
       and not exists (select 1 from private.stock_movements r
         where r.company_id = m.company_id and r.omie_product_id = m.omie_product_id and r.kind = 'entrada'
-          and r.canceled and r.operation = m.operation and r.document = m.document)) ex on true
+          and r.canceled and r.operation = m.operation and r.document = m.document)
+      and not (m.operation = '00' and exists (select 1 from private.stock_movements r
+        where r.company_id = m.company_id and r.omie_product_id = m.omie_product_id and r.kind = 'entrada'
+          and r.operation = '00' and not r.canceled and r.moved_on = m.moved_on and abs(r.qty) = abs(m.qty)))
+    ) ex on true
   left join lateral (
     select a.company_id, a.last_sale from private.stock_auto_curves a
     join public.companies oc on oc.id = a.company_id and not oc.is_demo
