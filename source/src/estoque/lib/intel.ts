@@ -102,6 +102,8 @@ export const FLAG_LABELS: Record<string, string> = {
   demanda_recente: "Demanda recente",
 };
 export const flagLabel = (flag: string) => FLAG_LABELS[flag] ?? flag;
+/** Sinais que revelam custo: o banco só os entrega a quem vê custo (migração 0045). */
+export const COST_FLAGS = ["custo_desconhecido", "custo_provisorio", "custo_divergente"];
 
 /** Escala ordenada (A mais forte), a mesma do selo de curva; valores em styles.css. */
 export const CURVE_COLORS: Record<Curve, string> = {

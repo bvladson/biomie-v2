@@ -37,7 +37,7 @@ export interface IntelStatus {
 export interface CurveCapital {
   products: number; // produtos com saldo positivo
   capital: number | null; // saldos positivos × custo; null sem permissão de custo
-  unknownCost: number; // produtos com saldo e sem custo (fora do capital)
+  unknownCost: number | null; // produtos com saldo e sem custo (fora do capital); null sem permissão de custo
 }
 
 export interface IntelTopItem {

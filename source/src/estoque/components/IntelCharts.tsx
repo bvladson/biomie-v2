@@ -241,7 +241,7 @@ export function CurveChart({
               <TableHead className="text-right">Produtos com saldo</TableHead>
               {viewCost && <TableHead className="text-right">Capital</TableHead>}
               {viewCost && <TableHead className="text-right">% do capital</TableHead>}
-              <TableHead className="text-right">Sem custo</TableHead>
+              {viewCost && <TableHead className="text-right">Sem custo</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -255,9 +255,11 @@ export function CurveChart({
                 {viewCost && (
                   <TableCell className="text-right tabular-nums">{percentText(r.value)}</TableCell>
                 )}
-                <TableCell className="text-right tabular-nums">
-                  {integer(byCurve[r.curve]?.unknownCost ?? 0)}
-                </TableCell>
+                {viewCost && (
+                  <TableCell className="text-right tabular-nums">
+                    {integer(byCurve[r.curve]?.unknownCost ?? 0)}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

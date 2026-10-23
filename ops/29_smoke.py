@@ -9,6 +9,9 @@
                                         # menu por liberação e vendedor sem custo; --curves = curva
                                         # automática (0043) com curva manual de teste (grava e desfaz);
                                         # --curves-readonly = os mesmos passos sem gravar (produção)
+    ... --stock --intel | --intel-empty   # Inteligência (0044): painel, card = lista, gaveta do
+                                        # produto, Pareto, celular e vendedor sem custo (só leitura);
+                                        # --intel-empty = a tela avisa que ainda não há análise
     ... --hml                           # na HOMOLOGAÇÃO (41_homolog.py): túnel local 3150, contas
                                         # criadas e apagadas só lá; a produção não é tocada
 
@@ -139,7 +142,8 @@ try:
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
            'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp,
            'BIOMIE_STOCK_MODE': STOCK_EXPECTED,
-           'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0'}
+           'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0',
+           'BIOMIE_STOCK_INTEL': '1' if '--intel' in sys.argv else 'empty' if '--intel-empty' in sys.argv else '0'}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]

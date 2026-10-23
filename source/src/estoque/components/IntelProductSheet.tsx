@@ -80,10 +80,17 @@ function PriorityExplained({
   priority: number | null;
   parts: PriorityParts | null;
 }) {
-  if (priority === null || parts === null)
+  if (priority === null)
     return (
       <p className="text-sm text-muted-foreground">
         Sem prioridade: o produto não tem saldo positivo para liberar.
+      </p>
+    );
+  if (parts === null)
+    return (
+      <p className="text-sm text-muted-foreground">
+        Prioridade {priority.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}. O detalhe usa o
+        capital do produto (custo) e aparece só para quem pode ver custos.
       </p>
     );
   return (

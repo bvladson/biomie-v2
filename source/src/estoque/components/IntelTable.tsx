@@ -35,6 +35,7 @@ import { shortDate } from "../lib/curves";
 import {
   BAND_LABELS,
   BAND_ORDER,
+  COST_FLAGS,
   FLAG_LABELS,
   MIN_IDLE,
   STATE_LABELS,
@@ -219,7 +220,9 @@ export function IntelTable({
           onChange={(v) => set({ flag: v === ALL ? undefined : v })}
           options={[
             { value: ALL, label: "Todos" },
-            ...Object.entries(FLAG_LABELS).map(([value, label]) => ({ value, label })),
+            ...Object.entries(FLAG_LABELS)
+              .filter(([value]) => viewCost || !COST_FLAGS.includes(value))
+              .map(([value, label]) => ({ value, label })),
           ]}
         />
       </div>

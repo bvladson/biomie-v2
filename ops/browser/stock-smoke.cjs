@@ -13,6 +13,24 @@ const mode = process.env.BIOMIE_STOCK_MODE || 'off';
 // =ro (29_smoke.py --curves-readonly, para a PRODUÇÃO): os mesmos passos sem a curva manual (não grava nada).
 const curves = ['1', 'ro'].includes(process.env.BIOMIE_STOCK_CURVES);
 const curvesWrite = process.env.BIOMIE_STOCK_CURVES === '1';
+// BIOMIE_STOCK_INTEL=1 (29_smoke.py --intel): Inteligência (0044) com análise publicada;
+// =empty (--intel-empty): a tela abre e avisa que ainda não há análise. Só leitura nos dois casos.
+const intel = process.env.BIOMIE_STOCK_INTEL;
+// Primeiro número do texto, no formato do Brasil (1.234 = mil duzentos e trinta e quatro).
+const firstNumber = (text) => {
+  const m = /\d[\d.]*/.exec(String(text));
+  return m ? Number(m[0].replace(/\./g, '')) : null;
+};
+async function until(check, ms = 30000) {
+  const deadline = Date.now() + ms;
+  let last;
+  while (Date.now() < deadline) {
+    last = await check();
+    if (last.ok) return last;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return last;
+}
 const shotsDir = process.env.BIOMIE_SMOKE_SHOTS;
 const shotPrefix = process.env.BIOMIE_SMOKE_SHOT_PREFIX;
 async function shot(page, name, fullPage = true) {
@@ -181,6 +199,69 @@ async function screen(page, path, heading) {
         return { product: name.slice(0, 80), shots: [dialogShot, manualShot] };
       });
     }
+    if (intel === '1' || intel === 'empty') {
+      await step('super: inteligência — painel', async () => {
+        await sup.page.goto(base + '/estoque/inteligencia');
+        await sup.page.getByRole('heading', { name: 'Inteligência do estoque' }).waitFor({ timeout: 60000 });
+        if (!(await sup.page.getByRole('link', { name: 'Inteligência', exact: true }).count()))
+          throw new Error('aba Inteligência ausente para o Super admin');
+        if (intel === 'empty') {
+          await sup.page.getByText('Nenhuma análise publicada ainda').waitFor({ timeout: 45000 });
+          return { empty: true, shot: await shot(sup.page, 'inteligencia-vazia') };
+        }
+        await sup.page.getByRole('heading', { name: 'Radar do capital parado' }).waitFor({ timeout: 60000 });
+        await sup.page.getByRole('heading', { name: 'Diagnóstico por estado' }).waitFor({ timeout: 45000 });
+        await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 60000 });
+        if (await sup.page.getByText('Não foi possível carregar o estoque').count())
+          throw new Error('mensagem de falha na tela');
+        const run = (await sup.page.getByText(/Análise publicada em/).first().innerText()).slice(0, 220);
+        const tiles = await sup.page.locator('#stock-main .panel').evaluateAll((els) =>
+          els.slice(0, 6).map((e) => e.innerText.replace(/\s+/g, ' ').trim().slice(0, 90)));
+        return { run, tiles, shot: await shot(sup.page, 'inteligencia') };
+      });
+      if (intel === '1') {
+        await step('super: inteligência — card abre a lista com o mesmo total', async () => {
+          const out = [];
+          for (const label of [/Sem venda há mais de 180 dias/, /Produtos novos/]) {
+            await sup.page.goto(base + '/estoque/inteligencia');
+            const tile = sup.page.getByRole('button', { name: label }).first();
+            await tile.waitFor({ timeout: 60000 });
+            const value = firstNumber((await tile.innerText()).split('\n')[1]);
+            await tile.click();
+            await sup.page.waitForURL(/semVenda=|estado=/, { timeout: 45000 });
+            const seen = await until(async () => {
+              const text = await sup.page.getByText(/produtos? · página/).first().innerText().catch(() => '');
+              return { ok: firstNumber(text) === value, text };
+            });
+            if (!seen.ok) throw new Error(`card ${value} × lista "${seen.text}"`);
+            out.push({ card: String(label), value, list: seen.text });
+          }
+          return { cards: out, url: new URL(sup.page.url()).search.slice(0, 120) };
+        });
+        await step('super: inteligência — gaveta do produto', async () => {
+          await sup.page.goto(base + '/estoque/inteligencia');
+          await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 60000 });
+          const first = sup.page.locator('#intel-produtos table tbody tr').first().getByRole('button').first();
+          const name = (await first.innerText()).slice(0, 80);
+          await first.click();
+          const dialog = sup.page.getByRole('dialog');
+          await dialog.getByText('Por que este estado').waitFor({ timeout: 45000 });
+          await dialog.getByText('Como a prioridade foi calculada').waitFor({ timeout: 45000 });
+          const rule = (await dialog.locator('section').first().innerText()).replace(/\s+/g, ' ').slice(0, 300);
+          const file = await shot(sup.page, 'inteligencia-produto', false);
+          await sup.page.keyboard.press('Escape');
+          return { name, rule, shot: file };
+        });
+        await step('super: inteligência — Pareto de uma empresa', async () => {
+          await sup.page.goto(base + '/estoque/inteligencia');
+          await sup.page.getByRole('radiogroup', { name: 'Empresas do estoque' }).getByRole('radio').first().click();
+          await sup.page.getByRole('heading', { name: /Pareto do faturamento/ }).waitFor({ timeout: 60000 });
+          const foot = (await sup.page.getByText(/^Curva A: .* produtos até/).first().innerText()).slice(0, 220);
+          await sup.page.getByRole('heading', { name: /Pareto do faturamento/ }).scrollIntoViewIfNeeded();
+          return { foot, shot: await shot(sup.page, 'inteligencia-pareto', false) };
+        });
+      }
+    }
     const mobile = await open(browser, 390);
     await step('super: celular sem rolagem lateral', async () => {
       await login(mobile.page, 'super');
@@ -188,6 +269,13 @@ async function screen(page, path, heading) {
       await mobile.page.getByText(/Posições de estoque|A primeira leitura/).first().waitFor({ timeout: 45000 });
       const wide = await mobile.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       if (wide > 2) throw new Error(`página ${wide}px mais larga que a tela`);
+    });
+    if (intel === '1') await step('super: inteligência no celular sem rolagem lateral', async () => {
+      await mobile.page.goto(base + '/estoque/inteligencia');
+      await mobile.page.getByText(/produtos? · página/).waitFor({ timeout: 60000 });
+      const wide = await mobile.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      if (wide > 2) throw new Error(`página ${wide}px mais larga que a tela`);
+      return { shot: await shot(mobile.page, 'inteligencia-celular') };
     });
 
     const ges = await open(browser);
@@ -221,6 +309,23 @@ async function screen(page, path, heading) {
       if (curves && (await ven.page.getByRole('columnheader', { name: /Faturamento/ }).count()))
         throw new Error('vendedor viu o faturamento da curva');
       return { mode };
+    });
+    if (intel === '1') await step('vendedor: inteligência sem custo, Pareto ou exportação', async () => {
+      await ven.page.goto(base + '/estoque/inteligencia');
+      if (mode !== 'on') {
+        await ven.page.getByText('ainda não foi liberado para o seu perfil').waitFor({ timeout: 45000 });
+        return { mode };
+      }
+      await ven.page.getByRole('heading', { name: 'Inteligência do estoque' }).waitFor({ timeout: 60000 });
+      await ven.page.getByText(/produtos? · página/).waitFor({ timeout: 60000 });
+      if (await ven.page.getByText('Capital em estoque').count()) throw new Error('vendedor viu o capital em estoque');
+      if (await ven.page.getByRole('columnheader', { name: 'Capital' }).count()) throw new Error('vendedor viu a coluna Capital');
+      if (await ven.page.getByRole('heading', { name: /Pareto do faturamento/ }).count()) throw new Error('vendedor viu o Pareto');
+      if (await ven.page.getByRole('button', { name: 'Exportar CSV' }).count()) throw new Error('vendedor pode exportar');
+      const text = await ven.page.locator('#stock-main').innerText();
+      if (/R\$\s?\d/.test(text)) throw new Error('vendedor viu valor em R$');
+      return { mode, tab: await ven.page.getByRole('link', { name: 'Inteligência', exact: true }).count(),
+               shot: await shot(ven.page, 'inteligencia-vendedor') };
     });
   } finally {
     await browser.close();

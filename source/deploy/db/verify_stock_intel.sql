@@ -163,7 +163,10 @@ begin
         'curve', jsonb_build_object('current', 'A', 'source', 'auto', 'revenue12m', 200),
         'sales', jsonb_build_object('d365', jsonb_build_object('units', 2, 'revenue', 200)))),
     jsonb_build_object('omieProductId', '3002', 'sku', 'SKU-3002', 'name', 'Cadeira parada',
-      'state', 'historico_insuficiente', 'flags', jsonb_build_array(), 'priority', 61, 'metrics', jsonb_build_object(
+      'state', 'historico_insuficiente', 'flags', jsonb_build_array('custo_provisorio'), 'priority', 61,
+      'priorityParts', jsonb_build_object('capital', 1, 'idle', 0.05, 'coverage', 1, 'trend', 0,
+        'weights', jsonb_build_object('capital', 0.4, 'idle', 0.3, 'coverage', 0.15, 'trend', 0.15)),
+      'metrics', jsonb_build_object(
         'capital', 60, 'stock', jsonb_build_object('qty', 3, 'available', 3), 'daysWithoutSale', 20,
         'lastSale', null, 'cost', jsonb_build_object('unitCost', 20),
         'curve', jsonb_build_object('current', 'D', 'source', 'auto')))));
@@ -327,6 +330,13 @@ begin
   if (public.stock_intel_product(ca, '3002')->'metrics'->>'capital')::numeric <> 60 then
     raise exception 'FALHOU: produto com custo para o Super admin';
   end if;
+  -- 0045: sinais de custo e explicação da prioridade continuam visíveis para quem vê custo.
+  if (public.stock_intel_products(jsonb_build_object('companyId', ca, 'flag', 'custo_provisorio'))->>'total')::integer <> 1
+     or not (public.stock_intel_product(ca, '3002')->'flags') ? 'custo_provisorio'
+     or public.stock_intel_product(ca, '3002')->'priorityParts' = 'null'::jsonb
+     or (public.stock_intel_overview(ca, '12m')->'capital'->'byCurve'->'D'->>'unknownCost') is null then
+    raise exception 'FALHOU: Super admin deveria ver sinais de custo, explicação da prioridade e produtos sem custo';
+  end if;
   v := public.stock_intel_pareto(ca, '12m');
   if (v->>'total')::numeric <> 300 or jsonb_array_length(v->'rows') <> 2 or v->'rows'->0->>1 <> '3001'
      or (v->'rows'->0->>6)::numeric <> 0.666667 or v->'limits' <> '[80, 95]'::jsonb then
@@ -359,6 +369,20 @@ begin
      or v->'metrics'->'sales'->'d365' ? 'revenue' or v->'metrics'->'sales'->'d365'->>'units' <> '2' then
     raise exception 'FALHOU: produto do vendedor deveria vir sem custo e sem faturamento: %', v->'metrics';
   end if;
+  -- 0045: sinal de custo ("até R$ 1"), explicação da prioridade (capital) e sem custo por curva: não.
+  v := public.stock_intel_product(ca, '3002');
+  if v->'flags' <> '[]'::jsonb or v->'priorityParts' <> 'null'::jsonb then
+    raise exception 'FALHOU: vendedor viu sinal de custo ou a explicação da prioridade: % %', v->'flags', v->'priorityParts';
+  end if;
+  if exists (select 1 from jsonb_array_elements(public.stock_intel_products(jsonb_build_object('companyId', ca))->'rows') r
+             where r->'flags' ? 'custo_provisorio' or r->'priorityParts' <> 'null'::jsonb)
+     or public.stock_intel_overview(ca, '12m')->'capital'->'byCurve'->'D'->'unknownCost' <> 'null'::jsonb then
+    raise exception 'FALHOU: lista ou painel do vendedor com sinal de custo';
+  end if;
+  begin
+    perform public.stock_intel_products(jsonb_build_object('companyId', ca, 'flag', 'custo_provisorio'));
+    raise exception 'FALHOU: vendedor filtrou por sinal de custo';
+  exception when others then if sqlerrm not like '%custos%' then raise; end if; end;
   begin
     perform public.stock_intel_products(jsonb_build_object('companyId', ca, 'page', -1));
     raise exception 'FALHOU: vendedor exportou';
