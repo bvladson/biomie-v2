@@ -17,6 +17,7 @@ from . import VERSION
 from .api import RpcClient, RpcError
 from .diagnosis import detect_alerts, diagnose, recommend
 from .forecast import forecast
+from .replenishment import buy_recommendation, index_entry, opportunities, plan, resolve_params
 from .metrics import (curve_history, month_list, monthly_series, product_metrics, returns_by_product,
                       sales_frame, to_date, window_sums)
 from .states import classify, priority
@@ -24,7 +25,8 @@ from .states import classify, priority
 CHUNK = 200  # ~0,7 MB por lote com diagnósticos e previsão (gateway interno aceita 8 MB)
 
 
-def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def build_company_rows(extract: dict[str, Any], params: dict[str, Any],
+                       replenishment: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     as_of = to_date(extract["asOf"])
     sales_from = to_date(extract.get("salesFrom"))
     frame = sales_frame(extract.get("sales"))
@@ -54,6 +56,8 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
     by_state: dict[str, dict[str, Any]] = {}
     alerts_by_severity: dict[str, int] = {}
     forecasts: dict[str, int] = {}
+    buying: dict[str, int] = {}
+    company_id = str(extract.get("companyId"))
     for i, (product, m, state, flags) in enumerate(items):
         score, parts = priority(m, state, pct.get(i), params)
         m["diagnoses"] = diagnose(m, state, flags, params)
@@ -62,6 +66,12 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
         m["forecast"] = forecast(m, daily.get(str(product["omieProductId"]), []), as_of, sales_from)
         key = m["forecast"]["status"] if m["forecast"]["status"] != "ok" else f"ok_{m['forecast']['backtest']['quality']}"
         forecasts[key] = forecasts.get(key, 0) + 1
+        omie = str(product["omieProductId"])
+        m["replenishment"] = plan(m, state, resolve_params(replenishment or [], company_id, omie, product.get("family")))
+        buy = buy_recommendation(m["replenishment"])
+        if buy:
+            m["recommendations"].insert(0, buy)
+        buying[m["replenishment"]["status"]] = buying.get(m["replenishment"]["status"], 0) + 1
         for alert in m["alerts"]:
             alerts_by_severity[alert["severity"]] = alerts_by_severity.get(alert["severity"], 0) + 1
         rows.append({"omieProductId": str(product["omieProductId"]), "productId": product.get("productId"),
@@ -77,6 +87,7 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
         "byState": by_state,
         "alerts": alerts_by_severity,
         "forecasts": forecasts,
+        "replenishment": buying,
         "asOf": extract["asOf"], "salesFrom": extract.get("salesFrom"),
     }
     return rows, stats
@@ -100,13 +111,16 @@ def run(client: RpcClient, trigger: str = "schedule", force: bool = False, compa
     run_id, params = begin["runId"], begin["params"]
     companies = [c for c in begin.get("companies") or [] if company in (None, c["id"], c["slug"])]
     summary: dict[str, Any] = {}
+    entries: list[dict[str, Any]] = []
     try:
         if company and not companies:
             raise ValueError("Empresa não encontrada para a execução.")
+        planning = client.call("stock_intel_planning", {"p_run": run_id}) or {}
         for item in companies:
             t0 = clock()
             extract = client.call("stock_intel_extract", {"p_run": run_id, "p_company": item["id"]})
-            rows, stats = build_company_rows(extract, params)
+            rows, stats = build_company_rows(extract, params, planning.get("replenishment") or [])
+            entries.extend(e for e in (index_entry(item, r) for r in rows) if e is not None)
             for start in range(0, max(len(rows), 1), CHUNK):
                 client.call("stock_intel_publish", {"p_run": run_id, "p_company": item["id"],
                                                     "p_chunk": start // CHUNK, "p_rows": rows[start:start + CHUNK]})
@@ -116,9 +130,15 @@ def run(client: RpcClient, trigger: str = "schedule", force: bool = False, compa
                  "seconds": stats["seconds"]})
             if clock() - started > max_seconds:
                 raise TimeoutError("Tempo máximo da execução esgotado.")
+        # Oportunidades entre empresas só numa execução com todas as empresas (comparar exige as duas).
+        opps = opportunities(entries, float(params["ruptureCoverageDays"])) if company is None else []
+        if company is None:
+            for start in range(0, max(len(opps), 1), 1000):
+                client.call("stock_intel_publish_opportunities", {"p_run": run_id, "p_chunk": start // 1000,
+                                                                 "p_rows": opps[start:start + 1000]})
         total = round(clock() - started, 1)
         finish = client.call("stock_intel_finish", {"p_run": run_id, "p_stats": {
-            "version": VERSION, "seconds": total, "companies": summary}}, retry=False)
+            "version": VERSION, "seconds": total, "companies": summary, "opportunities": len(opps)}}, retry=False)
         log({"event": "intel_published", "runId": run_id, "companies": (finish or {}).get("companies"),
              "seconds": total})
         return {"started": True, "runId": run_id, "published": True, "seconds": total, "companies": summary}
