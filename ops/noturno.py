@@ -38,8 +38,8 @@ WAIT = [] if '--teste' in sys.argv else ['--esperar']
 LOGS = BASE / 'ops' / 'logs'
 # sales_kpis rápido (migração 0046, branch perf/sales-kpis, commit fe85aca).
 SALES_KPIS_RELEASE = 'fe85acab7ae6'
-# Inteligência do Estoque fases 1–5 (branch feature/estoque-inteligencia, commit ccfff1f).
-INTEL_RELEASE = 'ccfff1fcbbac'
+# Inteligência do Estoque fases 1–5 (branch feature/estoque-inteligencia, commit 885ff74).
+INTEL_RELEASE = '885ff74576cd'
 
 
 def night_lock(hours=5):
