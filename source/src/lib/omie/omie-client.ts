@@ -314,8 +314,11 @@ export class OmieClient {
       declaredTotal === 0 &&
       (!key || (body[key] as unknown[]).length === 0) &&
       (reportedPage === undefined || Number(reportedPage) === 0 || Number(reportedPage) === 1)
-    )
+    ) {
+      // Same as the "não existem registros" fault: Omie still holds this call for a few seconds.
+      this.limiter.noteEmptyPage(this.creds.appKey, call);
       return { page, totalPages: 0, totalRecords: 0, records: [] };
+    }
     if (
       !Number.isInteger(page) ||
       page < 1 ||
