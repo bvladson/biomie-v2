@@ -1,17 +1,19 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { LayoutDashboard, ListFilter, SlidersHorizontal } from "lucide-react";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { LayoutDashboard, Lightbulb, ListFilter, SlidersHorizontal } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useGlobalFilters } from "@/hooks/use-filters";
 import { appContextQuery } from "@/lib/queries";
 import type { CompanyFilter, CurveWindow } from "../api/contract";
 import { StockContext, canOpenStock } from "../lib/hooks";
 import { CURVE_WINDOWS, DEFAULT_WINDOW, WINDOW_LABELS, isCurveWindow } from "../lib/curves";
+import { intelApi } from "../api/intel";
 import { Notice } from "./shared";
 
 const navigation = [
   { to: "/estoque", label: "Visão geral", icon: LayoutDashboard, exact: true },
+  { to: "/estoque/inteligencia", label: "Inteligência", icon: Lightbulb, exact: false },
   { to: "/estoque/posicoes", label: "Posições", icon: ListFilter, exact: false },
   { to: "/estoque/simulacao", label: "Simulação", icon: SlidersHorizontal, exact: false },
 ] as const;
@@ -44,6 +46,18 @@ export function StockLayout() {
   const { resolved, company } = useGlobalFilters();
   const [scope, setScope] = useState<Scope>("company");
   const [curveWindow, setCurveWindow] = useState<CurveWindow>(DEFAULT_WINDOW);
+  const allowed = canOpenStock(ctx);
+  const isSuper = ctx.roles.includes("SUPER_ADMIN");
+  // A aba Inteligência aparece quando o motor está ligado ou já publicou (o Super admin sempre vê).
+  const intel = useQuery({
+    queryKey: ["stock", "intel", "status"],
+    queryFn: () => intelApi.status(),
+    enabled: allowed && !isSuper,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const showIntel =
+    isSuper || intel.data?.enabled === true || (intel.data?.current.length ?? 0) > 0;
   useEffect(() => {
     setScope(readScope());
     setCurveWindow(readWindow());
@@ -64,7 +78,7 @@ export function StockLayout() {
       /* sem armazenamento: a escolha vale até recarregar */
     }
   }
-  if (!canOpenStock(ctx))
+  if (!allowed)
     return (
       <main className="mx-auto w-full max-w-[1400px] px-4 py-8 md:px-6">
         <Notice>O módulo Estoque ainda não foi liberado para o seu perfil.</Notice>
@@ -86,18 +100,20 @@ export function StockLayout() {
       >
         <div className="flex flex-col justify-between gap-4 border-b pb-5 md:flex-row md:items-end">
           <nav aria-label="Estoque" className="flex flex-wrap gap-1">
-            {navigation.map((n) => (
-              <Link
-                key={n.to}
-                to={n.to}
-                activeOptions={{ exact: n.exact }}
-                className="flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted"
-                activeProps={{ className: "bg-accent text-accent-foreground font-semibold" }}
-              >
-                <n.icon className="size-4" aria-hidden />
-                {n.label}
-              </Link>
-            ))}
+            {navigation
+              .filter((n) => n.to !== "/estoque/inteligencia" || showIntel)
+              .map((n) => (
+                <Link
+                  key={n.to}
+                  to={n.to}
+                  activeOptions={{ exact: n.exact }}
+                  className="flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted"
+                  activeProps={{ className: "bg-accent text-accent-foreground font-semibold" }}
+                >
+                  <n.icon className="size-4" aria-hidden />
+                  {n.label}
+                </Link>
+              ))}
           </nav>
           <div className="min-w-0 space-y-1.5">
             <span className="block text-xs font-medium text-muted-foreground">Empresas</span>

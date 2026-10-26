@@ -17,7 +17,10 @@ SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHos
        '-o', 'ServerAliveInterval=30', '-i', str(pathlib.Path.home() / '.ssh/hostinger_srv1851839_ed25519'),
        'root@179.197.238.57']
 script = pathlib.Path(sys.argv[1])
-args = ' '.join(shlex.quote(a) for a in sys.argv[2:])
+# Testes pesados da homologação só na janela (parecer de 23/10/2026): ver ops/janela_testes.py.
+sys.path.insert(0, str(BASE / 'ops'))
+import janela_testes  # noqa: E402
+args = ' '.join(shlex.quote(a) for a in janela_testes.guard(script, sys.argv[2:]))
 result = subprocess.run(SSH + ['python3 - ' + args], input=script.read_text(encoding='utf-8'),
                         capture_output=True, text=True, encoding='utf-8', timeout=7200)
 logs = BASE / 'ops' / 'logs'

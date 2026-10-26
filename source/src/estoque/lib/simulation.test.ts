@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { simulate, PRESETS, validateScenario, chartProjection, summarize } from "./simulation";
+import {
+  simulate,
+  PRESETS,
+  validateScenario,
+  chartProjection,
+  summarize,
+  commercial,
+  withPriceBasis,
+  productKey,
+} from "./simulation";
 import { csvCell } from "./format";
 import { createMockApi, makePositions } from "../dev/mock-api";
 import type { SimulationItem, ScenarioInput } from "../api/contract";
@@ -262,5 +271,50 @@ describe("StockApi contract boundaries", () => {
   it("CSV protects formulas and quoting", () => {
     for (const s of ["=1", "+2", "-3", "−4", "@a", "  =1"]) expect(csvCell(s)).toContain("'");
     expect(csvCell('a"b;c')).toBe('"a""b;c"');
+  });
+});
+
+describe("simulador inteligente (fase 5)", () => {
+  const items: SimulationItem[] = [
+    one({ id: "c1:10:1", sku: "A1", curve: "D", qty: 10, cost: 40, price: 100 }),
+    one({ id: "c1:11:1", sku: "B1", curve: "D", qty: 4, cost: 95, price: 100 }),
+    one({ id: "c1:12:1", sku: "C1", curve: "D", qty: 5, cost: 10, price: 0 }), // sem preço
+    one({ id: "c1:13:1", sku: "N1", curve: "D", qty: -2, cost: 10, price: 50 }), // negativo
+  ];
+  const all: ScenarioInput = { cuts: { A: 0, B: 0, C: 0, D: 100 }, discount: 10 };
+
+  it("resultado bruto, margem, venda integral e desconto concedido", () => {
+    const r = commercial(items, all, 0);
+    // A1: 10 × 90 = 900 de receita, 400 de custo; B1: 4 × 90 = 360, 380 de custo
+    expect(r.grossResult).toBeCloseTo(900 - 400 + (360 - 380));
+    expect(r.marginPct).toBeCloseTo(((900 - 400 + 360 - 380) / 1260) * 100);
+    expect(r.fullSaleRevenue).toBeCloseTo(1260); // C1 sem preço não entra; negativo não entra
+    expect(r.analyzedCost).toBeCloseTo(400 + 380 + 50);
+    expect(r.discountAmount).toBeCloseTo(100 + 40);
+  });
+
+  it("margem abaixo da mínima, inclusive negativa", () => {
+    const r = commercial(items, all, 0);
+    expect(r.belowMarginCount).toBe(1);
+    expect(r.belowMargin[0]).toEqual(
+      expect.objectContaining({ sku: "B1", refPrice: 100, price: 90 }),
+    );
+    expect(r.belowMargin[0]!.marginPct).toBeCloseTo(((90 - 95) / 90) * 100);
+    expect(commercial(items, all, 60).belowMarginCount).toBe(2); // A1 tem 55,6%
+  });
+
+  it("base de preço explícita: média de 12 meses só onde existe, nunca a outra base", () => {
+    expect(productKey("c1:10:1")).toBe("c1:10");
+    const avg = new Map([["c1:10", 80]]);
+    const based = withPriceBasis(items, "media12m", avg);
+    expect(based.map((i) => i.price)).toEqual([80, 0, 0, 0]);
+    expect(simulate(based, all).totals.missingPrice).toBe(2); // B1 e C1 saem sem preço na base
+    expect(withPriceBasis(items, "omie", avg)).toBe(items);
+  });
+
+  it("não muda o cálculo original", () => {
+    const before = simulate(items, all);
+    commercial(items, all, 30);
+    expect(simulate(items, all)).toEqual(before);
   });
 });

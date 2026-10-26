@@ -9,6 +9,9 @@
                                         # menu por liberação e vendedor sem custo; --curves = curva
                                         # automática (0043) com curva manual de teste (grava e desfaz);
                                         # --curves-readonly = os mesmos passos sem gravar (produção)
+    ... --stock --intel | --intel-empty   # Inteligência (0044): painel, card = lista, gaveta do
+                                        # produto, Pareto, celular e vendedor sem custo (só leitura);
+                                        # --intel-empty = a tela avisa que ainda não há análise
     ... --hml                           # na HOMOLOGAÇÃO (41_homolog.py): túnel local 3150, contas
                                         # criadas e apagadas só lá; a produção não é tocada
 
@@ -132,6 +135,11 @@ accounts = [
     {'label': 'common', 'email': f'smoke-common-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'VIEWER', 'fullName': 'Smoke Common', 'companies': ['mag-filial'], 'legacy': {'mag-filial': ['licitacao']}},
 ]
+# Na homologação o teste de navegador é pesado: só na janela (ops/janela_testes.py).
+if HML_MODE:
+    sys.path.insert(0, str(BASE / 'ops'))
+    import janela_testes  # noqa: E402
+    sys.argv = [sys.argv[0]] + janela_testes.guard(pathlib.Path('29_smoke.py'), sys.argv[1:])
 report = {}
 tunnel = None
 try:
@@ -139,7 +147,8 @@ try:
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
            'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp,
            'BIOMIE_STOCK_MODE': STOCK_EXPECTED,
-           'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0'}
+           'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0',
+           'BIOMIE_STOCK_INTEL': '1' if '--intel' in sys.argv else 'empty' if '--intel-empty' in sys.argv else '0'}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]

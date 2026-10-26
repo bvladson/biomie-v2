@@ -24,10 +24,22 @@ import {
 } from "@/components/ui/table";
 import { stockApi } from "../api";
 import type { ScenarioInput } from "../api/contract";
-import { ALL_CURVES, CURVES, PRESETS, simulate, chartProjection } from "../lib/simulation";
+import {
+  ALL_CURVES,
+  CURVES,
+  DISCOUNT_PRESETS,
+  PRESETS,
+  simulate,
+  chartProjection,
+  commercial,
+  withPriceBasis,
+  type PriceBasis,
+} from "../lib/simulation";
+import { intelApi } from "../api/intel";
+import { shortDate } from "../lib/curves";
 import { money, quantity, dateTime, errorMessage, downloadCsv } from "../lib/format";
 import { PageTitle } from "../components/StockLayout";
-import { CurveBadge, Metric, Notice, Status } from "../components/shared";
+import { Choice, CurveBadge, Metric, Notice, Status } from "../components/shared";
 import { ProjectionChart } from "../components/ProjectionChart";
 import { WINDOW_LABELS } from "../lib/curves";
 export function SimulationPage() {
@@ -41,7 +53,9 @@ export function SimulationPage() {
     [name, setName] = useState(""),
     [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
-    [deleteId, setDeleteId] = useState<string | null>(null);
+    [deleteId, setDeleteId] = useState<string | null>(null),
+    [basis, setBasis] = useState<PriceBasis>("omie"),
+    [minMargin, setMinMargin] = useState(0);
   const q = useQuery({
     queryKey: ["stock", "simulation", companyId, window],
     queryFn: () => stockApi.simulationBase(companyId, window),
@@ -54,24 +68,39 @@ export function SimulationPage() {
     enabled: caps.data?.viewCost === true,
     retry: false,
   });
-  const result = useMemo(
-    () => (q.data ? simulate(q.data.items, scenario) : null),
-    [q.data, scenario],
+  // Preço médio vendido em 12 meses (análise da inteligência); sem análise, a opção não aparece.
+  const prices = useQuery({
+    queryKey: ["stock", "intel", "price-basis", companyId],
+    queryFn: () => intelApi.priceBasis(companyId),
+    enabled: caps.data?.viewCost === true,
+    retry: false,
+  });
+  const avgPrices = useMemo(
+    () => new Map((prices.data?.prices ?? []).map(([c, omie, price]) => [`${c}:${omie}`, price])),
+    [prices.data],
   );
-  const chart = useMemo(
-    () => (q.data ? chartProjection(q.data.items, scenario) : null),
-    [q.data, scenario],
+  const hasAvg = avgPrices.size > 0;
+  const activeBasis: PriceBasis = hasAvg ? basis : "omie";
+  const items = useMemo(
+    () => (q.data ? withPriceBasis(q.data.items, activeBasis, avgPrices) : null),
+    [q.data, activeBasis, avgPrices],
+  );
+  const result = useMemo(() => (items ? simulate(items, scenario) : null), [items, scenario]);
+  const chart = useMemo(() => (items ? chartProjection(items, scenario) : null), [items, scenario]);
+  const comm = useMemo(
+    () => (items ? commercial(items, scenario, minMargin) : null),
+    [items, scenario, minMargin],
   );
   const comparisons = useMemo(
     () =>
-      q.data
+      items
         ? Object.entries(PRESETS).map(([key, p]) => ({
             key,
             preset: p,
-            result: simulate(q.data.items, p),
+            result: simulate(items, p),
           }))
         : [],
-    [q.data],
+    [items],
   );
   return (
     <>
@@ -102,7 +131,7 @@ export function SimulationPage() {
             }}
           >
             <Download className="size-4" />
-            CSV · curvas e produtos
+            {activeBasis === "omie" ? "CSV · curvas e produtos" : "CSV · com o preço do Omie"}
           </Button>
         )}
       </PageTitle>
@@ -189,6 +218,22 @@ export function SimulationPage() {
                   </p>
                 </div>
               ))}
+              <Choice
+                label="Base do preço"
+                value={activeBasis}
+                onChange={(v) => setBasis(v as PriceBasis)}
+                options={[
+                  { value: "omie", label: "Preço de venda cadastrado no Omie" },
+                  ...(hasAvg
+                    ? [
+                        {
+                          value: "media12m",
+                          label: `Preço médio vendido em 12 meses (análise de ${shortDate(prices.data?.asOf)})`,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
               <label className="flex items-center justify-between gap-4 text-sm">
                 Desconto sobre o preço de venda
                 <Input
@@ -204,6 +249,34 @@ export function SimulationPage() {
                       ...scenario,
                       discount: Math.max(0, Math.min(70, Math.round(Number(e.target.value)))),
                     })
+                  }
+                />
+              </label>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Descontos prontos">
+                {DISCOUNT_PRESETS.map((d) => (
+                  <Button
+                    key={d}
+                    variant={scenario.discount === d ? "default" : "outline"}
+                    size="sm"
+                    className="min-h-9"
+                    onClick={() => setScenario({ ...scenario, discount: d })}
+                  >
+                    {d}%
+                  </Button>
+                ))}
+              </div>
+              <label className="flex items-center justify-between gap-4 text-sm">
+                Margem mínima aceitável
+                <Input
+                  aria-label="Margem mínima em porcentagem"
+                  type="number"
+                  min={-100}
+                  max={90}
+                  step={1}
+                  className="h-11 w-20 shrink-0 bg-card text-right"
+                  value={minMargin}
+                  onChange={(e) =>
+                    setMinMargin(Math.max(-100, Math.min(90, Math.round(Number(e.target.value)))))
                   }
                 />
               </label>
@@ -251,6 +324,87 @@ export function SimulationPage() {
               </p>
             </div>
           </section>
+          {comm && (
+            <section className="space-y-4">
+              <h2 className="text-lg font-semibold">Resultado comercial do cenário</h2>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Metric
+                  label="Resultado bruto estimado"
+                  value={money(comm.grossResult)}
+                  foot={
+                    comm.marginPct === null
+                      ? "Sem receita no cenário"
+                      : `Margem estimada de ${comm.marginPct.toFixed(1).replace(".", ",")}% sobre a receita`
+                  }
+                />
+                <Metric
+                  label="Desconto concedido"
+                  value={money(comm.discountAmount)}
+                  foot={`Diferença para o preço de referência nas unidades que saem`}
+                />
+                <Metric
+                  label="Receita na venda integral"
+                  value={money(comm.fullSaleRevenue)}
+                  foot={`Todo o saldo positivo com preço · custo analisado ${money(comm.analyzedCost)}`}
+                />
+                <Metric
+                  label={`Abaixo da margem de ${minMargin}%`}
+                  value={String(comm.belowMarginCount)}
+                  foot="Posições com saída no cenário"
+                />
+              </div>
+              {comm.belowMargin.length > 0 && (
+                <div className="overflow-hidden rounded-lg border bg-card">
+                  <Table className="min-w-[720px]">
+                    <TableHeader>
+                      <TableRow>
+                        {[
+                          "Produto",
+                          "Curva",
+                          "Custo unitário",
+                          "Preço de referência",
+                          "Preço simulado",
+                          "Margem",
+                          "Saída",
+                        ].map((h) => (
+                          <TableHead key={h}>{h}</TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {comm.belowMargin.map((b) => (
+                        <TableRow key={b.id}>
+                          <TableCell className="max-w-72 whitespace-normal">
+                            {b.name}
+                            <span className="block text-xs text-muted-foreground">
+                              {[b.sku, b.companyName].filter(Boolean).join(" · ")}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <CurveBadge curve={b.curve} />
+                          </TableCell>
+                          <TableCell>{money(b.cost)}</TableCell>
+                          <TableCell>{money(b.refPrice)}</TableCell>
+                          <TableCell>{money(b.price)}</TableCell>
+                          <TableCell>{b.marginPct.toFixed(1).replace(".", ",")}%</TableCell>
+                          <TableCell>{quantity(b.sold)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+              <Notice>
+                Receita potencial não é venda garantida. O desconto não muda a quantidade vendida
+                nesta simulação: não há histórico que sustente um efeito do desconto na demanda.
+                Impostos, frete, comissões e outras despesas não estão incluídos. Base do preço:{" "}
+                {activeBasis === "omie"
+                  ? "preço de venda cadastrado no Omie"
+                  : "preço médio vendido em 12 meses (sem venda no período, o item fica sem preço)"}
+                . Nenhuma simulação altera preços no Omie.
+              </Notice>
+            </section>
+          )}
           <section className="space-y-4">
             <h2 className="text-lg font-semibold">Cenários de referência</h2>
             <div className="grid gap-4 md:grid-cols-3">

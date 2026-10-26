@@ -5,6 +5,8 @@
 Creates the database from scratch (auth structure copied without data), applies
 every migration of the release, runs the SQL suites and drops it again. The
 production database is never used for tests.
+Suites the release does not have are reported as skipped. Each rollback script
+(deploy/db/rollback/*.down.sql) runs once, inside a transaction that is undone.
 """
 import json
 import pathlib
@@ -22,6 +24,9 @@ SUITES = ['deploy/db/verify_security.sql', 'deploy/db/verify_channel_filter.sql'
           'deploy/db/verify_pipeline_contract.sql', 'deploy/db/verify_rpc_grants.sql',
           'deploy/db/verify_order_scope.sql', 'deploy/db/verify_finance_adjustments.sql',
           'deploy/db/verify_admin_users.sql', 'deploy/db/verify_stock.sql', 'deploy/db/verify_stock_curves.sql',
+          'deploy/db/verify_stock_intel.sql', 'deploy/db/verify_stock_intel_insights.sql',
+          'deploy/db/verify_stock_intel_commercial.sql',
+          'deploy/db/verify_sales_kpis.sql',
           'scripts/test-commercial-contract.sql',
           'scripts/test-omie-matching.sql']
 
@@ -58,12 +63,21 @@ report['migrations_applied'] = int(count.split()[2])
 results = {}
 for suite in SUITES:
     path = REL / suite
+    if not path.exists():
+        results[suite] = {'ok': True, 'skipped': 'ausente nesta release'}
+        continue
     p = psql(TEST_DB, path.read_text(), timeout=600)
     notices = [line.split('NOTICE:', 1)[1].strip() for line in p.stderr.splitlines() if 'NOTICE:' in line]
     results[suite] = {'ok': p.returncode == 0, 'notices': notices[-8:],
                       'error': None if p.returncode == 0 else (p.stderr or p.stdout)[-1200:]}
 report['suites'] = results
-report['all_ok'] = all(r['ok'] for r in results.values())
+rollbacks = {}
+for path in sorted((REL / 'deploy/db/rollback').glob('*.down.sql')):
+    p = psql(TEST_DB, 'begin;\n' + path.read_text() + '\nrollback;\n', timeout=600)
+    rollbacks[path.name] = {'ok': p.returncode == 0,
+                            'error': None if p.returncode == 0 else (p.stderr or p.stdout)[-1200:]}
+report['rollback_scripts'] = rollbacks
+report['all_ok'] = all(r['ok'] for r in results.values()) and all(r['ok'] for r in rollbacks.values())
 if not KEEP:
     must(psql('postgres', f'drop database if exists {TEST_DB};'), 'cleanup')
 report['dropped'] = not KEEP
