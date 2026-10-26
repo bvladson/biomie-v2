@@ -10,6 +10,10 @@
                                                                       # da cópia (só LÊ o Omie)
     python ops/remote.py ops/41_homolog.py intel-run [args do motor]  # BIOMIE Intelligence na cópia
                                                                       # (ex.: run --trigger ops --force)
+    python ops/remote.py ops/41_homolog.py tx-probe <release> <empresa-slug> <entidades> [dias]
+        # ciclo REAL de cargas de uma empresa com o código de uma release (ex.: correção da MAG Matriz):
+        # lê o Omie com a chave da empresa (a mesma da produção) e grava só na cópia; espera os minutos
+        # :10–:14 ou :40–:44 sem carga dessa empresa na produção, para não disputar a chave
 
 Para olhar no navegador: túnel SSH local 3150 -> 127.0.0.1:3150 (29_smoke.py --hml já faz isso).
 
@@ -378,16 +382,17 @@ def up(short):
             'containers': containers(), 'seconds': round(time.time() - started)}
 
 
-def oneoff(args, timeout):
+def oneoff(args, timeout, image=None, extra=None):
     """Contêiner avulso da imagem da homologação, na rede dela, com as chaves dela e a chave das
     credenciais do Omie (para LER o Omie); o arquivo de ambiente é apagado em seguida."""
-    image = run(['docker', 'inspect', f'{PROJECT}-hml-web-1', '--format', '{{.Config.Image}}'])
+    image = image or run(['docker', 'inspect', f'{PROJECT}-hml-web-1', '--format', '{{.Config.Image}}'])
     stack, env = read_env(STACK_ENV), read_env(HML_ENV)
     values = {'SUPABASE_URL': 'http://hml-gateway:8000', 'SUPABASE_SERVICE_ROLE_KEY': env['HML_SERVICE_KEY'],
               'SUPABASE_PUBLISHABLE_KEY': env['HML_ANON_KEY'],
               'BIOMIE_CREDENTIALS_KEY': stack.get('BIOMIE_CREDENTIALS_KEY', ''),
               'APP_ENV': 'production', 'BIOMIE_PROCESS_ROLE': 'worker', 'OMIE_GLOBAL_PER_MINUTE': '30',
               'OMIE_KEY_METHOD_PER_MINUTE': '10', 'OMIE_MAX_CONCURRENT': '1', 'OMIE_CIRCUIT_OPEN_MS': '1800000'}
+    values.update(extra or {})
     env_file = HML / 'oneoff.env'
     write_private(env_file, ''.join(f'{k}={v}' + chr(10) for k, v in values.items()))
     try:
@@ -399,6 +404,60 @@ def oneoff(args, timeout):
     for value in secret_values():
         out = out.replace(value, '[REDACTED]')
     return {'exit': p.returncode, 'stdout': out, 'stderr': p.stderr[-1500:]}
+
+
+def tx_probe(short, slug, entities, days):
+    """Ciclo real de cargas de UMA empresa com o código de uma release, na cópia. A chave do Omie é a
+    mesma da produção: só começa nos minutos :10–:14 ou :40–:44 (as cargas da produção começam em :21
+    e :51) e sem carga dessa empresa em andamento na produção. Conta as respostas "já existe uma
+    requisição desse método" e as pausas do nosso circuito."""
+    import re
+    if not re.fullmatch(r'[0-9a-f]{12}', short) or not re.fullmatch(r'[a-z0-9-]{2,40}', slug):
+        raise SystemExit('uso: tx-probe <release-12> <empresa-slug> <entidades> [dias]')
+    allowed = ['invoices', 'orders', 'receivables', 'settlements']
+    picked = [e for e in entities.split(',') if e]
+    if not picked or any(e not in allowed for e in picked) or not days.isdigit() or not 1 <= int(days) <= 400:
+        raise SystemExit('entidades: invoices,orders,receivables,settlements; dias: 1 a 400')
+    release = BASE / 'releases' / short
+    meta = json.loads((release / 'RELEASE.json').read_text())
+    image = f'biomie-v2-web:hml-{short}'
+    built = 0
+    if subprocess.run(['docker', 'image', 'inspect', image], capture_output=True).returncode:
+        env = ensure_keys()
+        started = time.time()
+        build(['-f', str(release / 'deploy/vps/Dockerfile'),
+               '--build-arg', f'VITE_SUPABASE_URL={SITE}/supabase',
+               '--build-arg', f"VITE_SUPABASE_PUBLISHABLE_KEY={env['HML_ANON_KEY']}",
+               '--build-arg', f"GIT_COMMIT={meta['commit']}",
+               '-t', image, str(release)], timeout=3600)
+        built = round(time.time() - started)
+    deadline = time.time() + 45 * 60
+    while True:
+        minute = datetime.datetime.now().minute
+        busy = int(psql("select count(*) from public.integration_sync_runs r join public.companies c "
+                        f"on c.id = r.company_id where c.slug = '{slug}' and r.status = 'RUNNING';",
+                        db='biomie_v2') or 0)
+        if 10 <= minute % 30 <= 14 and not busy:
+            break
+        if time.time() > deadline:
+            raise SystemExit('sem janela livre da chave em 45 min (produção usando a empresa)')
+        time.sleep(30)
+    since = (datetime.date.today() - datetime.timedelta(days=int(days))).isoformat()
+    started = time.time()
+    out = oneoff(['.output/bootstrap-sync.mjs', '--phase=transactions', f'--companies={slug}',
+                  f'--entities={",".join(picked)}', f'--from={since}', '--fresh'], 1500, image=image,
+                 # mesmos limites do worker da produção, para o teste valer como o ciclo real
+                 extra={'OMIE_GLOBAL_PER_MINUTE': '90', 'OMIE_KEY_METHOD_PER_MINUTE': '30'})
+    text = out['stdout'] + out['stderr']
+    busy_by_call = {}
+    for call in re.findall(r'omie retry call=(\S+) kind=rate_limit attempt=\d+ wait_ms=\d+: Omie ainda processa', text):
+        busy_by_call[call] = busy_by_call.get(call, 0) + 1
+    final = [line for line in out['stdout'].splitlines() if '"job":"omie_bootstrap"' in line]
+    return {'release': short, 'commit': meta['commit'], 'company': slug, 'entities': picked, 'from': since,
+            'buildSeconds': built, 'started': datetime.datetime.now().isoformat(timespec='seconds'),
+            'runSeconds': round(time.time() - started), 'exit': out['exit'],
+            'busyAnswers': busy_by_call, 'circuitPauses': text.count('bloqueado temporariamente'),
+            'result': final[-1] if final else None, 'tail': text[-3000:]}
 
 
 def intel_run(args, timeout):
@@ -490,6 +549,10 @@ elif command == 'movements-load':
     if not minutes.isdigit():
         raise SystemExit('minutos: número inteiro')
     out = oneoff(['.output/stock-movements-load.mjs', f'--minutes={minutes}'], int(minutes) * 60 + 600)
+elif command == 'tx-probe':
+    if len(sys.argv) < 5:
+        raise SystemExit('uso: tx-probe <release-12> <empresa-slug> <entidades> [dias]')
+    out = tx_probe(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5] if len(sys.argv) > 5 else '62')
 elif command == 'intel-run':
     out = intel_run(sys.argv[2:] or ['run', '--trigger', 'ops', '--force'], 1800)
 else:
