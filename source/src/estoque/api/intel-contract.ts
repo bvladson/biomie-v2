@@ -144,6 +144,8 @@ export interface IntelQuery {
   /** Fase 3: só produtos com esta recomendação / com alerta aberto. */
   rec?: string | undefined;
   withAlerts?: boolean | undefined;
+  /** Família do produto no Omie (a mesma lista das posições). */
+  family?: string | undefined;
   sortBy?: IntelSort | undefined;
   sortDir?: "asc" | "desc" | undefined;
   page: number; // 50 por página; -1 = todas (exportação)

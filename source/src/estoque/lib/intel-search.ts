@@ -27,6 +27,7 @@ export interface IntelFilters {
   q?: string | undefined;
   rec?: string | undefined;
   alerts?: boolean | undefined;
+  family?: string | undefined;
   sort?: IntelSort | undefined;
   dir?: "asc" | "desc" | undefined;
   page?: number | undefined;
@@ -41,6 +42,7 @@ export interface IntelSearch {
   busca?: string | undefined;
   recomendacao?: string | undefined;
   comAlerta?: boolean | undefined;
+  familia?: string | undefined;
   ordem?: IntelSort | undefined;
   sentido?: "asc" | "desc" | undefined;
   pagina?: number | undefined;
@@ -56,6 +58,7 @@ const KEYS = {
   q: "busca",
   rec: "recomendacao",
   alerts: "comAlerta",
+  family: "familia",
   sort: "ordem",
   dir: "sentido",
   page: "pagina",
@@ -89,6 +92,10 @@ export function validateIntelSearch(raw: Record<string, unknown>): IntelSearch {
     busca: busca && busca.length <= 120 ? busca : undefined,
     recomendacao: pick(raw["recomendacao"], REC_FILTERS),
     comAlerta: raw["comAlerta"] === true ? true : undefined,
+    familia:
+      typeof raw["familia"] === "string" && raw["familia"].trim() && raw["familia"].length <= 120
+        ? raw["familia"].trim()
+        : undefined,
     ordem: pick(raw["ordem"], SORTS),
     sentido: raw["sentido"] === "asc" || raw["sentido"] === "desc" ? raw["sentido"] : undefined,
     pagina:
@@ -109,6 +116,7 @@ export function fromSearch(s: IntelSearch): IntelFilters {
     q: s.busca,
     rec: s.recomendacao,
     alerts: s.comAlerta,
+    family: s.familia,
     sort: s.ordem,
     dir: s.sentido,
     page: s.pagina,
@@ -132,6 +140,7 @@ export const CLEAR: Required<{ [K in keyof IntelFilters]: undefined }> = {
   q: undefined,
   rec: undefined,
   alerts: undefined,
+  family: undefined,
   sort: undefined,
   dir: undefined,
   page: undefined,
@@ -149,6 +158,7 @@ export function toQuery(companyId: CompanyFilter, f: IntelFilters): IntelQuery {
     search: f.q || undefined,
     rec: f.rec,
     withAlerts: f.alerts || undefined,
+    family: f.family,
     sortBy: f.sort ?? "priority",
     sortDir: f.dir ?? "desc",
     page: f.page ?? 0,
@@ -156,4 +166,6 @@ export function toQuery(companyId: CompanyFilter, f: IntelFilters): IntelQuery {
 }
 
 export const hasFilters = (f: IntelFilters) =>
-  Boolean(f.state || f.flag || f.curve || f.band || f.minIdle || f.q || f.rec || f.alerts);
+  Boolean(
+    f.state || f.flag || f.curve || f.band || f.minIdle || f.q || f.rec || f.alerts || f.family,
+  );

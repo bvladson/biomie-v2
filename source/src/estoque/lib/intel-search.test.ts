@@ -58,6 +58,7 @@ describe("inteligência do estoque — filtros no endereço", () => {
         "curva",
         "estado",
         "faixa",
+        "familia",
         "ordem",
         "pagina",
         "recomendacao",

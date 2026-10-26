@@ -34,6 +34,7 @@ import type {
   IntelState,
 } from "../api/intel-contract";
 import { intelApi } from "../api/intel";
+import { stockApi } from "../api";
 import { downloadCsv, errorMessage, money, quantity } from "../lib/format";
 import { shortDate } from "../lib/curves";
 import {
@@ -128,6 +129,11 @@ export function IntelTable({
     return () => clearTimeout(t);
   }, [search, onChange]);
 
+  const options = useQuery({
+    queryKey: ["stock", "filter-options", companyId],
+    queryFn: () => stockApi.filterOptions(companyId),
+    retry: false,
+  });
   const query = toQuery(companyId, filters);
   const q = useQuery({
     queryKey: ["stock", "intel", "products", query],
@@ -246,6 +252,19 @@ export function IntelTable({
             ]}
           />
         </div>
+        {(options.data?.families.length ?? 0) > 0 && (
+          <div className="w-56">
+            <Choice
+              label="Família"
+              value={filters.family ?? ALL}
+              onChange={(v) => set({ family: v === ALL ? undefined : v })}
+              options={[
+                { value: ALL, label: "Todas" },
+                ...(options.data?.families ?? []).map((f) => ({ value: f, label: f })),
+              ]}
+            />
+          </div>
+        )}
         <div className="w-48">
           <Choice
             label="Alertas"
@@ -304,6 +323,7 @@ export function IntelTable({
                 q: undefined,
                 rec: undefined,
                 alerts: undefined,
+                family: undefined,
                 page: undefined,
               });
             }}

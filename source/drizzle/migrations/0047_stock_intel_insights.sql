@@ -288,6 +288,7 @@ declare
   v_search text := nullif(btrim(coalesce(p_query->>'search', '')), '');
   v_min_idle integer := nullif(p_query->>'minIdle', '')::integer;
   v_rec text := nullif(p_query->>'rec', '');
+  v_family text := nullif(btrim(coalesce(p_query->>'family', '')), '');
   v_with_alerts boolean := coalesce((p_query->>'withAlerts')::boolean, false);
   v_sort text := coalesce(nullif(p_query->>'sortBy', ''), 'priority');
   v_dir text := coalesce(nullif(p_query->>'sortDir', ''), 'desc');
@@ -303,7 +304,7 @@ begin
            'possivel_excesso', 'possivel_obsolescencia', 'saudavel', 'risco_ruptura', 'sem_saldo'))
      or (v_flag is not null and v_flag !~ '^[a-z_]{3,40}$') or length(coalesce(v_search, '')) > 120
      or (v_min_idle is not null and v_min_idle not in (30, 60, 90, 180, 365))
-     or (v_rec is not null and v_rec !~ '^[a-z_]{3,40}$') then
+     or (v_rec is not null and v_rec !~ '^[a-z_]{3,40}$') or length(coalesce(v_family, '')) > 120 then
     raise exception 'Consulta inválida.' using errcode = 'P0001';
   end if;
   -- Sinais de custo (CMC até R$ 1, sem custo, custo diferente entre locais) revelam custo: só para
@@ -339,6 +340,7 @@ begin
       -- saldo e fora "produto novo" (que não é encalhe).
       and (v_min_idle is null or (mm.idle > v_min_idle and mm.qty > 0 and mm.state <> 'novo'))
       and (v_search is null or mm.sku ilike '%' || v_search || '%' or mm.name ilike '%' || v_search || '%')
+      and (v_family is null or mm.family = v_family)
       and (v_rec is null or exists (select 1 from jsonb_array_elements(
             case when jsonb_typeof(mm.metrics->'recommendations') = 'array' then mm.metrics->'recommendations'
                  else '[]'::jsonb end) r

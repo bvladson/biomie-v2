@@ -77,7 +77,7 @@ select set_config('f3.official', (select json_build_object(
 create function pg_temp.f3_rows(p_sev3001 text, p_alert3002 boolean, p_alert3003 boolean) returns jsonb
 language sql as $$
   select jsonb_build_array(
-    jsonb_build_object('omieProductId', '3001', 'sku', 'F3-3001', 'name', 'Mesa vendida', 'state', 'saudavel',
+    jsonb_build_object('omieProductId', '3001', 'sku', 'F3-3001', 'name', 'Mesa vendida', 'family', 'Mesas', 'state', 'saudavel',
       'flags', jsonb_build_array('demanda_em_queda'), 'priority', 30,
       'metrics', jsonb_build_object('capital', 50, 'cost', jsonb_build_object('unitCost', 10, 'known', true),
         'stock', jsonb_build_object('qty', 5), 'curve', jsonb_build_object('current', 'A'), 'daysWithoutSale', 10,
@@ -194,6 +194,10 @@ begin
   end if;
   v := public.stock_intel_products(jsonb_build_object('companyId', ca, 'withAlerts', true));
   if (v->>'total')::integer <> 2 then raise exception 'FALHOU: filtro com alerta (super): %', v->>'total'; end if;
+  v := public.stock_intel_products(jsonb_build_object('companyId', ca, 'family', 'Mesas'));
+  if (v->>'total')::integer <> 1 or v->'rows'->0->>'omieProductId' <> '3001' then
+    raise exception 'FALHOU: filtro por família: %', v;
+  end if;
   v := public.stock_intel_product(ca, '3002');
   if jsonb_array_length(v->'alerts') <> 1 or v->'metrics'->'diagnoses'->0->>'code' <> 'custo_provisorio' then
     raise exception 'FALHOU: detalhe do super, produto 3002: %', v->'alerts';

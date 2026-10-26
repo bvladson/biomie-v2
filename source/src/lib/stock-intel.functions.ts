@@ -43,6 +43,7 @@ const filters = z
       .regex(/^[a-z_]{3,40}$/)
       .optional(),
     withAlerts: z.boolean().optional(),
+    family: z.string().trim().min(1).max(120).optional(),
     sortBy: z.enum(["priority", "capital", "daysWithoutSale", "coverageDays", "name"]).optional(),
     sortDir: z.enum(["asc", "desc"]).optional(),
   })
