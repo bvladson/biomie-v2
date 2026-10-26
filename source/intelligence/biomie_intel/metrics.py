@@ -166,8 +166,10 @@ def product_metrics(
     if qty_positive > 0 and cov365 >= min_history:
         turnover = (units365 / cov365 * 365) / qty_positive
 
-    trend = None
+    trend, prev60_units = None, None
     prev60 = sums.get("prev60", 0.0)
+    if covered_days(120, as_of, sales_from) >= 120:
+        prev60_units = prev60
     if covered_days(120, as_of, sales_from) >= 120 and prev60 > 0:
         last60 = sums.get(60, (0.0, 0.0, 0))[0]
         trend = (last60 - prev60) / prev60 * 100
@@ -193,14 +195,18 @@ def product_metrics(
             "negativeValue": rnd(to_float(product.get("negativeValue"))),
         },
         "cost": {"unitCost": rnd(cost, 4) if cost_known else None, "known": cost_known, "suspect": cost_suspect,
-                 "divergentLocations": bool(cost_known and cost_min is not None and abs(cost - cost_min) > 0.005)},
+                 "divergentLocations": bool(cost_known and cost_min is not None and abs(cost - cost_min) > 0.005),
+                 "minUnitCost": rnd(cost_min, 4) if cost_known and cost_min is not None else None,
+                 "prevUnitCost": rnd(to_float(product.get("prevUnitCost")), 4)},
         "capital": rnd(capital),
         "salePrice": rnd(to_float(product.get("salePrice"))),
         "sales": sales,
         "velocityDaily": rnd(velocity, 4), "velocityBasis": basis,
         "coverageDays": rnd(coverage, 1),
         "turnoverAnnual": rnd(turnover, 2),
-        "trend60Pct": rnd(trend, 1),
+        "trend60Pct": rnd(trend, 1), "prev60Units": rnd(prev60_units, 3),
+        "received30": rnd(to_float(product.get("received30")), 3),
+        "received90": rnd(to_float(product.get("received90")), 3),
         "avgPrice": rnd(avg_price),
         "marginEstPct": rnd(margin, 1),
         "returns365": {"units": rnd(returns[0], 3), "events": returns[1]} if returns else {"units": 0, "events": 0},
@@ -215,7 +221,10 @@ def product_metrics(
         "curve": {"current": current, "source": product.get("curveSource"), "previous": previous,
                   "changedOn": changed_on.isoformat() if changed_on else None, "worsened": worsened,
                   "revenue12m": rnd(to_float(product.get("revenue12m"))),
-                  "share12m": rnd(to_float(product.get("share12m")), 6)},
+                  "share12m": rnd(to_float(product.get("share12m")), 6),
+                  # janela da curva = a desta análise (mesmo fim): só então o faturamento é comparável
+                  "windowAligned": (to_date(product.get("curveWindowStart")) == as_of - timedelta(days=364))
+                  if product.get("curveWindowStart") else None},
         "salesMonthly": [[m, rnd(series.get(m, (0.0, 0.0))[0], 3), rnd(series.get(m, (0.0, 0.0))[1])]
                          for m in months],
         "historyCoveredDays": cov365,

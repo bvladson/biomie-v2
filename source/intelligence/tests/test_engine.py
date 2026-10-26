@@ -60,7 +60,7 @@ def test_run_publishes_in_chunks_and_finishes_once():
     assert result["published"]
     publishes = [a for n, a in client.calls if n == "stock_intel_publish"]
     c1 = [a for a in publishes if a["p_company"] == "c1"]
-    assert [a["p_chunk"] for a in c1] == [0, 1, 2] and sum(len(a["p_rows"]) for a in c1) == 950
+    assert [a["p_chunk"] for a in c1] == list(range(-(-950 // CHUNK))) and sum(len(a["p_rows"]) for a in c1) == 950
     assert len(c1[0]["p_rows"]) == CHUNK
     # Empresa sem produtos ainda manda o lote 0 (limpa o que a execução tivesse gravado)
     assert [a["p_chunk"] for a in publishes if a["p_company"] == "c2"] == [0]

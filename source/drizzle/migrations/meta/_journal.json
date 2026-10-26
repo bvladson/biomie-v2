@@ -316,6 +316,13 @@
       "when": 1792501300000,
       "tag": "0045_stock_intel_cost_mask",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792501500000,
+      "tag": "0047_stock_intel_insights",
+      "breakpoints": true
     }
   ]
 }

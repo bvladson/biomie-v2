@@ -15,11 +15,12 @@ import pandas as pd
 
 from . import VERSION
 from .api import RpcClient, RpcError
+from .diagnosis import detect_alerts, diagnose, recommend
 from .metrics import (curve_history, month_list, monthly_series, product_metrics, returns_by_product,
                       sales_frame, to_date, window_sums)
 from .states import classify, priority
 
-CHUNK = 400
+CHUNK = 200  # ~0,7 MB por lote com diagnósticos e previsão (gateway interno aceita 8 MB)
 
 
 def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -46,8 +47,14 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
 
     rows: list[dict[str, Any]] = []
     by_state: dict[str, dict[str, Any]] = {}
+    alerts_by_severity: dict[str, int] = {}
     for i, (product, m, state, flags) in enumerate(items):
         score, parts = priority(m, state, pct.get(i), params)
+        m["diagnoses"] = diagnose(m, state, flags, params)
+        m["recommendations"] = recommend(m, state, flags, m["diagnoses"], params)
+        m["alerts"] = detect_alerts(m, state, flags, params)
+        for alert in m["alerts"]:
+            alerts_by_severity[alert["severity"]] = alerts_by_severity.get(alert["severity"], 0) + 1
         rows.append({"omieProductId": str(product["omieProductId"]), "productId": product.get("productId"),
                      "sku": product.get("sku"), "name": product.get("name"), "family": product.get("family"),
                      "state": state, "flags": flags, "priority": score, "priorityParts": parts, "metrics": m})
@@ -59,6 +66,7 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
         "withStock": sum(1 for _p, m, _s, _f in items if (m["stock"]["qty"] or 0) > 0),
         "unknownCost": sum(1 for _p, _m, _s, f in items if "custo_desconhecido" in f),
         "byState": by_state,
+        "alerts": alerts_by_severity,
         "asOf": extract["asOf"], "salesFrom": extract.get("salesFrom"),
     }
     return rows, stats
