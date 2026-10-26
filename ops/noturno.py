@@ -3,7 +3,11 @@ sessão do Claude aberta). Cada passo pesado passa pela janela de testes (--espe
 ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqui muda a produção.
 
     python ops/noturno.py matriz [release] [rodadas]   # teste controlado da correção da MAG Matriz
-    python ops/noturno.py sales-kpis                   # diagnóstico de sales_kpis na cópia
+    python ops/noturno.py sales-kpis [release]         # sales_kpis: diagnóstico, testes do banco e comparação
+
+sales-kpis: 45 (diagnóstico do sales_kpis atual na cópia) → 22 (suítes do banco da release, num banco de
+teste descartável) → 46 (atual × rápido nos dados reais da cópia, numa transação desfeita, mais o índice
+candidato criado, medido e apagado). Release padrão: SALES_KPIS_RELEASE.
 
 matriz (parecer de 26/10/2026): base da produção (72 h) → até N rodadas do tx-probe (cada uma espera
 uma janela sem uso real da chave pela produção) → produção nas últimas horas. A série PARA na primeira
@@ -21,6 +25,8 @@ BASE = pathlib.Path(__file__).resolve().parent.parent
 # --teste: não espera a janela (no expediente a janela recusa na hora): confere só o encanamento.
 WAIT = [] if '--teste' in sys.argv else ['--esperar']
 LOGS = BASE / 'ops' / 'logs'
+# sales_kpis rápido (migração 0046, branch perf/sales-kpis, commit fe85aca).
+SALES_KPIS_RELEASE = 'fe85acab7ae6'
 
 
 def remote(args, name, outdir, timeout=5 * 3600):
@@ -77,7 +83,7 @@ def matriz(release, rounds):
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
-def sales_kpis():
+def sales_kpis(release):
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-sales-kpis'
     out.mkdir(parents=True, exist_ok=True)
     rc, data, err = remote(['ops/45_sales_kpis_diag.py', '--planos'] + WAIT, '01-diagnostico', out)
@@ -85,6 +91,16 @@ def sales_kpis():
                'warm_ms': {k: v['ms'][-1] for k, v in (data or {}).get('measures', {}).items()},
                'rows': {k: v['rows'] for k, v in (data or {}).get('measures', {}).items()},
                'plansFile': (data or {}).get('plans', {}).get('file')}
+    if release:
+        rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '02-testes-do-banco', out)
+        summary['dbTests'] = {
+            'release': release, 'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
+            'suites': {k: ('pulada' if v.get('skipped') else v.get('ok')) for k, v in (tests or {}).get('suites', {}).items()},
+            'salesKpisNotices': (tests or {}).get('suites', {}).get('deploy/db/verify_sales_kpis.sql', {}).get('notices'),
+            'rollbackScripts': (tests or {}).get('rollback_scripts')}
+        rc, cmp, err = remote(['ops/46_sales_kpis_compare.py', release, '--minutos=40'] + WAIT,
+                              '03-comparacao-na-copia', out)
+        summary['compare'] = cmp if cmp else {'rc': rc, 'error': err}
     (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
@@ -97,6 +113,6 @@ if __name__ == '__main__':
         rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 3
         matriz(release, rounds)
     elif task == 'sales-kpis':
-        sales_kpis()
+        sales_kpis(sys.argv[2] if len(sys.argv) > 2 else SALES_KPIS_RELEASE)
     else:
         raise SystemExit(__doc__)
