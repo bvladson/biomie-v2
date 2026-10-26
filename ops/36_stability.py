@@ -8,7 +8,9 @@ Smoke tests (29_smoke.py) generate load and client aborts on purpose; read their
 """
 import collections
 import datetime as dt
+import glob
 import json
+import os
 import re
 import subprocess
 import sys
@@ -33,9 +35,27 @@ def sql(query):
 
 
 def logs(container):
-    p = subprocess.run(['docker', 'logs', '--timestamps', '--since', SINCE_ISO, container], capture_output=True,
-                       text=True, errors='replace')
-    return (p.stdout + p.stderr).splitlines()
+    # Desde o reinício de 23/10/2026, "docker logs" (com --since ou --tail grande) devolve só trechos antigos
+    # neste servidor (Docker 29). Lê direto os arquivos json-file do contêiner (atual e girados) e filtra pela
+    # janela; mesmo formato de "docker logs --timestamps": "<horário> <linha>".
+    path = subprocess.run(['docker', 'inspect', '--format', '{{.LogPath}}', container], capture_output=True,
+                          text=True).stdout.strip()
+    if not path:
+        return []
+    since = SINCE_ISO[:19]
+    files = sorted(glob.glob(path + '*'), key=os.path.getmtime)
+    out = []
+    for name in files:
+        with open(name, encoding='utf-8', errors='replace') as handle:
+            for raw in handle:
+                try:
+                    rec = json.loads(raw)
+                except ValueError:
+                    continue
+                stamp = rec.get('time', '')
+                if stamp[:19] >= since:
+                    out.extend(f'{stamp} {part}' for part in rec.get('log', '').splitlines())
+    return out
 
 
 def seconds(values, q):
