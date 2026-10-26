@@ -137,9 +137,11 @@ export function evidenceValue(e: IntelEvidence): string {
 }
 
 /** Rótulo da faixa de previsão (deixa claro que é a faixa dos erros do teste, não confiança calibrada). */
+const one = (v: number) => quantity(Math.round(v * 10) / 10);
+
 export function forecastRange(h: { units: number; low?: number; high?: number }): string {
-  if (h.low === undefined || h.high === undefined) return `${quantity(h.units)} un.`;
-  return `${quantity(h.units)} un. (faixa ${quantity(h.low)} a ${quantity(h.high)})`;
+  if (h.low === undefined || h.high === undefined) return `${one(h.units)} un.`;
+  return `${one(h.units)} un. (faixa ${one(h.low)} a ${one(h.high)})`;
 }
 
 const addDays = (iso: string, days: number) => {

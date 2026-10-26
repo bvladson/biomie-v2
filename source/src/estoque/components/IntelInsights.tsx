@@ -265,8 +265,8 @@ export function AlertRows({
           <li key={a.id}>
             <Block>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                  {alertLabel(a.kind)}
+                <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                  <span>{alertLabel(a.kind)}</span>
                   {a.isNew && (
                     <Badge className="font-normal">
                       <BellRing aria-hidden className="size-3" /> Novo
@@ -282,7 +282,7 @@ export function AlertRows({
                       <CircleCheck aria-hidden className="size-3" /> Resolvido
                     </Badge>
                   )}
-                </p>
+                </div>
                 <SeverityBadge severity={a.severity} />
               </div>
               {showProduct && (
@@ -346,6 +346,8 @@ export function AlertRows({
 }
 
 type TipProps = { active?: boolean | undefined; payload?: { payload?: unknown }[] | undefined };
+const dec = (v: number | null) =>
+  v === null ? "—" : v.toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 const first = <T,>(p: TipProps) =>
   p.active && p.payload?.[0]?.payload ? (p.payload[0].payload as T) : null;
 
@@ -367,7 +369,7 @@ export function ForecastPanel({ f }: { f: IntelForecast | undefined }) {
           {f.message ?? FORECAST_STATUS_LABELS[f.status]}
         </p>
       )}
-      {rows.length > 0 && (
+      {rows.some((r) => (r.actual ?? 0) > 0 || r.forecast !== null) && (
         <ChartContainer
           config={{ actual: { label: "Vendido" }, fitted: { label: "Previsto antes" } }}
           className="aspect-auto h-52 w-full"
@@ -519,7 +521,7 @@ export function ForecastPanel({ f }: { f: IntelForecast | undefined }) {
                 [
                   "Demanda",
                   f.demandClass
-                    ? `${DEMAND_CLASS_LABELS[f.demandClass]} (ADI ${f.adi ?? "—"}, CV² ${f.cv2 ?? "—"})`
+                    ? `${DEMAND_CLASS_LABELS[f.demandClass]} (ADI ${dec(f.adi)}, CV² ${dec(f.cv2)})`
                     : "—",
                 ],
                 [
@@ -692,7 +694,7 @@ export function MovementsChart({ d }: { d: IntelProductDetail }) {
                       key: "v",
                       label: "vendas",
                       value: quantity(r.sales),
-                      color: "var(--chart-3)",
+                      color: "var(--age-3)",
                     },
                     {
                       key: "o",
@@ -725,7 +727,7 @@ export function MovementsChart({ d }: { d: IntelProductDetail }) {
           <Bar
             yAxisId="q"
             dataKey="sales"
-            fill="var(--chart-3)"
+            fill="var(--age-3)"
             radius={[3, 3, 0, 0]}
             maxBarSize={10}
             isAnimationActive={false}
@@ -743,7 +745,7 @@ export function MovementsChart({ d }: { d: IntelProductDetail }) {
         </ComposedChart>
       </ChartContainer>
       <p className="text-xs text-muted-foreground">
-        Compras/produção e vendas por semana, pelas movimentações do Omie.{" "}
+        Barras azuis: compras/produção; laranja: vendas (movimentações do Omie, por semana).{" "}
         {stockConsistent
           ? "Linha: saldo estimado no fim de cada semana (saldo atual − entradas + saídas posteriores)."
           : "Saldo semanal não mostrado: as movimentações não cobrem as 26 semanas ou não fecham com o saldo atual."}

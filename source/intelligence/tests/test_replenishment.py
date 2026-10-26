@@ -115,3 +115,21 @@ def test_engine_publishes_opportunities_only_in_full_runs():
     client = FakeClient()
     run(client, trigger="ops", company="mag-filial", log=lambda e: None)
     assert "stock_intel_publish_opportunities" not in [n for n, _ in client.calls]
+
+
+def test_buy_suggestion_replaces_the_generic_replenishment_review():
+    from datetime import date, timedelta
+
+    from biomie_intel.engine import build_company_rows
+    from test_metrics import base_product
+
+    as_of = date(2026, 10, 23)
+    sales = [["1", (as_of - timedelta(days=7 * w)).isoformat(), 20, 2000, 1] for w in range(40)]
+    extract = {"companyId": "c1", "asOf": as_of.isoformat(), "salesFrom": "2026-01-01",
+               "products": [base_product(qty=10, qtyPositive=10, curve="A")], "sales": sales, "returns": [],
+               "curveHistory": []}
+    rows, stats = build_company_rows(extract, PARAMS, [{"companyId": "c1", "scope": "empresa", "key": "",
+                                                       "leadTimeDays": 20}])
+    recs = [r["type"] for r in rows[0]["metrics"]["recommendations"]]
+    assert rows[0]["state"] == "risco_ruptura" and recs[0] == "comprar" and "avaliar_reposicao" not in recs
+    assert stats["replenishment"] == {"comprar": 1}

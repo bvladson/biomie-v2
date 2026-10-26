@@ -536,7 +536,7 @@ export function StatesList({
 
 const CURVES: ClassifiedCurve[] = ["A", "B", "C", "D"];
 
-function CurveLegend() {
+export function CurveLegend() {
   return (
     <ul
       className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"

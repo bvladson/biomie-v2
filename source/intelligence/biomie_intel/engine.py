@@ -69,8 +69,8 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any],
         omie = str(product["omieProductId"])
         m["replenishment"] = plan(m, state, resolve_params(replenishment or [], company_id, omie, product.get("family")))
         buy = buy_recommendation(m["replenishment"])
-        if buy:
-            m["recommendations"].insert(0, buy)
+        if buy:  # a sugestão com quantidade substitui o "avaliar reposição" genérico
+            m["recommendations"] = [buy] + [r for r in m["recommendations"] if r["type"] != "avaliar_reposicao"]
         buying[m["replenishment"]["status"]] = buying.get(m["replenishment"]["status"], 0) + 1
         for alert in m["alerts"]:
             alerts_by_severity[alert["severity"]] = alerts_by_severity.get(alert["severity"], 0) + 1

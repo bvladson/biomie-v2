@@ -419,7 +419,9 @@ export function IntelTable({
                     <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {r.forecast?.status === "ok" && r.forecast.units30 !== null ? (
                         <>
-                          <span className="block">{quantity(r.forecast.units30)} un.</span>
+                          <span className="block">
+                            {quantity(Math.round(r.forecast.units30 * 10) / 10)} un.
+                          </span>
                           {r.forecast.quality && (
                             <span className="block text-xs text-muted-foreground">
                               qualidade {QUALITY_LABELS[r.forecast.quality].toLowerCase()}

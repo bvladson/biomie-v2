@@ -47,8 +47,8 @@ describe("inteligência fases 3–5 — formatos", () => {
   });
 
   it("faixa da previsão só quando existe", () => {
-    expect(forecastRange({ units: 8.57 })).toBe("8,57 un.");
-    expect(forecastRange({ units: 8, low: 3, high: 12 })).toBe("8 un. (faixa 3 a 12)");
+    expect(forecastRange({ units: 8.57 })).toBe("8,6 un.");
+    expect(forecastRange({ units: 8, low: 3.04, high: 12.46 })).toBe("8 un. (faixa 3 a 12,5)");
   });
 });
 

@@ -63,7 +63,7 @@ import { Choice, CurveBadge, Notice, Status } from "./shared";
 import { StatTile, StateBadge, TipBox } from "./IntelBits";
 import { AlertRows } from "./IntelInsights";
 import { useAlertRefresh } from "../lib/intel-hooks";
-import { ChartCard } from "./IntelCharts";
+import { ChartCard, CurveLegend } from "./IntelCharts";
 import type { IntelItem } from "./IntelProductSheet";
 
 const ALL = "all";
@@ -282,7 +282,7 @@ function CoverageVsLeadTime({ rows }: { rows: ReplenishmentRow[] }) {
   return (
     <ChartCard
       title="Cobertura × prazo de reposição"
-      description="Dias que o disponível + pendente dura na demanda prevista, contra o prazo do fornecedor. Barra menor que o prazo: falta antes da entrega se não comprar agora."
+      description="Azul: dias que o disponível + pendente dura na demanda prevista; laranja: prazo do fornecedor. Barra menor que o prazo: falta antes da entrega se não comprar agora."
     >
       <ChartContainer
         config={{ coverage: { label: "Cobertura" }, lead: { label: "Prazo" } }}
@@ -319,7 +319,7 @@ function CoverageVsLeadTime({ rows }: { rows: ReplenishmentRow[] }) {
                       key: "l",
                       label: "dias de prazo",
                       value: quantity(r.lead),
-                      color: "var(--chart-5)",
+                      color: "var(--age-3)",
                     },
                   ]}
                 />
@@ -335,7 +335,7 @@ function CoverageVsLeadTime({ rows }: { rows: ReplenishmentRow[] }) {
           />
           <Bar
             dataKey="lead"
-            fill="var(--chart-5)"
+            fill="var(--age-3)"
             radius={[0, 3, 3, 0]}
             maxBarSize={10}
             isAnimationActive={false}
@@ -1081,6 +1081,20 @@ export function OpportunitiesPanel({
 
 // ---------------------------------------------------------------- matriz risco × impacto
 
+/** Marcas 1–2–5 × 10ⁿ que cobrem os valores (eixo logarítmico legível: R$ 1 mil, 2 mil, 5 mil…). */
+function logTicks(values: number[]): number[] {
+  const positive = values.filter((v) => v > 0);
+  if (positive.length === 0) return [];
+  const min = Math.min(...positive);
+  const max = Math.max(...positive);
+  const out: number[] = [];
+  for (let e = Math.floor(Math.log10(min)); e <= Math.ceil(Math.log10(max)); e++)
+    for (const m of [1, 2, 5]) out.push(m * 10 ** e);
+  const lo = out.filter((t) => t <= min).pop() ?? out[0]!;
+  const hi = out.find((t) => t >= max) ?? out[out.length - 1]!;
+  return out.filter((t) => t >= lo && t <= hi);
+}
+
 export function RiskMatrix({
   companyId,
   onOpen,
@@ -1110,6 +1124,7 @@ export function RiskMatrix({
     }),
   );
   if (points.length === 0) return null;
+  const ticks = logTicks(points.map((p) => p.capital));
   return (
     <ChartCard
       title="Risco × impacto financeiro"
@@ -1138,6 +1153,7 @@ export function RiskMatrix({
       }
       footer="A prioridade é o índice documentado do motor (capital, tempo sem venda, cobertura e queda da demanda), não uma probabilidade."
     >
+      <CurveLegend />
       <ChartContainer
         config={{ priority: { label: "Prioridade" } }}
         className="aspect-auto h-80 w-full"
@@ -1148,7 +1164,8 @@ export function RiskMatrix({
             type="number"
             dataKey="capital"
             scale="log"
-            domain={["auto", "auto"]}
+            domain={[ticks[0] ?? "auto", ticks[ticks.length - 1] ?? "auto"]}
+            ticks={ticks}
             tickFormatter={compactMoney}
             tickLine={false}
             axisLine={{ stroke: "var(--border)" }}
@@ -1163,7 +1180,7 @@ export function RiskMatrix({
             axisLine={false}
             name="Prioridade"
           />
-          <ZAxis range={[36, 36]} />
+          <ZAxis range={[90, 90]} />
           <ReferenceLine y={50} stroke="var(--muted-foreground)" strokeDasharray="2 3" />
           <ChartTooltip
             cursor={{ strokeDasharray: "3 3" }}
