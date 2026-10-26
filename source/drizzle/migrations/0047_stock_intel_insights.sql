@@ -381,7 +381,11 @@ begin
                  limit 1),
       'alerts', (select count(*) from private.intel_alerts t
                  where t.company_id = o.company_id and t.omie_product_id = o.omie_product_id and t.status = 'open'
-                   and (v_cost or not t.requires_cost))) order by o.rn)
+                   and (v_cost or not t.requires_cost)),
+      -- fase 4: previsão de 30 dias (só quando o modelo passou no teste histórico) e a qualidade dela
+      'forecast', jsonb_build_object('status', o.metrics->'forecast'->>'status',
+        'units30', o.metrics->'forecast'->'horizons'->'30'->'units',
+        'quality', o.metrics->'forecast'->'backtest'->>'quality')) order by o.rn)
       filter (where v_page = -1 or (o.rn > v_page * 50 and o.rn <= (v_page + 1) * 50)), '[]'::jsonb)
   into v_total, v_rows
   from o;
@@ -447,7 +451,9 @@ create or replace function stock_internal.intel_params() returns jsonb
 language sql stable security definer set search_path = pg_catalog, public, pg_temp as $$
   select jsonb_build_object(
     'minHistoryDays', 120, 'lowTurnoverAnnual', 1.0, 'excessCoverageDays', 180, 'obsolescenceDays', 365,
-    'ruptureCoverageDays', 15, 'trendDeclinePct', -30, 'costSuspectMax', 1.00, 'runsKeptDays', 14,
+    -- execuções guardadas: 7 dias (eram 14) — com diagnósticos e previsão cada produto ocupa ~4 KB, e só a
+    -- execução publicada é lida (o custo anterior para os alertas vem dela)
+    'ruptureCoverageDays', 15, 'trendDeclinePct', -30, 'costSuspectMax', 1.00, 'runsKeptDays', 7,
     'priorityWeights', jsonb_build_object('capital', 0.4, 'idle', 0.3, 'coverage', 0.15, 'trend', 0.15),
     -- fase 3 (alertas): volume mínimo para queda abrupta, quedas e variações que disparam aviso, notas
     -- mínimas para "parou de vender", devoluções que pedem atenção e dias que um alerta resolvido fica

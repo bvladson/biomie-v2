@@ -16,6 +16,7 @@ import pandas as pd
 from . import VERSION
 from .api import RpcClient, RpcError
 from .diagnosis import detect_alerts, diagnose, recommend
+from .forecast import forecast
 from .metrics import (curve_history, month_list, monthly_series, product_metrics, returns_by_product,
                       sales_frame, to_date, window_sums)
 from .states import classify, priority
@@ -32,6 +33,10 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
     series = monthly_series(frame, months)
     returns = returns_by_product(extract.get("returns"))
     history = curve_history(extract.get("curveHistory"))
+    daily: dict[str, list[Any]] = {}
+    if not frame.empty:
+        for omie, part in frame.groupby("omie"):
+            daily[str(omie)] = list(zip(part["day"], part["qty"]))
 
     items = []
     for product in extract.get("products") or []:
@@ -48,11 +53,15 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
     rows: list[dict[str, Any]] = []
     by_state: dict[str, dict[str, Any]] = {}
     alerts_by_severity: dict[str, int] = {}
+    forecasts: dict[str, int] = {}
     for i, (product, m, state, flags) in enumerate(items):
         score, parts = priority(m, state, pct.get(i), params)
         m["diagnoses"] = diagnose(m, state, flags, params)
         m["recommendations"] = recommend(m, state, flags, m["diagnoses"], params)
         m["alerts"] = detect_alerts(m, state, flags, params)
+        m["forecast"] = forecast(m, daily.get(str(product["omieProductId"]), []), as_of, sales_from)
+        key = m["forecast"]["status"] if m["forecast"]["status"] != "ok" else f"ok_{m['forecast']['backtest']['quality']}"
+        forecasts[key] = forecasts.get(key, 0) + 1
         for alert in m["alerts"]:
             alerts_by_severity[alert["severity"]] = alerts_by_severity.get(alert["severity"], 0) + 1
         rows.append({"omieProductId": str(product["omieProductId"]), "productId": product.get("productId"),
@@ -67,6 +76,7 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any]) -> tuple
         "unknownCost": sum(1 for _p, _m, _s, f in items if "custo_desconhecido" in f),
         "byState": by_state,
         "alerts": alerts_by_severity,
+        "forecasts": forecasts,
         "asOf": extract["asOf"], "salesFrom": extract.get("salesFrom"),
     }
     return rows, stats
