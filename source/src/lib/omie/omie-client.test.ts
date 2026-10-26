@@ -149,6 +149,32 @@ describe("OmieClient", () => {
     expect(waits).toEqual([12_000]);
   });
 
+  it("also waits 12 s after an empty period answered as an empty list (no fault)", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const limiter = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    const { client } = mk(
+      [
+        () => json({ pagina: 0, total_de_paginas: 0, total_de_registros: 0, lista: [] }),
+        () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 1 }] }),
+      ],
+      limiter,
+    );
+    const empty = await client.listPage("x/", "ListarMovimentos", { pagina: 1, mes: 1 }, ["lista"]);
+    expect(empty.totalPages).toBe(0);
+    await client.listPage("x/", "ListarMovimentos", { pagina: 1, mes: 2 }, ["lista"]);
+    expect(waits).toEqual([12_000]);
+  });
+
   it("after a busy answer the next calls of that method are spaced 20 s", async () => {
     let t = 0;
     const limiterWaits: number[] = [];
