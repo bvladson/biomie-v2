@@ -144,7 +144,12 @@ export class OmieClient {
           return await this.limiter.run(
             this.creds.appKey,
             call,
-            () => this.once(path, call, param, controller.signal),
+            async () => {
+              const body = await this.once(path, call, param, controller.signal);
+              // Empty page: Omie still holds this call a few seconds; the next one waits longer.
+              if (body["__empty"]) this.limiter.noteEmptyPage(this.creds.appKey, call);
+              return body;
+            },
             controller.signal,
             fingerprint,
           );
@@ -253,13 +258,16 @@ export class OmieClient {
         `Omie bloqueou temporariamente este método (425): ${msg}`,
         false,
       );
-    if (fault && BUSY.test(fault))
+    if (fault && BUSY.test(fault)) {
+      // Space the next calls of this method, so one busy answer does not become three per cycle.
+      this.limiter.noteBusy(this.creds.appKey, call);
       throw new OmieError(
         "rate_limit",
         `Omie ainda processa outra requisição deste método: ${msg}`,
         true,
         OMIE_BUSY_RETRY_MS,
       );
+    }
     if (res.status === 429 || (fault && RATE_LIMIT.test(fault))) {
       const retry = res.headers.get("retry-after");
       const retryMs = retry
