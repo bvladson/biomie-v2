@@ -406,11 +406,103 @@ def oneoff(args, timeout, image=None, extra=None):
     return {'exit': p.returncode, 'stdout': out, 'stderr': p.stderr[-1500:]}
 
 
+PROBE_CONTAINER = 'biomie-hml-txprobe'
+
+
+def key_conflicts(slug):
+    """Uso real da chave do Omie dessa empresa pela PRODUÇÃO agora (só leitura no banco da produção):
+    cargas, jobs de carga, leituras de estoque (inclusive longas) e importação de movimentações."""
+    row = psql(f"""select concat_ws(' | ',
+      (select 'carga em andamento: ' || string_agg(r.entity, ',') from public.integration_sync_runs r
+        where r.company_id = c.id and r.status = 'RUNNING'),
+      (select 'job de carga em andamento: ' || count(*) from public.integration_backfill_jobs j
+        where j.company_id = c.id and j.status = 'RUNNING' having count(*) > 0),
+      (select 'leitura de estoque: ' || string_agg(s.status, ',') from private.stock_readings s
+        where s.company_id = c.id and s.status in ('queued', 'running')),
+      (select 'movimentações: ' || string_agg(m.status, ',') from private.stock_movement_jobs m
+        where m.company_id = c.id and m.status = 'running'))
+      from public.companies c where c.slug = '{slug}';""", db='biomie_v2')
+    return [part for part in row.split(' | ') if part.strip()]
+
+
+def container_log_lines(name):
+    """Linhas do contêiner direto do arquivo json-file (docker logs não é confiável neste servidor)."""
+    path = run(['docker', 'inspect', '--format', '{{.LogPath}}', name], check=False)
+    lines = []
+    if path and os.path.exists(path):
+        with open(path, encoding='utf-8', errors='replace') as handle:
+            for raw in handle:
+                try:
+                    rec = json.loads(raw)
+                except ValueError:
+                    continue
+                lines.extend((rec.get('time', ''), part) for part in rec.get('log', '').splitlines())
+    return lines
+
+
+def trace_metrics(events):
+    """Ritmo real das chamadas: depois de cada resposta vazia, quanto tempo até a próxima chamada do
+    mesmo método (a correção promete 12 s ou mais; o código antigo esperava 2 s)."""
+    def stamp(value):
+        return datetime.datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    by_call = {}
+    for ev in events:
+        by_call.setdefault(ev['call'], []).append(ev)
+    out = {}
+    for call, evs in by_call.items():
+        evs.sort(key=lambda e: e['startedAt'])
+        outcomes = {}
+        for ev in evs:
+            outcomes[ev['outcome']] = outcomes.get(ev['outcome'], 0) + 1
+        gaps = {'afterEmpty': [], 'afterOk': [], 'afterBusy': []}
+        for prev, nxt in zip(evs, evs[1:]):
+            gap = round(stamp(nxt['startedAt']) - (stamp(prev['startedAt']) + prev['ms'] / 1000), 1)
+            kind = ('afterEmpty' if prev['outcome'] in ('empty-list', 'empty-fault') else
+                    'afterBusy' if prev['outcome'] == 'busy' else 'afterOk')
+            gaps[kind].append(gap)
+        first = stamp(evs[0]['startedAt'])
+        last = stamp(evs[-1]['startedAt']) + evs[-1]['ms'] / 1000
+        out[call] = {
+            'calls': len(evs), 'outcomes': outcomes,
+            'records': sum(ev['records'] or 0 for ev in evs),
+            'seconds': round(last - first, 1),
+            'emptyThenWaited12s': f"{sum(1 for g in gaps['afterEmpty'] if g >= 11.5)}/{len(gaps['afterEmpty'])}",
+            'gapAfterEmpty': {'min': min(gaps['afterEmpty'], default=None), 'max': max(gaps['afterEmpty'], default=None)},
+            'gapAfterOk': {'min': min(gaps['afterOk'], default=None), 'max': max(gaps['afterOk'], default=None)},
+            'gapAfterBusy': gaps['afterBusy'],
+            'apiMs': {'min': min(ev['ms'] for ev in evs), 'max': max(ev['ms'] for ev in evs)},
+        }
+    return out
+
+
+def finance_snapshot(slug, since, db):
+    """Contas a receber emitidas e baixas pagas no período, para comparar cópia × produção."""
+    return json.loads(psql(f"""select json_build_object(
+      'receivables', (select json_build_object('count', count(*), 'amount', round(coalesce(sum(r.original_amount), 0), 2),
+                        'cancelled', count(*) filter (where r.cancelled_at is not null),
+                        'missing', count(*) filter (where r.missing_in_source))
+                      from public.canonical_receivables r where r.company_id = c.id and r.issue_date >= date '{since}'),
+      'settlements', (select json_build_object('count', count(*), 'amount', round(coalesce(sum(s.amount), 0), 2))
+                      from public.canonical_settlements s where s.company_id = c.id and s.settlement_date >= date '{since}'))
+      from public.companies c where c.slug = '{slug}';""", db=db) or '{}')
+
+
+def prod_worker_window(t0, t1):
+    """O worker da produção no mesmo intervalo: erros, respostas "já existe" e pausas do circuito."""
+    lines = [text for stamp, text in container_log_lines('biomie-v2-worker-1') if t0 <= stamp[:19] <= t1]
+    return {'lines': len(lines),
+            'errors': sum(1 for t in lines if '"tick_failed"' in t or '_failed"' in t),
+            'busyAnswers': sum(1 for t in lines if 'Omie ainda processa outra' in t),
+            'circuitPauses': sum(1 for t in lines if 'bloqueado temporariamente' in t)}
+
+
 def tx_probe(short, slug, entities, days):
-    """Ciclo real de cargas de UMA empresa com o código de uma release, na cópia. A chave do Omie é a
-    mesma da produção: só começa nos minutos :10–:14 ou :40–:44 (as cargas da produção começam em :21
-    e :51) e sem carga dessa empresa em andamento na produção. Conta as respostas "já existe uma
-    requisição desse método" e as pausas do nosso circuito."""
+    """Ciclo real de cargas de UMA empresa com o código de uma release, na cópia, com rastreio de cada
+    chamada ao Omie (omie-trace-sync). A chave do Omie é a mesma da produção, então (parecer de
+    26/10/2026): só leitura (métodos Listar*), mesmos limites do worker da produção, começa só sem uso
+    real da chave pela produção (e nos minutos :10–:14 ou :40–:44, longe das cargas :21/:51) e é
+    encerrado na hora se aparecer conflito, bloqueio, consumo redundante, pausa do circuito ou mais de 2
+    respostas "já existe uma requisição"."""
     import re
     if not re.fullmatch(r'[0-9a-f]{12}', short) or not re.fullmatch(r'[a-z0-9-]{2,40}', slug):
         raise SystemExit('uso: tx-probe <release-12> <empresa-slug> <entidades> [dias]')
@@ -418,8 +510,12 @@ def tx_probe(short, slug, entities, days):
     picked = [e for e in entities.split(',') if e]
     if not picked or any(e not in allowed for e in picked) or not days.isdigit() or not 1 <= int(days) <= 400:
         raise SystemExit('entidades: invoices,orders,receivables,settlements; dias: 1 a 400')
+    if run(['docker', 'inspect', '--format', '{{.State.Status}}', PROBE_CONTAINER], check=False) == 'running':
+        raise SystemExit('outro tx-probe em andamento: um teste por vez na chave')
     release = BASE / 'releases' / short
     meta = json.loads((release / 'RELEASE.json').read_text())
+    if not (release / 'scripts/omie-trace-sync.ts').exists():
+        raise SystemExit('esta release não tem o rastreio (scripts/omie-trace-sync.ts)')
     image = f'biomie-v2-web:hml-{short}'
     built = 0
     if subprocess.run(['docker', 'image', 'inspect', image], capture_output=True).returncode:
@@ -431,33 +527,88 @@ def tx_probe(short, slug, entities, days):
                '--build-arg', f"GIT_COMMIT={meta['commit']}",
                '-t', image, str(release)], timeout=3600)
         built = round(time.time() - started)
-    deadline = time.time() + 45 * 60
+    # Começa só sem uso real da chave pela produção (e longe das cargas :21/:51).
+    waited = time.time()
+    deadline = waited + 45 * 60
     while True:
-        minute = datetime.datetime.now().minute
-        busy = int(psql("select count(*) from public.integration_sync_runs r join public.companies c "
-                        f"on c.id = r.company_id where c.slug = '{slug}' and r.status = 'RUNNING';",
-                        db='biomie_v2') or 0)
-        if 10 <= minute % 30 <= 14 and not busy:
+        conflicts = key_conflicts(slug)
+        if 10 <= datetime.datetime.now().minute % 30 <= 14 and not conflicts:
             break
         if time.time() > deadline:
-            raise SystemExit('sem janela livre da chave em 45 min (produção usando a empresa)')
-        time.sleep(30)
+            raise SystemExit(f'sem janela livre da chave em 45 min: {conflicts}')
+        time.sleep(20)
     since = (datetime.date.today() - datetime.timedelta(days=int(days))).isoformat()
-    started = time.time()
-    out = oneoff(['.output/bootstrap-sync.mjs', '--phase=transactions', f'--companies={slug}',
-                  f'--entities={",".join(picked)}', f'--from={since}', '--fresh'], 1500, image=image,
-                 # mesmos limites do worker da produção, para o teste valer como o ciclo real
-                 extra={'OMIE_GLOBAL_PER_MINUTE': '90', 'OMIE_KEY_METHOD_PER_MINUTE': '30'})
-    text = out['stdout'] + out['stderr']
-    busy_by_call = {}
-    for call in re.findall(r'omie retry call=(\S+) kind=rate_limit attempt=\d+ wait_ms=\d+: Omie ainda processa', text):
-        busy_by_call[call] = busy_by_call.get(call, 0) + 1
-    final = [line for line in out['stdout'].splitlines() if '"job":"omie_bootstrap"' in line]
+    stack, env = read_env(STACK_ENV), read_env(HML_ENV)
+    values = {'SUPABASE_URL': 'http://hml-gateway:8000', 'SUPABASE_SERVICE_ROLE_KEY': env['HML_SERVICE_KEY'],
+              'SUPABASE_PUBLISHABLE_KEY': env['HML_ANON_KEY'],
+              'BIOMIE_CREDENTIALS_KEY': stack.get('BIOMIE_CREDENTIALS_KEY', ''),
+              'APP_ENV': 'production', 'BIOMIE_PROCESS_ROLE': 'worker',
+              # mesmos limites do worker da produção, para o teste valer como o ciclo real
+              'OMIE_GLOBAL_PER_MINUTE': '90', 'OMIE_KEY_METHOD_PER_MINUTE': '30', 'OMIE_MAX_CONCURRENT': '1',
+              'OMIE_CIRCUIT_OPEN_MS': '1800000'}
+    env_file = HML / 'txprobe.env'
+    write_private(env_file, ''.join(f'{k}={v}' + chr(10) for k, v in values.items()))
+    subprocess.run(['docker', 'rm', '-f', PROBE_CONTAINER], capture_output=True)
+    t0 = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        run(['docker', 'run', '-d', '--name', PROBE_CONTAINER, '--network', f'{PROJECT}_hml', '--cpus', '0.5',
+             '--memory', '768m', '--env-file', str(env_file), image, 'node', '.output/omie-trace-sync.mjs',
+             '--phase=transactions', f'--companies={slug}', f'--entities={",".join(picked)}',
+             f'--from={since}', '--fresh'])
+    finally:
+        env_file.unlink(missing_ok=True)
+    aborted = None
+    limit = time.time() + 20 * 60
+    while True:
+        state = run(['docker', 'inspect', '--format', '{{.State.Status}}', PROBE_CONTAINER], check=False)
+        text = '\n'.join(t for _, t in container_log_lines(PROBE_CONTAINER))
+        busy = text.count('"outcome":"busy"')
+        if '"outcome":"blocked"' in text or '"outcome":"redundant"' in text:
+            aborted = 'bloqueio ou consumo redundante do Omie'
+        elif 'bloqueado temporariamente' in text:
+            aborted = 'pausa do circuito no teste'
+        elif busy > 2:
+            aborted = f'{busy} respostas "já existe uma requisição"'
+        elif state == 'running' and key_conflicts(slug):
+            aborted = 'produção começou a usar a chave: ' + '; '.join(key_conflicts(slug))
+        elif state == 'running' and time.time() > limit:
+            aborted = 'passou de 20 min'
+        if aborted or state != 'running':
+            break
+        time.sleep(5)
+    if aborted:
+        subprocess.run(['docker', 'kill', PROBE_CONTAINER], capture_output=True)
+        time.sleep(2)
+    t1 = datetime.datetime.now(datetime.timezone.utc)
+    exit_code = run(['docker', 'inspect', '--format', '{{.State.ExitCode}}', PROBE_CONTAINER], check=False)
+    lines = [t for _, t in container_log_lines(PROBE_CONTAINER)]
+    subprocess.run(['docker', 'rm', '-f', PROBE_CONTAINER], capture_output=True)
+    events, other = [], []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            other.append(line)
+            continue
+        if rec.get('event') == 'omie_call':
+            events.append(rec)
+        else:
+            other.append(line)
+    final = [line for line in other if '"job":"omie_trace_sync"' in line]
+    tail = '\n'.join(line for line in other if '"job":"omie_trace_sync"' not in line)[-2500:]
+    for value in secret_values():
+        tail = tail.replace(value, '[REDACTED]')
+    w0, w1 = t0.strftime('%Y-%m-%dT%H:%M:%S'), t1.strftime('%Y-%m-%dT%H:%M:%S')
     return {'release': short, 'commit': meta['commit'], 'company': slug, 'entities': picked, 'from': since,
-            'buildSeconds': built, 'started': datetime.datetime.now().isoformat(timespec='seconds'),
-            'runSeconds': round(time.time() - started), 'exit': out['exit'],
-            'busyAnswers': busy_by_call, 'circuitPauses': text.count('bloqueado temporariamente'),
-            'result': final[-1] if final else None, 'tail': text[-3000:]}
+            'buildSeconds': built, 'waitedForSlotSeconds': round(t0.timestamp() - waited),
+            'startedUtc': w0, 'finishedUtc': w1, 'seconds': round((t1 - t0).total_seconds()),
+            'exit': exit_code, 'aborted': aborted, 'result': final[-1] if final else None,
+            'calls': len(events), 'byMethod': trace_metrics(events),
+            'retries': sum(1 for t in other if 'omie retry call=' in t),
+            'finance': {'copy': finance_snapshot(slug, since, DB), 'production': finance_snapshot(slug, since, 'biomie_v2')},
+            'productionWorker': prod_worker_window(w0, w1),
+            'timeline': [{k: e[k] for k in ('startedAt', 'call', 'outcome', 'records', 'ms', 'params')} for e in events][-60:],
+            'tail': tail}
 
 
 def intel_run(args, timeout):
