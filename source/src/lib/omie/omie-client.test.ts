@@ -121,6 +121,74 @@ describe("OmieClient", () => {
     expect(Math.max(...waits)).toBeGreaterThanOrEqual(20_000);
   });
 
+  it("waits 12 s after an empty page before the next call of the same method", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const limiter = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    const { client } = mk(
+      [
+        () => json({ faultstring: "ERROR: Não existem registros para a página [1]!" }, 500),
+        () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 1 }] }),
+      ],
+      limiter,
+    );
+    const empty = await client.listPage("x/", "ListarContasReceber", { pagina: 1, mes: 1 }, [
+      "lista",
+    ]);
+    expect(empty.records).toHaveLength(0);
+    await client.listPage("x/", "ListarContasReceber", { pagina: 1, mes: 2 }, ["lista"]);
+    expect(waits).toEqual([12_000]);
+  });
+
+  it("after a busy answer the next calls of that method are spaced 20 s", async () => {
+    let t = 0;
+    const limiterWaits: number[] = [];
+    const limiter = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          limiterWaits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    let i = 0;
+    const responses = [
+      () =>
+        json(
+          {
+            faultstring:
+              "ERROR: Já existe uma requisição desse método sendo executada e você pode tentar novamente em alguns instantes. (1)",
+          },
+          500,
+        ),
+      () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 1 }] }),
+      () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 2 }] }),
+    ];
+    const client = new OmieClient(creds, {
+      fetchImpl: (async () => responses[Math.min(i++, 2)]!()) as unknown as typeof fetch,
+      sleep: async (ms) => {
+        t += ms;
+      },
+      limiter,
+      maxRetries: 2,
+    });
+    await client.listPage("x/", "ListarContasReceber", { pagina: 1, mes: 1 }, ["lista"]);
+    await client.listPage("x/", "ListarContasReceber", { pagina: 1, mes: 2 }, ["lista"]);
+    // The retry of the identical request still respects the 61 s rule; the next month waits 20 s.
+    expect(limiterWaits.at(-1)).toBe(20_000);
+  });
+
   it("redacts credentials", () => {
     const m = redact('erro KEY123 / SECRET456 "app_key":"zzz"', creds);
     expect(m).not.toContain("KEY123");
@@ -190,6 +258,72 @@ describe("OmieRateLimiter", () => {
     expect(waits).toEqual([2_000]);
     t += 5_000;
     await l.run("k", "ListarContasReceber", async () => 1, undefined, "k-crr-3");
+    expect(waits).toEqual([2_000]);
+  });
+
+  it("waits longer after an empty page, only for that method and key", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarContasReceber", async () => 1);
+    l.noteEmptyPage("k", "ListarContasReceber");
+    await l.run("k", "ListarMovimentos", async () => 1);
+    await l.run("other", "ListarContasReceber", async () => 1);
+    expect(waits).toEqual([]);
+    await l.run("k", "ListarContasReceber", async () => 1);
+    expect(waits).toEqual([12_000]);
+  });
+
+  it("spaces a method 20 s for 10 minutes after a busy answer, then back to 2 s", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarContasReceber", async () => 1);
+    l.noteBusy("k", "ListarContasReceber");
+    await l.run("k", "ListarContasReceber", async () => 1);
+    await l.run("k", "ListarMovimentos", async () => 1);
+    expect(waits).toEqual([20_000]);
+    t += 10 * 60_000;
+    await l.run("k", "ListarContasReceber", async () => 1);
+    await l.run("k", "ListarContasReceber", async () => 1);
+    expect(waits).toEqual([20_000, 2_000]);
+  });
+
+  it("turns the adaptive pauses off with 0 (rollback without a release)", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      { emptyPageGapMs: 0, busyGapMs: 0 },
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarContasReceber", async () => 1);
+    l.noteEmptyPage("k", "ListarContasReceber");
+    l.noteBusy("k", "ListarContasReceber");
+    await l.run("k", "ListarContasReceber", async () => 1);
     expect(waits).toEqual([2_000]);
   });
 
