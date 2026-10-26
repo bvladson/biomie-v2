@@ -342,6 +342,26 @@ begin
               where ic.company_id = any(v_companies) and (x.metrics->>'avgPrice')::numeric > 0), '[]'::jsonb));
 end $$;
 
+-- Matriz risco × impacto: os 400 produtos de maior prioridade com capital (o eixo do impacto é o capital,
+-- então só para quem vê custo). A prioridade é o índice documentado do motor, não probabilidade.
+create or replace function stock_internal.intel_matrix(p_company text) returns jsonb
+language plpgsql stable security definer set search_path = pg_catalog, public, pg_temp as $$
+declare
+  v_caps jsonb := stock_internal.require('viewCost');
+  v_companies uuid[] := stock_internal.scope(p_company);
+begin
+  return (select jsonb_build_object('total', count(*), 'points', coalesce(jsonb_agg(jsonb_build_array(
+      t.company_id, t.omie_product_id, t.sku, t.name, t.capital, t.priority, t.state, t.curve)
+      order by t.rn) filter (where t.rn <= 400), '[]'::jsonb))
+    from (select x.company_id, x.omie_product_id, x.sku, x.name, (x.metrics->>'capital')::numeric as capital,
+            x.priority, x.state, x.metrics->'curve'->>'current' as curve,
+            row_number() over (order by x.priority desc, (x.metrics->>'capital')::numeric desc, x.omie_product_id) as rn
+          from private.intel_current ic
+          join private.intel_product_metrics x on x.run_id = ic.run_id and x.company_id = ic.company_id
+          where ic.company_id = any(v_companies) and x.priority is not null
+            and (x.metrics->>'capital')::numeric > 0) t);
+end $$;
+
 -- ===================================================================== entradas
 
 create or replace function public.stock_intel_planning(p_run uuid)
@@ -366,23 +386,28 @@ returns jsonb language sql security invoker set search_path = pg_catalog, public
 create or replace function public.stock_intel_price_basis(p_company text)
 returns jsonb language sql security invoker set search_path = pg_catalog, public as $$
   select stock_internal.intel_price_basis(p_company) $$;
+create or replace function public.stock_intel_matrix(p_company text)
+returns jsonb language sql security invoker set search_path = pg_catalog, public as $$
+  select stock_internal.intel_matrix(p_company) $$;
 
 revoke all on function stock_internal.intel_planning(uuid), stock_internal.intel_publish_opportunities(uuid, integer, jsonb),
   stock_internal.intel_replenishment_params(text), stock_internal.intel_set_replenishment(text, text, text, jsonb, text),
-  stock_internal.intel_replenishment(jsonb), stock_internal.intel_opportunities(jsonb), stock_internal.intel_price_basis(text)
-  from public, anon, authenticated;
+  stock_internal.intel_replenishment(jsonb), stock_internal.intel_opportunities(jsonb), stock_internal.intel_price_basis(text),
+  stock_internal.intel_matrix(text) from public, anon, authenticated;
 grant execute on function stock_internal.intel_planning(uuid), stock_internal.intel_publish_opportunities(uuid, integer, jsonb)
   to service_role;
 grant execute on function stock_internal.intel_replenishment_params(text),
   stock_internal.intel_set_replenishment(text, text, text, jsonb, text), stock_internal.intel_replenishment(jsonb),
-  stock_internal.intel_opportunities(jsonb), stock_internal.intel_price_basis(text) to authenticated;
+  stock_internal.intel_opportunities(jsonb), stock_internal.intel_price_basis(text), stock_internal.intel_matrix(text)
+  to authenticated;
 revoke all on function public.stock_intel_planning(uuid), public.stock_intel_publish_opportunities(uuid, integer, jsonb),
   public.stock_intel_replenishment_params(text), public.stock_intel_set_replenishment(text, text, text, jsonb, text),
-  public.stock_intel_replenishment(jsonb), public.stock_intel_opportunities(jsonb), public.stock_intel_price_basis(text)
-  from public, anon, authenticated;
+  public.stock_intel_replenishment(jsonb), public.stock_intel_opportunities(jsonb), public.stock_intel_price_basis(text),
+  public.stock_intel_matrix(text) from public, anon, authenticated;
 grant execute on function public.stock_intel_planning(uuid), public.stock_intel_publish_opportunities(uuid, integer, jsonb)
   to service_role;
 grant execute on function public.stock_intel_replenishment_params(text),
   public.stock_intel_set_replenishment(text, text, text, jsonb, text), public.stock_intel_replenishment(jsonb),
-  public.stock_intel_opportunities(jsonb), public.stock_intel_price_basis(text) to authenticated;
+  public.stock_intel_opportunities(jsonb), public.stock_intel_price_basis(text), public.stock_intel_matrix(text)
+  to authenticated;
 notify pgrst, 'reload schema';

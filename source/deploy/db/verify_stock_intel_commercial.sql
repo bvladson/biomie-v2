@@ -135,7 +135,7 @@ begin
   perform public.stock_intel_publish(run, ca, 0, jsonb_build_array(
     jsonb_build_object('omieProductId', '501', 'sku', 'F5-X', 'name', 'Cadeira X', 'state', 'possivel_excesso', 'flags', '[]'::jsonb,
       'priority', 80, 'metrics', jsonb_build_object('stock', jsonb_build_object('qty', 100, 'available', 100),
-        'avgPrice', 85, 'sales', jsonb_build_object('d365', jsonb_build_object('units', 4)),
+        'capital', 4000, 'avgPrice', 85, 'sales', jsonb_build_object('d365', jsonb_build_object('units', 4)),
         'replenishment', jsonb_build_object('status', 'nao_comprar', 'qty', 0, 'leadTimeDays', 20, 'coverageDays', 900))),
     jsonb_build_object('omieProductId', '502', 'sku', 'F5-Y', 'name', 'Mesa Y', 'state', 'risco_ruptura', 'flags', '[]'::jsonb,
       'priority', 60, 'metrics', jsonb_build_object('stock', jsonb_build_object('qty', 2, 'available', 2),
@@ -196,6 +196,12 @@ begin
   if jsonb_array_length(v->'prices') <> 1 or (v->'prices'->0->>2)::numeric <> 85 then
     raise exception 'FALHOU: base de preço do simulador: %', v;
   end if;
+  v := public.stock_intel_matrix('all');
+  -- só entra produto com prioridade e capital: 501 (502 tem prioridade sem capital; 601 nada)
+  if (v->>'total')::integer <> 1 or v->'points'->0->>1 <> '501' or (v->'points'->0->>4)::numeric <> 4000
+     or (v->'points'->0->>5)::numeric <> 80 then
+    raise exception 'FALHOU: matriz só com capital e prioridade: %', v;
+  end if;
   v := public.stock_intel_set_replenishment(ca, 'produto', '502', null, 'Volta ao prazo da empresa');
   if not (v->>'removed')::boolean then raise exception 'FALHOU: remover parâmetro'; end if;
 end $$;
@@ -219,6 +225,11 @@ begin
     perform public.stock_intel_price_basis('all');
   exception when insufficient_privilege then refused := true; end;
   if not refused then raise exception 'FALHOU: vendedor recebeu base de preço'; end if;
+  refused := false;
+  begin
+    perform public.stock_intel_matrix('all');
+  exception when insufficient_privilege then refused := true; end;
+  if not refused then raise exception 'FALHOU: vendedor recebeu a matriz (capital)'; end if;
 end $$;
 reset role;
 

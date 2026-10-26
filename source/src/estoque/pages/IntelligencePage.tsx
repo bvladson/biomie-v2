@@ -1,12 +1,14 @@
 /**
- * Inteligência do Estoque (BIOMIE Intelligence, fase 2): cards, distribuição ABCD, radar do capital
- * parado, estados, evolução, Pareto e a lista de produtos com a explicação de cada um. Tudo é
- * leitura do que o motor já publicou; nada aqui altera o Omie nem os dados oficiais.
+ * Inteligência do Estoque (BIOMIE Intelligence): painel (cards, distribuição ABCD, radar do capital
+ * parado, estados, evolução, Pareto, matriz risco × impacto e a lista de produtos com diagnóstico,
+ * ação e previsão), alertas, Reposição Inteligente e oportunidades entre empresas. Tudo é leitura do
+ * que o motor já publicou; nada aqui altera o Omie nem os dados oficiais.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Lightbulb } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { appContextQuery } from "@/lib/queries";
 import type { ClassifiedCurve } from "../api/contract";
 import type { IntelBand, IntelOverview, IntelProductRow, IntelState } from "../api/intel-contract";
@@ -23,11 +25,31 @@ import {
 } from "../components/IntelCharts";
 import { IntelTable } from "../components/IntelTable";
 import { IntelProductSheet, type IntelItem } from "../components/IntelProductSheet";
+import {
+  AlertsPanel,
+  OpportunitiesPanel,
+  ReplenishmentPanel,
+  RiskMatrix,
+} from "../components/IntelPanels";
 import { useCapabilities, useStockCompany } from "../lib/hooks";
 import { dateTime, money } from "../lib/format";
 import { WINDOW_LABELS, shortDate } from "../lib/curves";
 import { bandsAbove, compactMoney, integer, percentText } from "../lib/intel";
-import { CLEAR, fromSearch, toSearch, type IntelFilters } from "../lib/intel-search";
+import {
+  CLEAR,
+  TABS,
+  fromSearch,
+  toSearch,
+  type IntelFilters,
+  type IntelTab,
+} from "../lib/intel-search";
+
+const TAB_LABELS: Record<IntelTab, string> = {
+  painel: "Painel",
+  alertas: "Alertas",
+  reposicao: "Reposição inteligente",
+  grupo: "Entre empresas",
+};
 
 const route = getRouteApi("/_authenticated/_shell/estoque/inteligencia");
 
@@ -95,13 +117,25 @@ export function IntelligencePage() {
   const isSuper = ctx.roles.includes("SUPER_ADMIN");
   const viewCost = caps.data?.viewCost === true;
   const canExport = caps.data?.export === true;
+  const canAck = caps.data?.classify === true;
   const single = companyId !== "all";
+  const tab: IntelTab = search.aba ?? "painel";
+  const setTab = (t: IntelTab) =>
+    routeNavigate({
+      search: (prev) => ({ ...prev, aba: t === "painel" ? undefined : t }),
+      resetScroll: false,
+    });
   const [item, setItem] = useState<IntelItem | null>(null);
 
   const overview = useQuery({
     queryKey: ["stock", "intel", "overview", companyId, window],
     queryFn: () => intelApi.overview(companyId, window),
     placeholderData: keepPreviousData,
+    retry: false,
+  });
+  const alertSummary = useQuery({
+    queryKey: ["stock", "intel", "alerts", "summary", companyId],
+    queryFn: () => intelApi.alerts({ companyId, page: 0 }),
     retry: false,
   });
   const pareto = useQuery({
@@ -186,131 +220,194 @@ export function IntelligencePage() {
           aria-busy={overview.isFetching}
         >
           <RunInfo o={o} isSuper={isSuper} />
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-            {viewCost && (
-              <StatTile
-                label="Capital em estoque"
-                value={o.capital.total === null ? "—" : compactMoney(o.capital.total)}
-                foot={`${money(o.capital.total)} · saldos positivos × CMC`}
-              />
-            )}
-            {viewCost && (
-              <StatTile
-                label="Capital em C + D"
-                value={cd === null ? "—" : compactMoney(cd)}
-                foot={`${percentText(o.capital.cdShare)} do capital · ${label}`}
-              />
-            )}
-            {hasRun && (
-              <>
-                <StatTile
-                  label="Risco de ruptura"
-                  value={integer(tile("risco_ruptura").products)}
-                  foot="Saldo para menos de 15 dias"
-                  active={onlyState("risco_ruptura")}
-                  onSelect={() => drill({ state: "risco_ruptura" })}
-                />
-                <StatTile
-                  label="Sem venda há mais de 180 dias"
-                  value={integer(over180Products)}
-                  foot={
-                    over180Capital === null ? "Produtos com saldo" : compactMoney(over180Capital)
-                  }
-                  active={filters.minIdle === 180 && !filters.state && !filters.band}
-                  onSelect={() => drill({ minIdle: 180 })}
-                />
-                <StatTile
-                  label="Produtos novos"
-                  value={integer(tile("novo").products)}
-                  foot={tile("novo").foot ?? "Sem alerta de encalhe"}
-                  active={onlyState("novo")}
-                  onSelect={() => drill({ state: "novo" })}
-                />
-                <StatTile
-                  label="Histórico insuficiente"
-                  value={integer(tile("historico_insuficiente").products)}
-                  foot={tile("historico_insuficiente").foot ?? "Ainda sem base para afirmar"}
-                  active={onlyState("historico_insuficiente")}
-                  onSelect={() => drill({ state: "historico_insuficiente" })}
-                />
-              </>
-            )}
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-2">
-            <CurveChart
-              overview={o}
-              viewCost={viewCost}
-              windowLabel={label}
-              onSelect={(curve: ClassifiedCurve) =>
-                navigate({
-                  to: "/estoque/posicoes",
-                  search: (prev) => ({ ...prev, curve, view: "product" }),
-                })
-              }
-            />
-            {hasRun ? (
-              <IdleRadar
-                overview={o}
-                viewCost={viewCost}
-                onSelect={(band: IntelBand) => drill({ band })}
-              />
-            ) : (
-              <section className="panel flex min-h-60 flex-col items-center justify-center gap-3 p-8 text-center">
-                <Lightbulb className="size-9 text-muted-foreground" aria-hidden />
-                <h2 className="text-base font-semibold">Nenhuma análise publicada ainda</h2>
-                <p className="max-w-md text-sm text-muted-foreground">
-                  O radar, os estados e a lista de produtos aparecem depois da primeira execução do
-                  motor de inteligência.
-                </p>
-              </section>
-            )}
-          </div>
-
           {hasRun && (
-            <div className="grid gap-5 lg:grid-cols-2">
-              <StatesList
-                overview={o}
-                viewCost={viewCost}
-                active={filters.state}
-                onSelect={(state) => drill({ state })}
-              />
-              <EvolutionChart overview={o} viewCost={viewCost} />
-            </div>
+            <nav
+              aria-label="Seções da inteligência do estoque"
+              className="flex flex-wrap gap-2 border-b pb-3"
+            >
+              {TABS.map((t) => (
+                <Button
+                  key={t}
+                  variant={tab === t ? "default" : "ghost"}
+                  className="min-h-11"
+                  aria-current={tab === t ? "page" : undefined}
+                  onClick={() => setTab(t)}
+                >
+                  {TAB_LABELS[t]}
+                  {t === "alertas" && (alertSummary.data?.summary.open ?? 0) > 0
+                    ? ` (${integer(alertSummary.data!.summary.open)})`
+                    : ""}
+                </Button>
+              ))}
+            </nav>
           )}
-
-          {viewCost &&
-            (single ? (
-              pareto.data ? (
-                <ParetoView pareto={pareto.data} windowLabel={label} />
-              ) : (
-                <Status
-                  loading={pareto.isPending}
-                  error={pareto.error}
-                  retry={() => pareto.refetch()}
-                />
-              )
-            ) : (
-              <p className="panel p-5 text-sm text-muted-foreground">
-                Pareto do faturamento: escolha uma empresa no topo. A curva é calculada por empresa.
-              </p>
-            ))}
-
-          {hasRun && (
-            <IntelTable
+          {hasRun && tab === "alertas" && (
+            <AlertsPanel companyId={companyId} canAck={canAck} onOpen={(it) => setItem(it)} />
+          )}
+          {hasRun && tab === "reposicao" && (
+            <ReplenishmentPanel
               companyId={companyId}
-              filters={filters}
-              onChange={update}
-              onOpen={(r: IntelProductRow) =>
-                setItem({ companyId: r.companyId, omieProductId: r.omieProductId })
-              }
               viewCost={viewCost}
               canExport={canExport}
+              onOpen={(it) => setItem(it)}
             />
+          )}
+          {hasRun && tab === "grupo" && (
+            <OpportunitiesPanel
+              companyId={companyId}
+              viewCost={viewCost}
+              onOpen={(it) => setItem(it)}
+            />
+          )}
+          {(tab === "painel" || !hasRun) && (
+            <>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+                {viewCost && (
+                  <StatTile
+                    label="Capital em estoque"
+                    value={o.capital.total === null ? "—" : compactMoney(o.capital.total)}
+                    foot={`${money(o.capital.total)} · saldos positivos × CMC`}
+                  />
+                )}
+                {viewCost && (
+                  <StatTile
+                    label="Capital em C + D"
+                    value={cd === null ? "—" : compactMoney(cd)}
+                    foot={`${percentText(o.capital.cdShare)} do capital · ${label}`}
+                  />
+                )}
+                {hasRun && (
+                  <>
+                    <StatTile
+                      label="Risco de ruptura"
+                      value={integer(tile("risco_ruptura").products)}
+                      foot="Saldo para menos de 15 dias"
+                      active={onlyState("risco_ruptura")}
+                      onSelect={() => drill({ state: "risco_ruptura" })}
+                    />
+                    <StatTile
+                      label="Sem venda há mais de 180 dias"
+                      value={integer(over180Products)}
+                      foot={
+                        over180Capital === null
+                          ? "Produtos com saldo"
+                          : compactMoney(over180Capital)
+                      }
+                      active={filters.minIdle === 180 && !filters.state && !filters.band}
+                      onSelect={() => drill({ minIdle: 180 })}
+                    />
+                    <StatTile
+                      label="Produtos novos"
+                      value={integer(tile("novo").products)}
+                      foot={tile("novo").foot ?? "Sem alerta de encalhe"}
+                      active={onlyState("novo")}
+                      onSelect={() => drill({ state: "novo" })}
+                    />
+                    <StatTile
+                      label="Histórico insuficiente"
+                      value={integer(tile("historico_insuficiente").products)}
+                      foot={tile("historico_insuficiente").foot ?? "Ainda sem base para afirmar"}
+                      active={onlyState("historico_insuficiente")}
+                      onSelect={() => drill({ state: "historico_insuficiente" })}
+                    />
+                    {alertSummary.data && (
+                      <StatTile
+                        label="Alertas abertos"
+                        value={integer(alertSummary.data.summary.open)}
+                        foot={`${integer(alertSummary.data.summary.alta)} de gravidade alta · ${integer(alertSummary.data.summary.new)} novos`}
+                        onSelect={() => setTab("alertas")}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-2">
+                <CurveChart
+                  overview={o}
+                  viewCost={viewCost}
+                  windowLabel={label}
+                  onSelect={(curve: ClassifiedCurve) =>
+                    navigate({
+                      to: "/estoque/posicoes",
+                      search: (prev) => ({ ...prev, curve, view: "product" }),
+                    })
+                  }
+                />
+                {hasRun ? (
+                  <IdleRadar
+                    overview={o}
+                    viewCost={viewCost}
+                    onSelect={(band: IntelBand) => drill({ band })}
+                  />
+                ) : (
+                  <section className="panel flex min-h-60 flex-col items-center justify-center gap-3 p-8 text-center">
+                    <Lightbulb className="size-9 text-muted-foreground" aria-hidden />
+                    <h2 className="text-base font-semibold">Nenhuma análise publicada ainda</h2>
+                    <p className="max-w-md text-sm text-muted-foreground">
+                      O radar, os estados e a lista de produtos aparecem depois da primeira execução
+                      do motor de inteligência.
+                    </p>
+                  </section>
+                )}
+              </div>
+
+              {hasRun && (
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <StatesList
+                    overview={o}
+                    viewCost={viewCost}
+                    active={filters.state}
+                    onSelect={(state) => drill({ state })}
+                  />
+                  <EvolutionChart overview={o} viewCost={viewCost} />
+                </div>
+              )}
+
+              {viewCost &&
+                (single ? (
+                  pareto.data ? (
+                    <ParetoView pareto={pareto.data} windowLabel={label} />
+                  ) : (
+                    <Status
+                      loading={pareto.isPending}
+                      error={pareto.error}
+                      retry={() => pareto.refetch()}
+                    />
+                  )
+                ) : (
+                  <p className="panel p-5 text-sm text-muted-foreground">
+                    Pareto do faturamento: escolha uma empresa no topo. A curva é calculada por
+                    empresa.
+                  </p>
+                ))}
+
+              {hasRun && viewCost && (
+                <RiskMatrix companyId={companyId} onOpen={(it) => setItem(it)} />
+              )}
+
+              {hasRun && (
+                <IntelTable
+                  companyId={companyId}
+                  filters={filters}
+                  onChange={update}
+                  onOpen={(r: IntelProductRow) =>
+                    setItem({ companyId: r.companyId, omieProductId: r.omieProductId })
+                  }
+                  viewCost={viewCost}
+                  canExport={canExport}
+                />
+              )}
+            </>
           )}
         </div>
       )}
-      <IntelProductSheet item={item} onClose={() => setItem(null)} viewCost={viewCost} />
+      <IntelProductSheet
+        item={item}
+        onClose={() => setItem(null)}
+        viewCost={viewCost}
+        canAck={canAck}
+      />
     </>
   );
 }

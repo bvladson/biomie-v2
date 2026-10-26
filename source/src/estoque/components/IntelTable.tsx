@@ -1,10 +1,14 @@
-/** Lista de produtos analisados (oportunidades e riscos): filtros na URL, ordenação, páginas e CSV. */
+/**
+ * Lista de produtos analisados (oportunidades e riscos): filtros na URL, ordenação, páginas e CSV, com o
+ * diagnóstico e a ação principais, alertas abertos e a previsão de 30 dias.
+ */
 import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
+  BellRing,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -45,6 +49,7 @@ import {
   minIdleLabel,
 } from "../lib/intel";
 import { hasFilters, toQuery, type IntelFilters } from "../lib/intel-search";
+import { QUALITY_LABELS, REC_FILTERS, recLabel } from "../lib/intel-insights";
 import { Choice, CurveBadge, Status } from "./shared";
 import { FlagList, PriorityMeter, StateBadge } from "./IntelBits";
 
@@ -229,6 +234,31 @@ export function IntelTable({
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-56">
           <Choice
+            label="Recomendação"
+            value={filters.rec ?? ALL}
+            onChange={(v) => set({ rec: v === ALL ? undefined : v })}
+            options={[
+              { value: ALL, label: "Todas" },
+              ...REC_FILTERS.filter((r) => viewCost || r !== "conferir_custo").map((r) => ({
+                value: r,
+                label: recLabel(r),
+              })),
+            ]}
+          />
+        </div>
+        <div className="w-48">
+          <Choice
+            label="Alertas"
+            value={filters.alerts ? "sim" : ALL}
+            onChange={(v) => set({ alerts: v === "sim" ? true : undefined })}
+            options={[
+              { value: ALL, label: "Todos os produtos" },
+              { value: "sim", label: "Só com alerta aberto" },
+            ]}
+          />
+        </div>
+        <div className="w-56">
+          <Choice
             label="Ordenar por"
             value={query.sortBy ?? "priority"}
             onChange={(v) => set({ sort: v as IntelSort })}
@@ -272,6 +302,8 @@ export function IntelTable({
                 band: undefined,
                 minIdle: undefined,
                 q: undefined,
+                rec: undefined,
+                alerts: undefined,
                 page: undefined,
               });
             }}
@@ -293,6 +325,7 @@ export function IntelTable({
                 <TableRow>
                   <TableHead>Produto</TableHead>
                   <TableHead>Estado e sinais</TableHead>
+                  <TableHead>Diagnóstico e ação</TableHead>
                   <TableHead className="whitespace-nowrap">Curva 12 m</TableHead>
                   <TableHead className="text-right">Saldo</TableHead>
                   {viewCost && <TableHead className="text-right">Capital</TableHead>}
@@ -300,6 +333,7 @@ export function IntelTable({
                   <TableHead className="text-right">Cobertura</TableHead>
                   <TableHead className="text-right">Giro/ano</TableHead>
                   <TableHead className="whitespace-nowrap text-right">Tendência 60 d</TableHead>
+                  <TableHead className="whitespace-nowrap text-right">Previsão 30 d</TableHead>
                   <TableHead className="text-right">Prioridade</TableHead>
                 </TableRow>
               </TableHeader>
@@ -319,10 +353,26 @@ export function IntelTable({
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
+                      {(r.alerts ?? 0) > 0 && (
+                        <p className="mt-1 inline-flex items-center gap-1 text-xs">
+                          <BellRing aria-hidden className="size-3.5 text-risk" />
+                          {r.alerts} {r.alerts === 1 ? "alerta aberto" : "alertas abertos"}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell className="min-w-52 space-y-1.5 whitespace-normal">
                       <StateBadge state={r.state} />
                       <FlagList flags={r.flags} max={2} />
+                    </TableCell>
+                    <TableCell className="min-w-56 max-w-72 whitespace-normal text-sm">
+                      {r.diagnosis ? (
+                        <p title={r.diagnosis.text}>{r.diagnosis.title}</p>
+                      ) : (
+                        <p className="text-muted-foreground">—</p>
+                      )}
+                      {r.action && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">→ {r.action.action}</p>
+                      )}
                     </TableCell>
                     <TableCell>
                       {r.curve ? <CurveBadge curve={r.curve} /> : "—"}
@@ -366,6 +416,20 @@ export function IntelTable({
                     <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {trendText(r.trend60Pct)}
                     </TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
+                      {r.forecast?.status === "ok" && r.forecast.units30 !== null ? (
+                        <>
+                          <span className="block">{quantity(r.forecast.units30)} un.</span>
+                          {r.forecast.quality && (
+                            <span className="block text-xs text-muted-foreground">
+                              qualidade {QUALITY_LABELS[r.forecast.quality].toLowerCase()}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       <PriorityMeter value={r.priority} />
                     </TableCell>
@@ -373,7 +437,7 @@ export function IntelTable({
                 ))}
                 {data.total === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="py-10 text-center">
+                    <TableCell colSpan={viewCost ? 13 : 12} className="py-10 text-center">
                       Nenhum produto para estes filtros.
                     </TableCell>
                   </TableRow>

@@ -366,6 +366,11 @@ export function intelCsv(rows: IntelProductRow[], viewCost: boolean): string {
       "Tendência 60 dias (%)",
       "Unidades em 12 meses",
       ...(viewCost ? ["Faturamento em 12 meses"] : []),
+      "Diagnóstico",
+      "Ação recomendada",
+      "Alertas abertos",
+      "Previsão 30 dias (un.)",
+      "Qualidade da previsão",
     ],
     ...rows.map((r) => [
       r.companyName,
@@ -388,6 +393,18 @@ export function intelCsv(rows: IntelProductRow[], viewCost: boolean): string {
       opt(r.trend60Pct),
       opt(r.units365),
       ...(viewCost ? [opt(r.revenue365)] : []),
+      r.diagnosis ? `${r.diagnosis.title}: ${r.diagnosis.text}` : "",
+      r.action?.action ?? "",
+      r.alerts ?? "",
+      r.forecast?.status === "ok" ? opt(r.forecast.units30) : "",
+      r.forecast?.status === "ok" && r.forecast.quality ? FORECAST_QUALITY[r.forecast.quality] : "",
     ]),
   ]);
 }
+
+const FORECAST_QUALITY: Record<string, string> = {
+  boa: "Boa",
+  regular: "Regular",
+  fraca: "Fraca",
+  nao_avaliavel: "Não avaliável",
+};

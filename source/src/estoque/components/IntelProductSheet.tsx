@@ -1,4 +1,7 @@
-/** Inteligência de um produto: estado e evidências, prioridade explicada, vendas, curva e estoque. */
+/**
+ * Inteligência de um produto: estado e evidências, diagnóstico, recomendações, alertas, previsão,
+ * reposição, prioridade explicada, vendas, estoque, movimentações, curva e oportunidades no grupo.
+ */
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -26,6 +29,16 @@ import { STATE_RULES, coverageText, days, evidence, integer, percentText } from 
 import { CurveBadge } from "./shared";
 import { FlagList, PriorityMeter, StateBadge } from "./IntelBits";
 import { MonthlySalesChart } from "./IntelCharts";
+import {
+  AlertRows,
+  DiagnosisList,
+  ForecastPanel,
+  MovementsChart,
+  ProductOpportunities,
+  RecommendationList,
+  ReplenishmentBlock,
+} from "./IntelInsights";
+import { useAlertRefresh } from "../lib/intel-hooks";
 
 export interface IntelItem {
   companyId: string;
@@ -144,8 +157,17 @@ function PriorityExplained({
   );
 }
 
-function Detail({ d, viewCost }: { d: IntelProductDetail; viewCost: boolean }) {
+function Detail({
+  d,
+  viewCost,
+  canAck,
+}: {
+  d: IntelProductDetail;
+  viewCost: boolean;
+  canAck: boolean;
+}) {
   const m = d.metrics;
+  const refresh = useAlertRefresh();
   const windows = [
     ["30 dias", m.sales.d30],
     ["60 dias", m.sales.d60],
@@ -171,6 +193,26 @@ function Detail({ d, viewCost }: { d: IntelProductDetail; viewCost: boolean }) {
             <li key={line}>{line}</li>
           ))}
         </ul>
+      </Section>
+
+      <Section title="Diagnóstico">
+        <DiagnosisList items={m.diagnoses} />
+      </Section>
+
+      <Section title="Recomendações">
+        <RecommendationList items={m.recommendations} />
+      </Section>
+
+      <Section title="Alertas">
+        <AlertRows alerts={d.alerts ?? []} canAck={canAck} onChanged={refresh} />
+      </Section>
+
+      <Section title="Previsão de demanda (30, 60 e 90 dias)">
+        <ForecastPanel f={m.forecast} />
+      </Section>
+
+      <Section title="Reposição inteligente">
+        <ReplenishmentBlock r={m.replenishment} viewCost={viewCost} />
       </Section>
 
       <Section title="Como a prioridade foi calculada">
@@ -290,6 +332,10 @@ function Detail({ d, viewCost }: { d: IntelProductDetail; viewCost: boolean }) {
         />
       </Section>
 
+      <Section title="Movimentações por semana">
+        <MovementsChart d={d} />
+      </Section>
+
       <Section title="Curva e movimentações">
         <Facts
           rows={[
@@ -342,6 +388,10 @@ function Detail({ d, viewCost }: { d: IntelProductDetail; viewCost: boolean }) {
         )}
       </Section>
 
+      <Section title="Oportunidades entre empresas">
+        <ProductOpportunities d={d} viewCost={viewCost} />
+      </Section>
+
       <div className="flex flex-wrap gap-3 border-t pt-5">
         {d.productId && (
           <Link
@@ -375,10 +425,12 @@ export function IntelProductSheet({
   item,
   onClose,
   viewCost,
+  canAck = false,
 }: {
   item: IntelItem | null;
   onClose: () => void;
   viewCost: boolean;
+  canAck?: boolean;
 }) {
   const q = useQuery({
     queryKey: ["stock", "intel", "product", item?.companyId ?? null, item?.omieProductId ?? null],
@@ -415,7 +467,7 @@ export function IntelProductSheet({
             Este produto não está na última análise publicada.
           </p>
         ) : (
-          <Detail d={d} viewCost={viewCost} />
+          <Detail d={d} viewCost={viewCost} canAck={canAck} />
         )}
       </SheetContent>
     </Sheet>

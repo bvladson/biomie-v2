@@ -123,6 +123,112 @@ function empty(curve: Curve): CurveResult {
     missingPrice: 0,
   };
 }
+// ---------------------------------------------------------------- simulador inteligente (fase 5)
+
+/** Descontos prontos (o campo continua aceitando qualquer valor inteiro de 0 a 70%). */
+export const DISCOUNT_PRESETS = [5, 10, 15, 20, 30] as const;
+
+/**
+ * Base do desconto, sempre explícita: o preço de venda cadastrado no Omie ou o preço médio vendido em
+ * 12 meses (faturamento ÷ unidades, da análise da inteligência). Sem preço na base escolhida, o item
+ * fica sem receita (conta em "sem preço"), nunca com o preço da outra base.
+ */
+export type PriceBasis = "omie" | "media12m";
+
+/** "empresa:produto" a partir do id da posição ("empresa:produto:local"). */
+export const productKey = (id: string) => id.split(":").slice(0, 2).join(":");
+
+export function withPriceBasis(
+  items: SimulationItem[],
+  basis: PriceBasis,
+  avgPrices: Map<string, number>,
+): SimulationItem[] {
+  if (basis === "omie") return items;
+  return items.map((i) => ({ ...i, price: avgPrices.get(productKey(i.id)) ?? 0 }));
+}
+
+export interface BelowMarginItem {
+  id: string;
+  sku: string;
+  name: string;
+  curve: Curve;
+  companyName?: string | undefined;
+  cost: number;
+  refPrice: number;
+  price: number;
+  marginPct: number;
+  sold: number;
+}
+
+export interface CommercialResult {
+  /** Receita se todo o saldo positivo com preço fosse vendido no preço simulado (não é venda garantida). */
+  fullSaleRevenue: number;
+  /** Custo do estoque analisado (saldo positivo). */
+  analyzedCost: number;
+  /** Receita do cenário − custo das unidades que saem, só nos itens com preço. */
+  grossResult: number;
+  /** Resultado bruto ÷ receita do cenário (itens com preço); null sem receita. */
+  marginPct: number | null;
+  /** Quanto se deixa de receber nas unidades que saem, em relação ao preço de referência. */
+  discountAmount: number;
+  belowMargin: BelowMarginItem[];
+  belowMarginCount: number;
+}
+
+/**
+ * Indicadores comerciais do cenário: os mesmos cortes e desconto de simulate(), a mesma conta de
+ * saída. A quantidade vendida não muda com o desconto (não há histórico que sustente esse efeito).
+ */
+export function commercial(
+  items: SimulationItem[],
+  scenario: ScenarioInput,
+  minMarginPct: number,
+): CommercialResult {
+  const { rows } = simulate(items, scenario);
+  const factor = 1 - scenario.discount / 100;
+  let fullSaleRevenue = 0,
+    analyzedCost = 0,
+    grossResult = 0,
+    revenue = 0,
+    discountAmount = 0;
+  const below: BelowMarginItem[] = [];
+  for (const r of rows) {
+    if (r.qty > 0) {
+      analyzedCost += r.qty * r.cost;
+      if (r.price > 0) fullSaleRevenue += r.qty * r.price * factor;
+    }
+    if (r.sold <= 0 || r.price <= 0) continue;
+    revenue += r.revenue;
+    grossResult += r.revenue - r.removed;
+    discountAmount += r.sold * r.price - r.revenue;
+    const price = r.price * factor;
+    const marginPct = ((price - r.cost) / price) * 100;
+    if (marginPct < minMarginPct)
+      below.push({
+        id: r.id,
+        sku: r.sku,
+        name: r.name,
+        curve: r.curve,
+        companyName: r.companyName,
+        cost: r.cost,
+        refPrice: r.price,
+        price,
+        marginPct,
+        sold: r.sold,
+      });
+  }
+  below.sort((a, b) => a.marginPct - b.marginPct || a.sku.localeCompare(b.sku));
+  return {
+    fullSaleRevenue,
+    analyzedCost,
+    grossResult,
+    marginPct: revenue > 0 ? (grossResult / revenue) * 100 : null,
+    discountAmount,
+    belowMargin: below.slice(0, 50),
+    belowMarginCount: below.length,
+  };
+}
+
 /** Charts exclude negatives without removing them from the accounting totals. */
 export function chartProjection(items: SimulationItem[], scenario: ScenarioInput) {
   const positive = simulate(

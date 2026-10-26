@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLEAR, fromSearch, toSearch, validateIntelSearch } from "./intel-search";
+import { CLEAR, fromSearch, toQuery, toSearch, validateIntelSearch } from "./intel-search";
 
 describe("inteligência do estoque — filtros no endereço", () => {
   it("aceita só valores conhecidos e descarta o resto", () => {
@@ -54,15 +54,33 @@ describe("inteligência do estoque — filtros no endereço", () => {
     expect(Object.keys(toSearch(CLEAR)).sort()).toEqual(
       [
         "busca",
+        "comAlerta",
         "curva",
         "estado",
         "faixa",
         "ordem",
         "pagina",
+        "recomendacao",
         "semVenda",
         "sentido",
         "sinal",
       ].sort(),
+    );
+  });
+
+  it("recomendação, só com alerta e aba: só valores conhecidos", () => {
+    expect(
+      validateIntelSearch({ recomendacao: "comprar", comAlerta: true, aba: "reposicao" }),
+    ).toEqual(
+      expect.objectContaining({ recomendacao: "comprar", comAlerta: true, aba: "reposicao" }),
+    );
+    expect(
+      validateIntelSearch({ recomendacao: "vender_tudo", comAlerta: "true", aba: "admin" }),
+    ).toEqual(
+      expect.objectContaining({ recomendacao: undefined, comAlerta: undefined, aba: undefined }),
+    );
+    expect(toQuery("all", fromSearch({ recomendacao: "nao_comprar", comAlerta: true }))).toEqual(
+      expect.objectContaining({ rec: "nao_comprar", withAlerts: true }),
     );
   });
 });

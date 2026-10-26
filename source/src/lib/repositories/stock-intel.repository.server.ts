@@ -7,14 +7,27 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import type { CompanyFilter, CurveWindow } from "@/estoque/api/contract";
 import type {
+  IntelAlert,
+  IntelAlertQuery,
+  IntelAlertSummary,
   IntelOverview,
   IntelPareto,
   IntelProductDetail,
   IntelProductRow,
   IntelQuery,
   IntelStatus,
+  MatrixPoint,
+  Opportunity,
+  OpportunityQuery,
+  PriceBasisRow,
+  ReplenishmentParam,
+  ReplenishmentParamInput,
+  ReplenishmentQuery,
+  ReplenishmentRow,
+  ReplenishmentSummary,
 } from "@/estoque/api/intel-contract";
 import { intelCsv } from "@/estoque/lib/intel";
+import { replenishmentCsv } from "@/estoque/lib/intel-insights";
 import { capabilities, fromDb, stockError } from "./stock.repository.server";
 
 type Db = SupabaseClient<Database>;
@@ -50,6 +63,58 @@ export const product = (db: Db, companyId: string, omieProductId: string) =>
 export const pareto = (db: Db, companyId: string, window?: CurveWindow) =>
   call<IntelPareto>(db, "stock_intel_pareto", { p_company: companyId, p_window: window ?? null });
 
+// ---------------------------------------------------------------- fase 3: alertas
+export const alerts = (db: Db, query: IntelAlertQuery) =>
+  call<{ rows: IntelAlert[]; total: number; summary: IntelAlertSummary }>(
+    db,
+    "stock_intel_alerts",
+    {
+      p_query: query,
+    },
+  );
+
+export const ackAlert = (db: Db, alertId: string, note: string | null) =>
+  call<{ acknowledged: boolean }>(db, "stock_intel_alert_ack", { p_alert: alertId, p_note: note });
+
+// ---------------------------------------------------------------- fase 5: reposição e grupo
+export const replenishment = (db: Db, query: ReplenishmentQuery) =>
+  call<{ rows: ReplenishmentRow[]; total: number; summary: ReplenishmentSummary }>(
+    db,
+    "stock_intel_replenishment",
+    { p_query: query },
+  );
+
+export const replenishmentParams = (db: Db, companyId: CompanyFilter) =>
+  call<{ canEdit: boolean; serviceLevels: number[]; rows: ReplenishmentParam[] }>(
+    db,
+    "stock_intel_replenishment_params",
+    { p_company: companyId },
+  );
+
+export const setReplenishment = (db: Db, input: ReplenishmentParamInput) =>
+  call<{ saved?: boolean; removed?: boolean }>(db, "stock_intel_set_replenishment", {
+    p_company: input.companyId,
+    p_scope: input.scope,
+    p_key: input.key,
+    p_values: input.values,
+    p_reason: input.reason,
+  });
+
+export const opportunities = (db: Db, query: OpportunityQuery) =>
+  call<{ rows: Opportunity[]; total: number; note: string }>(db, "stock_intel_opportunities", {
+    p_query: query,
+  });
+
+export const priceBasis = (db: Db, companyId: CompanyFilter) =>
+  call<{ asOf: string | null; prices: PriceBasisRow[] }>(db, "stock_intel_price_basis", {
+    p_company: companyId,
+  });
+
+export const matrix = (db: Db, companyId: CompanyFilter) =>
+  call<{ points: MatrixPoint[]; total: number }>(db, "stock_intel_matrix", {
+    p_company: companyId,
+  });
+
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
 
 /** CSV do filtro inteiro montado no servidor; o banco confere a permissão de exportar de novo. */
@@ -63,5 +128,19 @@ export async function exportCsv(
   return {
     fileName: `estoque-inteligencia-${stamp()}.csv`,
     csv: intelCsv(data.rows, caps.viewCost),
+  };
+}
+
+/** Reposição filtrada em CSV, montada no servidor; o banco confere a permissão de exportar de novo. */
+export async function exportReplenishmentCsv(
+  db: Db,
+  query: Omit<ReplenishmentQuery, "page">,
+): Promise<{ fileName: string; csv: string }> {
+  const caps = await capabilities(db);
+  if (!caps.export) throw stockError("forbidden", "Você não pode exportar o estoque.");
+  const data = await replenishment(db, { ...query, page: -1 });
+  return {
+    fileName: `estoque-reposicao-${stamp()}.csv`,
+    csv: replenishmentCsv(data.rows, caps.viewCost),
   };
 }
