@@ -32,6 +32,16 @@ export interface RateLimitConfig {
    * desse método sendo executada" to back-to-back calls).
    */
   minMethodGapMs: number;
+  /**
+   * Extra pause after an EMPTY page ("não existem registros") before the next call of the same
+   * method and key: Omie answers fast but still holds the call for some seconds, and the next one
+   * comes back "já existe uma requisição desse método" (MAG Matriz, 23/10/2026: 3 per cycle). 0 = off.
+   */
+  emptyPageGapMs: number;
+  /** After a "já existe uma requisição" answer, calls of that method and key are spaced by this. 0 = off. */
+  busyGapMs: number;
+  /** How long the wider spacing lasts after the last "já existe uma requisição" answer. */
+  busyGapWindowMs: number;
   /** Errors per App Key inside the window that pause the whole key. */
   keyErrorBudget: number;
   keyErrorWindowMs: number;
@@ -45,6 +55,9 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   circuitOpenMs: 30 * 60_000,
   redundantSpacingMs: 61_000,
   minMethodGapMs: 2_000,
+  emptyPageGapMs: 12_000,
+  busyGapMs: 20_000,
+  busyGapWindowMs: 10 * 60_000,
   keyErrorBudget: 5,
   keyErrorWindowMs: 30 * 60_000,
 };
@@ -77,6 +90,10 @@ export class OmieRateLimiter {
   private lastRequest = new Map<string, number>();
   private lastMethodCall = new Map<string, number>();
   private keyErrors = new Map<string, number[]>();
+  /** Earliest start of the next call of a key+method (after an empty page). */
+  private notBefore = new Map<string, number>();
+  /** Until when a key+method keeps the wider spacing (after a busy answer). */
+  private busyUntil = new Map<string, number>();
 
   constructor(
     cfg: Partial<RateLimitConfig> = {},
@@ -95,7 +112,13 @@ export class OmieRateLimiter {
       if (!Number.isFinite(value) || value <= 0)
         throw new Error("Configuração inválida dos limites Omie.");
     }
-    for (const value of [this.cfg.redundantSpacingMs, this.cfg.minMethodGapMs])
+    for (const value of [
+      this.cfg.redundantSpacingMs,
+      this.cfg.minMethodGapMs,
+      this.cfg.emptyPageGapMs,
+      this.cfg.busyGapMs,
+      this.cfg.busyGapWindowMs,
+    ])
       if (!Number.isFinite(value) || value < 0)
         throw new Error("Configuração inválida dos limites Omie.");
     this.now = deps.now ?? Date.now;
@@ -131,6 +154,22 @@ export class OmieRateLimiter {
       this.circuits.get(OmieRateLimiter.key(appKey, KEY_SCOPE)) ?? 0,
     );
     return until > now ? "open" : "closed";
+  }
+
+  /** Omie answered an empty page: the next call of this method waits emptyPageGapMs. */
+  noteEmptyPage(appKey: string, method: string) {
+    if (this.cfg.emptyPageGapMs <= 0) return;
+    const k = OmieRateLimiter.key(appKey, method);
+    this.notBefore.set(
+      k,
+      Math.max(this.notBefore.get(k) ?? 0, this.now() + this.cfg.emptyPageGapMs),
+    );
+  }
+
+  /** Omie answered "já existe uma requisição desse método": space this method for a while. */
+  noteBusy(appKey: string, method: string) {
+    if (this.cfg.busyGapMs <= 0) return;
+    this.busyUntil.set(OmieRateLimiter.key(appKey, method), this.now() + this.cfg.busyGapWindowMs);
   }
 
   /** Counts an Omie-side error; opens the key circuit before Omie's own block. */
@@ -191,7 +230,15 @@ export class OmieRateLimiter {
     }
     // One wait (not a loop) so injected clocks in tests never spin.
     const lastCall = this.lastMethodCall.get(k);
-    const gap = lastCall === undefined ? 0 : lastCall + this.cfg.minMethodGapMs - this.now();
+    const spacing =
+      (this.busyUntil.get(k) ?? 0) > this.now()
+        ? Math.max(this.cfg.minMethodGapMs, this.cfg.busyGapMs)
+        : this.cfg.minMethodGapMs;
+    const startAt = Math.max(
+      lastCall === undefined ? 0 : lastCall + spacing,
+      this.notBefore.get(k) ?? 0,
+    );
+    const gap = startAt - this.now();
     if (gap > 0) await abortableWait(this.sleep, gap, signal);
     for (;;) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -288,6 +335,14 @@ export function getSharedOmieLimiter(): OmieRateLimiter {
       ),
       keyErrorBudget: envNumber(env, "OMIE_KEY_ERROR_BUDGET", DEFAULT_RATE_LIMIT.keyErrorBudget),
       minMethodGapMs: envNumber(env, "OMIE_MIN_METHOD_GAP_MS", DEFAULT_RATE_LIMIT.minMethodGapMs),
+      // 0 desliga a espera adaptativa (retorno sem nova release: variável + reinício do worker).
+      emptyPageGapMs: envNumber(env, "OMIE_EMPTY_PAGE_GAP_MS", DEFAULT_RATE_LIMIT.emptyPageGapMs),
+      busyGapMs: envNumber(env, "OMIE_BUSY_GAP_MS", DEFAULT_RATE_LIMIT.busyGapMs),
+      busyGapWindowMs: envNumber(
+        env,
+        "OMIE_BUSY_GAP_WINDOW_MS",
+        DEFAULT_RATE_LIMIT.busyGapWindowMs,
+      ),
     });
   }
   return sharedOmieLimiter;
