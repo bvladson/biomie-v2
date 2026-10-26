@@ -4,10 +4,19 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
 
     python ops/noturno.py matriz [release] [rodadas]   # teste controlado da correção da MAG Matriz
     python ops/noturno.py sales-kpis [release]         # sales_kpis: diagnóstico, testes do banco e comparação
+    python ops/noturno.py intel [release]              # Inteligência (fases 1–5) na homologação
+
+Uma tarefa por vez: cada uma espera a anterior terminar (trava em ops/logs/noturno/.trava, solta
+sozinha quando o processo acaba, mesmo se cair).
 
 sales-kpis: 45 (diagnóstico do sales_kpis atual na cópia) → 22 (suítes do banco da release, num banco de
 teste descartável) → 46 (atual × rápido nos dados reais da cópia, numa transação desfeita, mais o índice
 candidato criado, medido e apagado). Release padrão: SALES_KPIS_RELEASE.
+
+intel: 22 (suítes do banco da release) → 41_homolog up (migrações 0047/0048 na cópia, imagem e
+subida) → Estoque liberado na cópia → prazo HIPOTÉTICO de 30 dias na cópia (47, rotulado como teste)
+→ motor (41_homolog intel-run) → conferência (43) → navegador (29_smoke --intel --hml) → down.
+Release padrão: INTEL_RELEASE.
 
 matriz (parecer de 26/10/2026): base da produção (72 h) → até N rodadas do tx-probe (cada uma espera
 uma janela sem uso real da chave pela produção) → produção nas últimas horas. A série PARA na primeira
@@ -15,10 +24,12 @@ rodada encerrada por segurança ou com 2 ou mais respostas "já existe uma requi
 """
 import datetime as dt
 import json
+import msvcrt
 import os
 import pathlib
 import subprocess
 import sys
+import time
 
 sys.stdout.reconfigure(encoding='utf-8')
 BASE = pathlib.Path(__file__).resolve().parent.parent
@@ -27,6 +38,25 @@ WAIT = [] if '--teste' in sys.argv else ['--esperar']
 LOGS = BASE / 'ops' / 'logs'
 # sales_kpis rápido (migração 0046, branch perf/sales-kpis, commit fe85aca).
 SALES_KPIS_RELEASE = 'fe85acab7ae6'
+# Inteligência do Estoque fases 1–5 (branch feature/estoque-inteligencia, commit ccfff1f).
+INTEL_RELEASE = 'ccfff1fcbbac'
+
+
+def night_lock(hours=5):
+    """Trava exclusiva entre as tarefas noturnas (o sistema solta quando o processo termina)."""
+    path = LOGS / 'noturno' / '.trava'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, 'a+')
+    deadline = time.time() + hours * 3600
+    while True:
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return handle
+        except OSError:
+            if time.time() > deadline:
+                raise SystemExit('outra tarefa noturna ainda está rodando; desisti depois de esperar')
+            time.sleep(30)
 
 
 def remote(args, name, outdir, timeout=5 * 3600):
@@ -105,10 +135,76 @@ def sales_kpis(release):
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
+def intel(release):
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-inteligencia'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
+    summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
+                          'migrations': (tests or {}).get('migrations_applied'),
+                          'suites': {k: ('pulada' if v.get('skipped') else v.get('ok'))
+                                     for k, v in (tests or {}).get('suites', {}).items()},
+                          'failures': {k: v.get('error') for k, v in (tests or {}).get('suites', {}).items()
+                                       if not v.get('ok')}}
+    if not (tests or {}).get('all_ok'):
+        return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
+    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
+    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
+    if not up:
+        return done('a homologação não subiu')
+    rc, mode, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '03-estoque-liberado-na-copia', out)
+    summary['stockMode'] = {'rc': rc, 'error': None if rc == 0 else err}
+    rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '04-prazo-hipotetico', out)
+    summary['hypotheticalLeadTime'] = seed or {'rc': rc, 'error': err}
+    rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '05-motor', out)
+    if engine:
+        events = [json.loads(line) for line in (engine.get('stdout') or '').splitlines() if line.startswith('{')]
+        summary['engine'] = {'exit': engine.get('exit'), 'buildSeconds': engine.get('buildSeconds'),
+                             'runSeconds': engine.get('runSeconds'),
+                             'events': [e for e in events if e.get('event') in ('intel_published', 'intel_failed',
+                                                                                 'intel_skipped', 'intel_company')]}
+    else:
+        summary['engine'] = {'rc': rc, 'error': err}
+    if not engine or engine.get('exit') != 0:
+        return done('o motor não publicou')
+    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '06-conferencia', out)
+    summary['check'] = check or {'rc': rc, 'error': err}
+    started = dt.datetime.now().isoformat(timespec='seconds')
+    p = subprocess.run([sys.executable, str(BASE / 'ops' / '29_smoke.py'), '--stock', '--stock-mode', 'on',
+                        '--curves-readonly', '--intel', '--hml', '--shots', f'intel5-{dt.date.today():%Y%m%d}'] + WAIT,
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=4 * 3600,
+                       env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+    (out / '07-navegador.txt').write_text(f'# {started} rc={p.returncode}\n{p.stdout}\n--stderr--\n{p.stderr}',
+                                         encoding='utf-8')
+    try:
+        browser = json.loads(p.stdout[p.stdout.find('{'):p.stdout.rfind('}') + 1])
+    except ValueError:
+        browser = None
+    summary['browser'] = {'rc': p.returncode, 'ok': (browser or {}).get('ok'),
+                          'steps': [{'name': s.get('name'), 'ok': s.get('ok'), 'error': s.get('error')}
+                                    for s in (browser or {}).get('steps', [])],
+                          'problems': (browser or {}).get('problems'),
+                          'error': None if browser else p.stderr.strip()[-600:]}
+    rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
+    summary['down'] = {'rc': rc}
+    return done()
+
+
 if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
-    if task == 'matriz':
+    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel') else None
+    if task == 'intel':
+        intel(sys.argv[2] if len(sys.argv) > 2 else INTEL_RELEASE)
+    elif task == 'matriz':
         release = sys.argv[2] if len(sys.argv) > 2 else 'ba4ee4b03c40'
         rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 3
         matriz(release, rounds)

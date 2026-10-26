@@ -249,8 +249,66 @@ async function screen(page, path, heading) {
           await dialog.getByText('Como a prioridade foi calculada').waitFor({ timeout: 45000 });
           const rule = (await dialog.locator('section').first().innerText()).replace(/\s+/g, ' ').slice(0, 300);
           const file = await shot(sup.page, 'inteligencia-produto', false);
+          // Fases 3–5: as seções novas aparecem (mesmo que digam que não há dado para aquele produto).
+          const sections = [];
+          for (const title of ['Diagnóstico', 'Recomendações', 'Alertas', 'Previsão de demanda (30, 60 e 90 dias)',
+                               'Reposição inteligente', 'Movimentações por semana', 'Oportunidades entre empresas']) {
+            const h = dialog.getByRole('heading', { name: title, exact: true });
+            await h.waitFor({ timeout: 45000 });
+            sections.push(title);
+          }
+          await dialog.getByRole('heading', { name: 'Previsão de demanda (30, 60 e 90 dias)', exact: true }).scrollIntoViewIfNeeded();
+          const forecastShot = await shot(sup.page, 'inteligencia-produto-previsao', false);
           await sup.page.keyboard.press('Escape');
-          return { name, rule, shot: file };
+          return { name, rule, sections, shots: [file, forecastShot] };
+        });
+        await step('super: inteligência — abas de alertas, reposição e entre empresas', async () => {
+          const out = {};
+          await sup.page.goto(base + '/estoque/inteligencia?aba=%22alertas%22');
+          await sup.page.getByRole('button', { name: /Alertas abertos/ }).first().waitFor({ timeout: 60000 }).catch(async () => {
+            await sup.page.getByText('Alertas abertos').first().waitFor({ timeout: 30000 });
+          });
+          out.alerts = (await sup.page.getByText('Alertas abertos').first().locator('..').innerText()).replace(/\s+/g, ' ').slice(0, 120);
+          out.alertsShot = await shot(sup.page, 'inteligencia-alertas');
+          await sup.page.goto(base + '/estoque/inteligencia?aba=%22reposicao%22');
+          await sup.page.getByRole('heading', { name: 'Prazos de reposição' }).waitFor({ timeout: 60000 });
+          if (!(await sup.page.getByText(/O BIOMIE não cria pedido de compra no Omie/).count()))
+            throw new Error('aviso de reposição consultiva ausente');
+          out.replenishment = (await sup.page.getByRole('button', { name: /^Comprar/ }).first().innerText()).replace(/\s+/g, ' ').slice(0, 120);
+          const define = sup.page.getByRole('button', { name: 'Definir prazo' });
+          if (await define.count()) {
+            await define.click();
+            await sup.page.getByRole('dialog').getByText('Parâmetro de reposição').waitFor({ timeout: 30000 });
+            const save = sup.page.getByRole('dialog').getByRole('button', { name: 'Salvar' });
+            if (await save.isEnabled()) throw new Error('salvaria prazo sem prazo e justificativa');
+            await sup.page.getByRole('dialog').getByRole('button', { name: 'Cancelar' }).click();
+            out.dialog = 'abre e não salva sem prazo e justificativa';
+          } else out.dialog = 'escolha uma empresa para definir (filtro em todas)';
+          out.replenishmentShot = await shot(sup.page, 'inteligencia-reposicao');
+          await sup.page.goto(base + '/estoque/inteligencia?aba=%22grupo%22');
+          await sup.page.getByText(/Movimentação entre CNPJs pode exigir nota fiscal/).first().waitFor({ timeout: 60000 });
+          out.group = (await sup.page.getByText(/ite(m|ns) · página|Nenhuma oportunidade/).first().innerText()).slice(0, 120);
+          out.groupShot = await shot(sup.page, 'inteligencia-grupo');
+          if (await sup.page.getByText('Não foi possível carregar o estoque').count()) throw new Error('falha numa aba');
+          return out;
+        });
+        await step('super: inteligência — matriz risco × impacto', async () => {
+          await sup.page.goto(base + '/estoque/inteligencia');
+          await sup.page.getByText(/produtos? · página/).waitFor({ timeout: 60000 });
+          const heading = sup.page.getByRole('heading', { name: 'Risco × impacto financeiro' });
+          if (!(await heading.count())) return { matrix: 'sem produtos com capital e prioridade' };
+          await heading.scrollIntoViewIfNeeded();
+          return { matrix: 'ok', shot: await shot(sup.page, 'inteligencia-matriz', false) };
+        });
+        await step('super: simulação — resultado comercial e base de preço', async () => {
+          await sup.page.goto(base + '/estoque/simulacao');
+          await sup.page.getByRole('heading', { name: 'Resultado comercial do cenário' }).waitFor({ timeout: 60000 });
+          await sup.page.getByRole('group', { name: 'Descontos prontos' }).getByRole('button', { name: '15%' }).click();
+          const result = (await sup.page.getByText('Resultado bruto estimado').first().locator('..').innerText()).replace(/\s+/g, ' ').slice(0, 160);
+          if (!(await sup.page.getByText(/Receita potencial não é venda garantida/).count()))
+            throw new Error('aviso de limitação da simulação ausente');
+          await sup.page.getByRole('heading', { name: 'Resultado comercial do cenário' }).scrollIntoViewIfNeeded();
+          return { result, shot: await shot(sup.page, 'simulacao-comercial', false) };
         });
         await step('super: inteligência — Pareto de uma empresa', async () => {
           await sup.page.goto(base + '/estoque/inteligencia');
@@ -324,7 +382,23 @@ async function screen(page, path, heading) {
       if (await ven.page.getByRole('button', { name: 'Exportar CSV' }).count()) throw new Error('vendedor pode exportar');
       const text = await ven.page.locator('#stock-main').innerText();
       if (/R\$\s?\d/.test(text)) throw new Error('vendedor viu valor em R$');
-      return { mode, tab: await ven.page.getByRole('link', { name: 'Inteligência', exact: true }).count(),
+      if (await ven.page.getByRole('heading', { name: 'Risco × impacto financeiro' }).count()) throw new Error('vendedor viu a matriz (capital)');
+      // Fases 3–5: nenhuma aba nova mostra valor em R$ ao vendedor, nem deixa definir prazo.
+      const tabs = {};
+      for (const [aba, ready] of [['alertas', /Alertas abertos|Nenhum alerta/], ['reposicao', /Prazos de reposição/],
+                                  ['grupo', /Movimentação entre CNPJs/]]) {
+        await ven.page.goto(base + `/estoque/inteligencia?aba=%22${aba}%22`);
+        await ven.page.getByText(ready).first().waitFor({ timeout: 60000 });
+        await ven.page.waitForTimeout(1500);
+        const t = await ven.page.locator('#stock-main').innerText();
+        if (/R\$\s?\d/.test(t)) throw new Error(`vendedor viu valor em R$ na aba ${aba}`);
+        if (await ven.page.getByRole('columnheader', { name: /Custo estimado|Valor a custo/ }).count())
+          throw new Error(`vendedor viu coluna de custo na aba ${aba}`);
+        if (await ven.page.getByRole('button', { name: 'Definir prazo' }).count()) throw new Error('vendedor pode definir prazo');
+        if (await ven.page.getByRole('button', { name: 'Estou ciente' }).count()) throw new Error('vendedor pode dar ciência');
+        tabs[aba] = 'sem custo';
+      }
+      return { mode, tabs, tab: await ven.page.getByRole('link', { name: 'Inteligência', exact: true }).count(),
                shot: await shot(ven.page, 'inteligencia-vendedor') };
     });
   } finally {
