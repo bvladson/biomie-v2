@@ -18,7 +18,11 @@ $jobs = @(
   @{ Name = 'BIOMIE homologacao - sales_kpis 27-10'; At = '2026-10-27T21:03:00'; Args = 'sales-kpis'
      Desc = 'sales_kpis: diagnostico, testes do banco e comparacao atual x rapido na copia (so leitura).' },
   @{ Name = 'BIOMIE homologacao - Inteligencia 27-10'; At = '2026-10-27T21:35:00'; Args = 'intel 885ff74576cd'
-     Desc = 'Inteligencia do Estoque fases 1-5 na homologacao (copia; prazo hipotetico rotulado como teste).' }
+     Desc = 'Inteligencia do Estoque fases 1-5 na homologacao (copia; prazo hipotetico rotulado como teste).' },
+  @{ Name = 'BIOMIE homologacao - Fornecedores 27-10'; At = '2026-10-27T23:35:00'; Args = 'intel-fornecedores bf130eec0648'
+     Desc = 'Fornecedores e prazos (0048/0049): copia nova, ListarProdutoFornecedor so leitura, prazo de teste, motor, navegador.' },
+  @{ Name = 'BIOMIE homologacao - Banco trem 27-10'; At = '2026-10-27T23:40:00'; Args = 'banco b5bc1c60303e'
+     Desc = 'Suites do banco do trem de integracao (Matriz + sales_kpis + Inteligencia + fornecedores).' }
 )
 foreach ($j in $jobs) {
   if ([datetime]$j.At -lt (Get-Date)) { Write-Host "pulado (horario ja passou): $($j.Name)"; continue }
