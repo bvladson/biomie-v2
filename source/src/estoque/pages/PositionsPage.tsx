@@ -51,7 +51,8 @@ type Flag =
   | "onlyConfirmed"
   | "soldElsewhere"
   | "recentExit"
-  | "onlyManual";
+  | "onlyManual"
+  | "noSupplier";
 const FLAGS: { value: Flag; label: string }[] = [
   { value: "none", label: "Todos" },
   { value: "onlyConfirmed", label: "Sem venda confirmada" },
@@ -60,6 +61,7 @@ const FLAGS: { value: Flag; label: string }[] = [
   { value: "soldElsewhere", label: "Vendido por outra empresa" },
   { value: "recentExit", label: "Com saída nos últimos 90 dias" },
   { value: "onlyManual", label: "Curva manual" },
+  { value: "noSupplier", label: "Sem fornecedor vinculado" },
 ];
 const MIN_REASON = 10;
 
@@ -103,7 +105,7 @@ function Indicators({ p }: { p: StockPosition }) {
 export function PositionsPage() {
   const incoming = route.useSearch();
   const navigate = route.useNavigate();
-  const { companyId, window } = useStockCompany(),
+  const { companyId, window, supplier } = useStockCompany(),
     client = useQueryClient(),
     caps = useCapabilities();
   const initialFlag: Flag = incoming.onlyNew
@@ -149,7 +151,7 @@ export function PositionsPage() {
   useEffect(() => {
     setPage(0);
     setSelected([]);
-  }, [companyId, window, view]);
+  }, [companyId, window, view, supplier]);
   const query: PositionQuery = {
     companyId,
     window,
@@ -169,6 +171,8 @@ export function PositionsPage() {
     soldElsewhere: flag === "soldElsewhere" || undefined,
     onlyManual: flag === "onlyManual" || undefined,
     recentExit: flag === "recentExit" || undefined,
+    noSupplier: flag === "noSupplier" || undefined,
+    supplier,
     productId: incoming.productId,
     sortBy: sort as PositionQuery["sortBy"],
     sortDir: dir,
@@ -185,8 +189,8 @@ export function PositionsPage() {
     retry: false,
   });
   const read = useQuery({
-    queryKey: ["stock", "overview", companyId, window],
-    queryFn: () => stockApi.overview(companyId, window),
+    queryKey: ["stock", "overview", companyId, window, supplier ?? null],
+    queryFn: () => stockApi.overview(companyId, window, supplier),
     retry: false,
   });
   const data = q.data;

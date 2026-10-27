@@ -1,5 +1,5 @@
 /**
- * Funções de servidor da inteligência do Estoque (migrações 0044 a 0048). Toda decisão de permissão é do
+ * Funções de servidor da inteligência do Estoque (migrações 0044 a 0049). Toda decisão de permissão é do
  * banco; aqui só se valida o formato da entrada. Respostas não ficam em cache intermediário.
  */
 import { createServerFn } from "@tanstack/react-start";
@@ -12,6 +12,8 @@ const noStore = () => setResponseHeader("Cache-Control", "no-store");
 
 const company = z.union([z.literal("all"), z.string().uuid()]);
 const curveWindow = z.enum(["30d", "90d", "180d", "12m"]);
+/** Código do fornecedor no Omie (0048). */
+const supplier = z.string().regex(/^[1-9]\d{0,19}$/, "Código do Omie inválido.");
 const state = z.enum([
   "novo",
   "historico_insuficiente",
@@ -44,6 +46,7 @@ const filters = z
       .optional(),
     withAlerts: z.boolean().optional(),
     family: z.string().trim().min(1).max(120).optional(),
+    supplier: supplier.optional(),
     sortBy: z.enum(["priority", "capital", "daysWithoutSale", "coverageDays", "name"]).optional(),
     sortDir: z.enum(["asc", "desc"]).optional(),
   })
@@ -61,11 +64,14 @@ export const intelStatus = createServerFn({ method: "GET" })
 export const intelOverview = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) =>
-    z.object({ companyId: company, window: curveWindow.optional() }).strict().parse(i),
+    z
+      .object({ companyId: company, window: curveWindow.optional(), supplier: supplier.optional() })
+      .strict()
+      .parse(i),
   )
   .handler(async ({ data, context }) => {
     noStore();
-    return (await repo()).overview(context.supabase, data.companyId, data.window);
+    return (await repo()).overview(context.supabase, data.companyId, data.window, data.supplier);
   });
 
 export const intelProducts = createServerFn({ method: "POST" })
@@ -159,6 +165,8 @@ const replenishmentFilters = z
         "comprar",
         "nao_comprar",
         "aguardar",
+        "sem_fornecedor",
+        "fornecedor_indefinido",
         "sem_prazo",
         "sem_previsao",
         "sem_demanda",
@@ -166,6 +174,7 @@ const replenishmentFilters = z
       ])
       .optional(),
     search: z.string().trim().max(120).optional(),
+    supplier: supplier.optional(),
   })
   .strict();
 
@@ -183,52 +192,6 @@ export const intelReplenishmentExport = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     noStore();
     return (await repo()).exportReplenishmentCsv(context.supabase, data);
-  });
-
-export const intelReplenishmentParams = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((i) => z.object({ companyId: company }).strict().parse(i))
-  .handler(async ({ data, context }) => {
-    noStore();
-    return (await repo()).replenishmentParams(context.supabase, data.companyId);
-  });
-
-export const intelSetReplenishment = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((i) =>
-    z
-      .object({
-        companyId: z.string().uuid(),
-        scope: z.enum(["empresa", "familia", "produto"]),
-        key: z.string().trim().max(120),
-        values: z
-          .object({
-            leadTimeDays: z.number().int().min(1).max(365),
-            reviewDays: z.number().int().min(1).max(180).optional(),
-            serviceLevel: z
-              .union([
-                z.literal(0.8),
-                z.literal(0.85),
-                z.literal(0.9),
-                z.literal(0.95),
-                z.literal(0.97),
-                z.literal(0.98),
-                z.literal(0.99),
-              ])
-              .optional(),
-            minLot: z.number().positive().max(1000000).nullable().optional(),
-            maxCoverageDays: z.number().int().min(7).max(730).nullable().optional(),
-          })
-          .strict()
-          .nullable(),
-        reason: z.string().trim().min(10).max(300),
-      })
-      .strict()
-      .parse(i),
-  )
-  .handler(async ({ data, context }) => {
-    noStore();
-    return (await repo()).setReplenishment(context.supabase, data);
   });
 
 export const intelOpportunities = createServerFn({ method: "POST" })

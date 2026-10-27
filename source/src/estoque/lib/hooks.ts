@@ -8,7 +8,17 @@ export const StockContext = createContext<{
   /** Janela da curva automática escolhida no topo do Estoque (padrão 12 meses). */
   window: CurveWindow;
   setWindow: (v: CurveWindow) => void;
-}>({ companyId: "all", setCompanyId: () => {}, window: "12m", setWindow: () => {} });
+  /** Fornecedor escolhido no topo (código do Omie, uma empresa por vez); undefined = todos. */
+  supplier?: string | undefined;
+  supplierName?: string | undefined;
+  setSupplier: (v: string | undefined) => void;
+}>({
+  companyId: "all",
+  setCompanyId: () => {},
+  window: "12m",
+  setWindow: () => {},
+  setSupplier: () => {},
+});
 export const useStockCompany = () => useContext(StockContext);
 export const useCapabilities = () =>
   useQuery({

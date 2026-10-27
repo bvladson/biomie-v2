@@ -14,6 +14,8 @@ const noStore = () => setResponseHeader("Cache-Control", "no-store");
 const company = z.union([z.literal("all"), z.string().uuid()]);
 const curve = z.enum(["A", "B", "C", "D", "U"]);
 const curveWindow = z.enum(["30d", "90d", "180d", "12m"]);
+/** Código do fornecedor no Omie (nCodForn = codigo_cliente_omie). */
+export const omieCode = z.string().regex(/^[1-9]\d{0,19}$/, "Código do Omie inválido.");
 const filters = z
   .object({
     companyId: company,
@@ -33,6 +35,8 @@ const filters = z
     onlyManual: z.boolean().optional(),
     onlyConfirmed: z.boolean().optional(),
     recentExit: z.boolean().optional(),
+    supplier: omieCode.optional(),
+    noSupplier: z.boolean().optional(),
     minDaysWithoutSale: z
       .union([z.literal(30), z.literal(90), z.literal(180), z.literal(365)])
       .optional(),
@@ -69,11 +73,14 @@ export const stockCapabilities = createServerFn({ method: "GET" })
 export const stockOverview = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i) =>
-    z.object({ companyId: company, window: curveWindow.optional() }).strict().parse(i),
+    z
+      .object({ companyId: company, window: curveWindow.optional(), supplier: omieCode.optional() })
+      .strict()
+      .parse(i),
   )
   .handler(async ({ data, context }) => {
     noStore();
-    return (await repo()).overview(context.supabase, data.companyId, data.window);
+    return (await repo()).overview(context.supabase, data.companyId, data.window, data.supplier);
   });
 
 export const stockPositions = createServerFn({ method: "POST" })

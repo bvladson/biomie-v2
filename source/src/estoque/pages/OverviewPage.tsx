@@ -56,12 +56,12 @@ function CurveInfo({ data }: { data: StockOverview }) {
 }
 
 export function OverviewPage() {
-  const { companyId, window } = useStockCompany();
+  const { companyId, window, supplier } = useStockCompany();
   const caps = useCapabilities();
   const client = useQueryClient();
   const q = useQuery({
-    queryKey: ["stock", "overview", companyId, window],
-    queryFn: () => stockApi.overview(companyId, window),
+    queryKey: ["stock", "overview", companyId, window, supplier ?? null],
+    queryFn: () => stockApi.overview(companyId, window, supplier),
     retry: false,
   });
   const data = q.data;
@@ -316,13 +316,22 @@ export function OverviewPage() {
               </div>
               <div className="min-w-0">
                 <h2 className="mb-3 text-lg font-semibold">Estoque a custo por curva</h2>
-                {chart && (
-                  <ProjectionChart data={chart.data.map((c) => ({ ...c, projected: 0 }))} />
+                {supplier ? (
+                  <p className="text-sm text-muted-foreground">
+                    Com o filtro de fornecedor, o valor por curva está nos cartões acima; o gráfico
+                    mostra a empresa inteira e fica de fora para não misturar as duas bases.
+                  </p>
+                ) : (
+                  <>
+                    {chart && (
+                      <ProjectionChart data={chart.data.map((c) => ({ ...c, projected: 0 }))} />
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {chart?.excludedCount ?? 0} posições negativas (
+                      {money(chart?.excludedValue ?? 0)}) fora das barras, preservadas nos totais.
+                    </p>
+                  </>
                 )}
-                <p className="text-xs text-muted-foreground">
-                  {chart?.excludedCount ?? 0} posições negativas ({money(chart?.excludedValue ?? 0)}
-                  ) fora das barras, preservadas nos totais.
-                </p>
               </div>
             </section>
           )}

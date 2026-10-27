@@ -16,6 +16,11 @@ const curvesWrite = process.env.BIOMIE_STOCK_CURVES === '1';
 // BIOMIE_STOCK_INTEL=1 (29_smoke.py --intel): Inteligência (0044) com análise publicada;
 // =empty (--intel-empty): a tela abre e avisa que ainda não há análise. Só leitura nos dois casos.
 const intel = process.env.BIOMIE_STOCK_INTEL;
+// BIOMIE_STOCK_SUPPLIERS=1 (29_smoke.py --suppliers): fornecedores e prazos (0048/0049). Só leitura: os
+// diálogos abrem e não salvam sem observação; nada é gravado.
+const suppliers = process.env.BIOMIE_STOCK_SUPPLIERS === '1';
+// Bloco de prazos da aba Reposição: o da 0048 de 25/10 ou o de fornecedores (0049).
+const REPL_HEADING = /^(Prazos de reposição|Prazos de entrega e política de reposição)$/;
 // Primeiro número do texto, no formato do Brasil (1.234 = mil duzentos e trinta e quatro).
 const firstNumber = (text) => {
   const m = /\d[\d.]*/.exec(String(text));
@@ -271,7 +276,7 @@ async function screen(page, path, heading) {
           out.alerts = (await sup.page.getByText('Alertas abertos').first().locator('..').innerText()).replace(/\s+/g, ' ').slice(0, 120);
           out.alertsShot = await shot(sup.page, 'inteligencia-alertas');
           await sup.page.goto(base + '/estoque/inteligencia?aba=%22reposicao%22');
-          await sup.page.getByRole('heading', { name: 'Prazos de reposição' }).waitFor({ timeout: 60000 });
+          await sup.page.getByRole('heading', { name: REPL_HEADING }).waitFor({ timeout: 60000 });
           if (!(await sup.page.getByText(/O BIOMIE não cria pedido de compra no Omie/).count()))
             throw new Error('aviso de reposição consultiva ausente');
           out.replenishment = (await sup.page.getByRole('button', { name: /^Comprar/ }).first().innerText()).replace(/\s+/g, ' ').slice(0, 120);
@@ -283,6 +288,10 @@ async function screen(page, path, heading) {
             if (await save.isEnabled()) throw new Error('salvaria prazo sem prazo e justificativa');
             await sup.page.getByRole('dialog').getByRole('button', { name: 'Cancelar' }).click();
             out.dialog = 'abre e não salva sem prazo e justificativa';
+          } else if (await sup.page.getByRole('link', { name: 'Fornecedores e prazos' }).count()) {
+            out.dialog = 'prazos por fornecedor (Fornecedores e prazos)';
+            if (!(await sup.page.getByRole('heading', { name: 'Prazos de entrega e política de reposição' }).count()))
+              throw new Error('bloco da política de reposição ausente');
           } else out.dialog = 'escolha uma empresa para definir (filtro em todas)';
           out.replenishmentShot = await shot(sup.page, 'inteligencia-reposicao');
           await sup.page.goto(base + '/estoque/inteligencia?aba=%22grupo%22');
@@ -321,6 +330,62 @@ async function screen(page, path, heading) {
       }
     }
     const mobile = await open(browser, 390);
+
+    if (suppliers) {
+      await step('super: fornecedores e prazos — página e ficha (sem gravar)', async () => {
+        await sup.page.goto(base + '/estoque/fornecedores');
+        await sup.page.getByRole('heading', { name: 'Fornecedores e prazos de entrega' }).waitFor({ timeout: 60000 });
+        await sup.page.getByText(/Fornecedores no Omie|Escolha uma empresa/).first().waitFor({ timeout: 60000 });
+        if (await sup.page.getByText('Não foi possível carregar o estoque').count()) throw new Error('falha na página');
+        const out = { shot: await shot(sup.page, 'fornecedores') };
+        out.tiles = (await sup.page.locator('#stock-main .panel').first().innerText().catch(() => '')).replace(/\s+/g, ' ').slice(0, 120);
+        // Lista com todos (não só os com estoque) e a ficha do primeiro fornecedor.
+        const first = sup.page.locator('#stock-main table tbody tr').first().getByRole('button').first();
+        if (!(await first.count())) return { ...out, suppliers: 0 };
+        out.firstSupplier = (await first.innerText()).slice(0, 60);
+        await first.click();
+        const sheet = sup.page.getByRole('dialog');
+        await sheet.getByRole('heading', { name: 'Prazo padrão do fornecedor' }).waitFor({ timeout: 60000 });
+        await sheet.getByRole('heading', { name: /Produtos vinculados/ }).waitFor({ timeout: 30000 });
+        out.historyVisible = (await sheet.getByRole('heading', { name: 'Histórico de alterações' }).count()) > 0;
+        out.sheetShot = await shot(sup.page, 'fornecedor-ficha', false);
+        const edit = sheet.getByRole('button', { name: /Informar prazo|Alterar/ }).first();
+        if (await edit.count()) {
+          await edit.click();
+          const dialog = sup.page.getByRole('dialog', { name: /Prazo padrão do fornecedor/ });
+          await dialog.waitFor({ timeout: 30000 });
+          await dialog.getByRole('textbox').first().fill('15');
+          if (await dialog.getByRole('button', { name: 'Salvar' }).isEnabled())
+            throw new Error('salvaria prazo sem observação');
+          await dialog.getByRole('button', { name: 'Cancelar' }).click();
+          out.dialog = 'abre e não salva sem observação';
+        }
+        await sup.page.keyboard.press('Escape');
+        return out;
+      });
+      await step('super: filtro por fornecedor no painel, radar e reposição', async () => {
+        await sup.page.goto(base + '/estoque');
+        const picker = sup.page.getByRole('combobox', { name: 'Fornecedor' });
+        await picker.waitFor({ timeout: 60000 });
+        if (await picker.isDisabled()) return { filter: 'desligado (escolha uma empresa ou sem fornecedores)' };
+        await picker.click();
+        const option = sup.page.getByRole('option').first();
+        await option.waitFor({ timeout: 30000 });
+        const name = (await option.innerText()).split('\n')[0].slice(0, 60);
+        await option.click();
+        await sup.page.getByText('Filtrando pelo fornecedor').waitFor({ timeout: 30000 });
+        const out = { supplier: name, overviewShot: await shot(sup.page, 'filtro-fornecedor-painel') };
+        await sup.page.getByRole('link', { name: 'Inteligência', exact: true }).click();
+        await sup.page.getByText(/produtos? · página|Nenhum produto/).first().waitFor({ timeout: 60000 });
+        if (!(await sup.page.getByText('Filtrando pelo fornecedor').count())) throw new Error('o filtro sumiu ao trocar de tela');
+        out.radarShot = await shot(sup.page, 'filtro-fornecedor-radar');
+        await sup.page.goto(base + '/estoque/inteligencia?aba=%22reposicao%22');
+        await sup.page.getByRole('heading', { name: REPL_HEADING }).waitFor({ timeout: 60000 });
+        if (await sup.page.getByText('Não foi possível carregar o estoque').count()) throw new Error('falha com o filtro');
+        await sup.page.getByRole('button', { name: 'Tirar o filtro de fornecedor' }).click().catch(() => {});
+        return out;
+      });
+    }
     await step('super: celular sem rolagem lateral', async () => {
       await login(mobile.page, 'super');
       await mobile.page.goto(base + '/estoque/posicoes');
@@ -385,7 +450,8 @@ async function screen(page, path, heading) {
       if (await ven.page.getByRole('heading', { name: 'Risco × impacto financeiro' }).count()) throw new Error('vendedor viu a matriz (capital)');
       // Fases 3–5: nenhuma aba nova mostra valor em R$ ao vendedor, nem deixa definir prazo.
       const tabs = {};
-      for (const [aba, ready] of [['alertas', /Alertas abertos|Nenhum alerta/], ['reposicao', /Prazos de reposição/],
+      for (const [aba, ready] of [['alertas', /Alertas abertos|Nenhum alerta/],
+                                  ['reposicao', /Prazos de reposição|Prazos de entrega e política de reposição/],
                                   ['grupo', /Movimentação entre CNPJs/]]) {
         await ven.page.goto(base + `/estoque/inteligencia?aba=%22${aba}%22`);
         await ven.page.getByText(ready).first().waitFor({ timeout: 60000 });
@@ -400,6 +466,26 @@ async function screen(page, path, heading) {
       }
       return { mode, tabs, tab: await ven.page.getByRole('link', { name: 'Inteligência', exact: true }).count(),
                shot: await shot(ven.page, 'inteligencia-vendedor') };
+    });
+
+    if (suppliers && mode === 'on') await step('vendedor: fornecedores e prazos só para consulta', async () => {
+      await ven.page.goto(base + '/estoque/fornecedores');
+      await ven.page.getByRole('heading', { name: 'Fornecedores e prazos de entrega' }).waitFor({ timeout: 60000 });
+      await ven.page.getByText(/Fornecedores no Omie|Escolha uma empresa/).first().waitFor({ timeout: 60000 });
+      if (await ven.page.getByRole('button', { name: 'Atualizar do Omie' }).count()) throw new Error('vendedor pode importar');
+      const first = ven.page.locator('#stock-main table tbody tr').first().getByRole('button').first();
+      if (await first.count()) {
+        await first.click();
+        const sheet = ven.page.getByRole('dialog');
+        await sheet.getByRole('heading', { name: 'Prazo padrão do fornecedor' }).waitFor({ timeout: 60000 });
+        if (await sheet.getByRole('button', { name: /Informar prazo|Alterar|Vincular/ }).count())
+          throw new Error('vendedor pode alterar prazo ou vínculo');
+        if (await sheet.getByRole('heading', { name: 'Histórico de alterações' }).count())
+          throw new Error('vendedor vê o histórico com nomes');
+      }
+      const text = await ven.page.locator('#stock-main').innerText();
+      if (/R\$\s?\d/.test(text)) throw new Error('vendedor viu valor em R$');
+      return { shot: await shot(ven.page, 'fornecedores-vendedor') };
     });
   } finally {
     await browser.close();

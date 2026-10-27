@@ -28,7 +28,9 @@ function guarded<A extends unknown[], R>(call: (...args: A) => Promise<R>) {
 
 export const serverStockApi: StockApi = {
   capabilities: guarded(() => fn.stockCapabilities()),
-  overview: guarded((companyId, window) => fn.stockOverview({ data: { companyId, window } })),
+  overview: guarded((companyId, window, supplier) =>
+    fn.stockOverview({ data: { companyId, window, supplier } }),
+  ),
   positions: guarded((query) => fn.stockPositions({ data: query })),
   filterOptions: guarded((companyId) => fn.stockFilterOptions({ data: { companyId } })),
   setCurve: guarded((input) => fn.stockSetCurve({ data: input })),

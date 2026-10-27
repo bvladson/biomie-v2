@@ -15,7 +15,9 @@ function guarded<A extends unknown[], R>(call: (...args: A) => Promise<R>) {
 
 export const intelApi: IntelApi = {
   status: guarded(() => fn.intelStatus()),
-  overview: guarded((companyId, window) => fn.intelOverview({ data: { companyId, window } })),
+  overview: guarded((companyId, window, supplier) =>
+    fn.intelOverview({ data: { companyId, window, supplier } }),
+  ),
   products: guarded((query) => fn.intelProducts({ data: query })),
   product: guarded((companyId, omieProductId) =>
     fn.intelProduct({ data: { companyId, omieProductId } }),
@@ -26,8 +28,6 @@ export const intelApi: IntelApi = {
   ackAlert: guarded((alertId, note) => fn.intelAckAlert({ data: { alertId, note } })),
   replenishment: guarded((query) => fn.intelReplenishment({ data: query })),
   exportReplenishmentCsv: guarded((query) => fn.intelReplenishmentExport({ data: query })),
-  replenishmentParams: guarded((companyId) => fn.intelReplenishmentParams({ data: { companyId } })),
-  setReplenishment: guarded((input) => fn.intelSetReplenishment({ data: input })),
   opportunities: guarded((query) => fn.intelOpportunities({ data: query })),
   priceBasis: guarded((companyId) => fn.intelPriceBasis({ data: { companyId } })),
   matrix: guarded((companyId) => fn.intelMatrix({ data: { companyId } })),

@@ -17,7 +17,7 @@ from . import VERSION
 from .api import RpcClient, RpcError
 from .diagnosis import detect_alerts, diagnose, recommend
 from .forecast import forecast
-from .replenishment import buy_recommendation, index_entry, opportunities, plan, resolve_params
+from .replenishment import buy_recommendation, index_entry, index_planning, opportunities, plan, resolve_supply
 from .metrics import (curve_history, month_list, monthly_series, product_metrics, returns_by_product,
                       sales_frame, to_date, window_sums)
 from .states import classify, priority
@@ -26,7 +26,9 @@ CHUNK = 200  # ~0,7 MB por lote com diagnósticos e previsão (gateway interno a
 
 
 def build_company_rows(extract: dict[str, Any], params: dict[str, Any],
-                       replenishment: list[dict[str, Any]] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                       planning: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """planning: fornecedores, prazos e política da empresa (stock_intel_planning); sem ele, nenhum produto
+    tem fornecedor e nenhuma quantidade de reposição é sugerida."""
     as_of = to_date(extract["asOf"])
     sales_from = to_date(extract.get("salesFrom"))
     frame = sales_frame(extract.get("sales"))
@@ -57,7 +59,7 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any],
     alerts_by_severity: dict[str, int] = {}
     forecasts: dict[str, int] = {}
     buying: dict[str, int] = {}
-    company_id = str(extract.get("companyId"))
+    supply_index = index_planning(planning)
     for i, (product, m, state, flags) in enumerate(items):
         score, parts = priority(m, state, pct.get(i), params)
         m["diagnoses"] = diagnose(m, state, flags, params)
@@ -67,7 +69,7 @@ def build_company_rows(extract: dict[str, Any], params: dict[str, Any],
         key = m["forecast"]["status"] if m["forecast"]["status"] != "ok" else f"ok_{m['forecast']['backtest']['quality']}"
         forecasts[key] = forecasts.get(key, 0) + 1
         omie = str(product["omieProductId"])
-        m["replenishment"] = plan(m, state, resolve_params(replenishment or [], company_id, omie, product.get("family")))
+        m["replenishment"] = plan(m, state, resolve_supply(supply_index, omie), supply_index["policy"])
         buy = buy_recommendation(m["replenishment"])
         if buy:  # a sugestão com quantidade substitui o "avaliar reposição" genérico
             m["recommendations"] = [buy] + [r for r in m["recommendations"] if r["type"] != "avaliar_reposicao"]
@@ -115,11 +117,12 @@ def run(client: RpcClient, trigger: str = "schedule", force: bool = False, compa
     try:
         if company and not companies:
             raise ValueError("Empresa não encontrada para a execução.")
-        planning = client.call("stock_intel_planning", {"p_run": run_id}) or {}
         for item in companies:
             t0 = clock()
+            planning = client.call("stock_intel_planning", {"p_run": run_id, "p_company": item["id"]}) or {}
             extract = client.call("stock_intel_extract", {"p_run": run_id, "p_company": item["id"]})
-            rows, stats = build_company_rows(extract, params, planning.get("replenishment") or [])
+            rows, stats = build_company_rows(extract, params, planning)
+            stats["testLeadTimes"] = bool(planning.get("testLeadTimes"))
             entries.extend(e for e in (index_entry(item, r) for r in rows) if e is not None)
             for start in range(0, max(len(rows), 1), CHUNK):
                 client.call("stock_intel_publish", {"p_run": run_id, "p_company": item["id"],

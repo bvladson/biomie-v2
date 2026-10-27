@@ -31,6 +31,7 @@ const permission = z.enum([
   "stock.view_cost",
   "stock.classify",
   "stock.export",
+  "stock.purchasing",
 ]);
 const status = z.enum(["ACTIVE", "BLOCKED", "INVITED", "NEVER_SIGNED_IN"]);
 const delivery = z.enum(["INVITE_LINK", "TEMP_PASSWORD"]);

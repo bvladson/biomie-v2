@@ -15,6 +15,8 @@ export interface StockCapabilities {
   saveScenarios: boolean; // salvar e excluir cenários
   export: boolean; // CSV
   refresh: boolean; // pedir nova leitura ao worker
+  /** Fornecedores e prazos de entrega (0048): Compras (permissão extra) e Super admin. */
+  purchasing?: boolean | undefined;
 }
 
 export interface StockReading {
@@ -92,6 +94,10 @@ export interface PositionQuery {
   onlyConfirmed?: boolean | undefined; // saldo positivo, sem venda na janela, histórico suficiente, não é novo
   recentExit?: boolean | undefined; // saída nos últimos 90 dias (consumo da produção, remessa, ajuste)
   minDaysWithoutSale?: 30 | 90 | 180 | 365 | undefined; // saldo positivo e sem venda há N dias ou mais
+  /** Código do fornecedor no Omie (0048); exige uma empresa. */
+  supplier?: string | undefined;
+  /** Só produtos sem fornecedor vinculado (no Omie ou pelo BIOMIE). */
+  noSupplier?: boolean | undefined;
   sortBy?:
     | "costValue"
     | "physicalQty"
@@ -152,8 +158,27 @@ export interface AgingSummary {
   incompleteProducts: number; // nunca venderam num histórico mais curto que 12 meses
 }
 
+/** Fornecedor do filtro (código do Omie e nome do cadastro do BIOMIE). */
+export interface SupplierRef {
+  id: string;
+  name: string;
+}
+
+export interface SupplierOption extends SupplierRef {
+  products: number; // produtos vinculados que aparecem na leitura
+}
+
+export interface StockFilterOptions {
+  locations: { code: string; name: string | null }[];
+  families: string[];
+  /** Fornecedores da empresa (vazio com várias empresas: o código é de cada conta do Omie). */
+  suppliers?: SupplierOption[] | undefined;
+  suppliersNeedCompany?: boolean | undefined;
+}
+
 export interface StockOverview {
   window?: CurveWindow | undefined;
+  supplier?: SupplierRef | null | undefined;
   readings: StockReading[];
   curves?: CurveRun[] | undefined;
   dAnalysis?: DAnalysis | undefined;
@@ -208,11 +233,13 @@ export interface StockApiError {
 
 export interface StockApi {
   capabilities(): Promise<StockCapabilities>;
-  overview(companyId: CompanyFilter, window?: CurveWindow): Promise<StockOverview>;
-  positions(query: PositionQuery): Promise<{ rows: StockPosition[]; total: number }>;
-  filterOptions(
+  overview(
     companyId: CompanyFilter,
-  ): Promise<{ locations: { code: string; name: string | null }[]; families: string[] }>;
+    window?: CurveWindow,
+    supplier?: string | undefined,
+  ): Promise<StockOverview>;
+  positions(query: PositionQuery): Promise<{ rows: StockPosition[]; total: number }>;
+  filterOptions(companyId: CompanyFilter): Promise<StockFilterOptions>;
   /** A–D = manual (justificativa obrigatória, 10 a 300 caracteres); AUTO volta para a automática. */
   setCurve(input: {
     positionIds: string[];

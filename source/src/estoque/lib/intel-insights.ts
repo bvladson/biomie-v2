@@ -106,7 +106,9 @@ export const REPLENISHMENT_LABELS: Record<ReplenishmentStatus, string> = {
   comprar: "Comprar",
   nao_comprar: "Não comprar agora",
   aguardar: "Sem compra neste ciclo",
-  sem_prazo: "Sem prazo de reposição",
+  sem_fornecedor: "Sem fornecedor vinculado",
+  fornecedor_indefinido: "Fornecedor a definir",
+  sem_prazo: "Sem prazo de entrega",
   sem_previsao: "Sem previsão confiável",
   sem_demanda: "Sem demanda prevista",
 };
@@ -273,8 +275,10 @@ export function replenishmentCsv(rows: ReplenishmentRow[], viewCost: boolean): s
       "Disponível",
       "Pendente",
       "Demanda prevista (un./dia)",
-      "Prazo de reposição (dias)",
+      "Fornecedor",
+      "Prazo de entrega (dias corridos)",
       "Origem do prazo",
+      "Prazo de teste (simulação)",
       "Nível de serviço",
       "Estoque de segurança",
       "Ponto de reposição",
@@ -297,8 +301,14 @@ export function replenishmentCsv(rows: ReplenishmentRow[], viewCost: boolean): s
       opt(r.available),
       opt(r.pending),
       opt(r.dailyDemand),
+      r.supplier?.name ?? "",
       r.leadTimeDays ?? "",
-      r.paramsSource ?? "",
+      r.leadTimeSource === "produto"
+        ? "Produto"
+        : r.leadTimeSource === "fornecedor"
+          ? "Padrão do fornecedor"
+          : "",
+      r.leadTimeStatus === "teste" ? "Sim" : "",
       r.serviceLevel === undefined ? "" : `${Math.round(r.serviceLevel * 100)}%`,
       opt(r.safetyStock),
       opt(r.reorderPoint),

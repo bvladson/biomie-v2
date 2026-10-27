@@ -26,7 +26,7 @@ except Exception:  # Windows sem a base de fusos: Brasília é UTC−3 fixo (sem
     TZ = dt.timezone(dt.timedelta(hours=-3), 'BRT')
 SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=yes',
        '-i', str(pathlib.Path.home() / '.ssh/hostinger_srv1851839_ed25519'), 'root@179.197.238.57']
-HEAVY_HOMOLOG = {'db-refresh', 'up', 'intel-run', 'movements-load', 'tx-probe'}
+HEAVY_HOMOLOG = {'db-refresh', 'up', 'intel-run', 'movements-load', 'tx-probe', 'suppliers-load'}
 # Duas linhas: carga de 1 minuto e leituras de estoque abertas (só leitura).
 PROBE = ("cut -d' ' -f1 /proc/loadavg; docker compose --env-file /opt/biomie-v2/shared/stack.env "
          "-f /opt/biomie-v2/compose.yml exec -T db psql -X -U postgres -d biomie_v2 -At -c "

@@ -11,6 +11,7 @@ import {
   stockStepDeps,
 } from "@/lib/omie/stock.server";
 import { runStockMovementsStep } from "@/lib/omie/stock-movements.server";
+import { runStockSuppliersStep } from "@/lib/omie/stock-suppliers.server";
 import type { OmieEntity } from "@/lib/omie/adapters";
 import { runSnapshotJob } from "./flight-plan-snapshots.server";
 import type { WorkerControl, WorkerDeps } from "./worker-core";
@@ -233,11 +234,14 @@ export function workerDependencies(admin: Admin, signal: AbortSignal): WorkerDep
       return created;
     },
     // Uma etapa de estoque por ciclo: a leitura agendada tem prioridade; sem leitura na fila,
-    // avança as movimentações (0043), quando ligadas no banco (sem fila, nada é chamado no Omie).
+    // avança as movimentações (0043) e, sem elas, os fornecedores (0048), quando ligados no banco
+    // (sem fila, nada é chamado no Omie).
     runStockStep: async () => {
       const deps = stockStepDeps(admin, (event) => (heartbeat(), log(event)));
       const step = await runStockStep(deps, 15_000);
-      return step.jobId ? step : runStockMovementsStep(deps, 15_000);
+      if (step.jobId) return step;
+      const movements = await runStockMovementsStep(deps, 15_000);
+      return movements.jobId ? movements : runStockSuppliersStep(deps, 15_000);
     },
   };
 }

@@ -5,6 +5,7 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
     python ops/noturno.py matriz [release] [rodadas]   # teste controlado da correção da MAG Matriz
     python ops/noturno.py sales-kpis [release]         # sales_kpis: diagnóstico, testes do banco e comparação
     python ops/noturno.py intel [release]              # Inteligência (fases 1–5) na homologação
+    python ops/noturno.py intel-fornecedores <release> # idem, com fornecedores e prazos (0048/0049)
 
 Uma tarefa por vez: cada uma espera a anterior terminar (trava em ops/logs/noturno/.trava, solta
 sozinha quando o processo acaba, mesmo se cair).
@@ -17,6 +18,10 @@ intel: 22 (suítes do banco da release) → 41_homolog up (migrações 0047/0048
 subida) → Estoque liberado na cópia → prazo HIPOTÉTICO de 30 dias na cópia (47, rotulado como teste)
 → motor (41_homolog intel-run) → conferência (43) → navegador (29_smoke --intel --hml) → down.
 Release padrão: INTEL_RELEASE.
+
+intel-fornecedores: como intel, mas com cópia NOVA da produção antes (db-refresh: a cópia tem as migrações
+antigas da fase 5) e, depois de subir, a importação dos fornecedores do Omie na cópia (41_homolog
+suppliers-load: só LÊ ListarProdutoFornecedor, 10 por página) antes do prazo de teste (47) e do motor.
 
 matriz (parecer de 26/10/2026): base da produção (72 h) → até N rodadas do tx-probe (cada uma espera
 uma janela sem uso real da chave pela produção) → produção nas últimas horas. A série PARA na primeira
@@ -135,8 +140,8 @@ def sales_kpis(release):
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
-def intel(release):
-    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-inteligencia'
+def intel(release, suppliers=False):
+    out = LOGS / 'noturno' / (f'{dt.date.today():%Y%m%d}-inteligencia' + ('-fornecedores' if suppliers else ''))
     out.mkdir(parents=True, exist_ok=True)
     summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
 
@@ -156,12 +161,22 @@ def intel(release):
                                        if not v.get('ok')}}
     if not (tests or {}).get('all_ok'):
         return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
+    if suppliers:
+        remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
+        rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
+        summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+        if not refresh:
+            return done('a cópia nova da produção falhou')
     rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
     summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
     if not up:
         return done('a homologação não subiu')
     rc, mode, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '03-estoque-liberado-na-copia', out)
     summary['stockMode'] = {'rc': rc, 'error': None if rc == 0 else err}
+    if suppliers:
+        rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '30'] + WAIT, '03b-fornecedores-do-omie', out)
+        summary['suppliersLoad'] = (
+            {k: load.get(k) for k in ('exit', 'skipped', 'conflicts', 'after')} if load else {'rc': rc, 'error': err})
     rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '04-prazo-hipotetico', out)
     summary['hypotheticalLeadTime'] = seed or {'rc': rc, 'error': err}
     rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '05-motor', out)
@@ -179,7 +194,8 @@ def intel(release):
     summary['check'] = check or {'rc': rc, 'error': err}
     started = dt.datetime.now().isoformat(timespec='seconds')
     p = subprocess.run([sys.executable, str(BASE / 'ops' / '29_smoke.py'), '--stock', '--stock-mode', 'on',
-                        '--curves-readonly', '--intel', '--hml', '--shots', f'intel5-{dt.date.today():%Y%m%d}'] + WAIT,
+                        '--curves-readonly', '--intel', '--hml', '--shots', f'intel5-{dt.date.today():%Y%m%d}']
+                       + (['--suppliers'] if suppliers else []) + WAIT,
                        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=4 * 3600,
                        env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
     (out / '07-navegador.txt').write_text(f'# {started} rc={p.returncode}\n{p.stdout}\n--stderr--\n{p.stderr}',
@@ -201,9 +217,13 @@ def intel(release):
 if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
-    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel') else None
+    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores') else None
     if task == 'intel':
         intel(sys.argv[2] if len(sys.argv) > 2 else INTEL_RELEASE)
+    elif task == 'intel-fornecedores':
+        if len(sys.argv) < 3:
+            raise SystemExit('uso: intel-fornecedores <release>')
+        intel(sys.argv[2], suppliers=True)
     elif task == 'matriz':
         release = sys.argv[2] if len(sys.argv) > 2 else 'ba4ee4b03c40'
         rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 3

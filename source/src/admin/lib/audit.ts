@@ -35,6 +35,12 @@ export const AUDIT_ACTIONS: Record<string, string> = {
   "stock.refresh.requested": "Leitura do estoque solicitada",
   "stock.module.mode": "Liberação do módulo Estoque",
   "stock.reading.toggled": "Leitura do estoque ligada ou desligada",
+  "stock.intel.alert_ack": "Alerta do estoque: ciente",
+  "stock.lead_time.changed": "Prazo de entrega do fornecedor",
+  "stock.preferred_supplier.changed": "Fornecedor principal do produto",
+  "stock.supplier_link.changed": "Vínculo produto × fornecedor",
+  "stock.replenishment_policy.changed": "Política de reposição",
+  "stock.suppliers.import_requested": "Importação de fornecedores solicitada",
   "legacy.identity_import": "Importação do sistema antigo",
   "legacy.targets_teams_import": "Importação do sistema antigo",
   update: "Configuração do Plano de Voo",
@@ -90,6 +96,19 @@ const FIELD_LABELS: Record<string, string> = {
   dispositivos: "Dispositivos",
   papel: "Papel",
   permissao: "Permissão",
+  // Estoque: fornecedores, prazos e política de reposição (0048/0049)
+  fornecedor: "Fornecedor",
+  produto: "Produto",
+  leadTimeDays: "Prazo de entrega (dias corridos)",
+  minLot: "Lote mínimo",
+  note: "Observação",
+  situacao: "Situação",
+  principal: "Fornecedor principal",
+  omie: "Vínculo do Omie",
+  manual: "Vínculo manual",
+  reviewDays: "Revisão a cada (dias)",
+  serviceLevel: "Nível de serviço",
+  maxCoverageDays: "Cobertura máxima (dias)",
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -13,10 +13,12 @@ $log = "$dir\ops\logs\noturno\agendador.log"
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew
 $jobs = @(
-  @{ Name = 'BIOMIE homologacao - Matriz 26-10'; At = '2026-10-26T18:33:00'; Args = 'matriz ba4ee4b03c40 3'
+  @{ Name = 'BIOMIE homologacao - Matriz 27-10'; At = '2026-10-27T18:33:00'; Args = 'matriz ba4ee4b03c40 3'
      Desc = 'Teste controlado da correcao da MAG Matriz (tx-probe, homologacao, so leitura no Omie).' },
-  @{ Name = 'BIOMIE homologacao - sales_kpis 26-10'; At = '2026-10-26T21:03:00'; Args = 'sales-kpis'
-     Desc = 'Diagnostico de sales_kpis na copia de homologacao (so leitura).' }
+  @{ Name = 'BIOMIE homologacao - sales_kpis 27-10'; At = '2026-10-27T21:03:00'; Args = 'sales-kpis'
+     Desc = 'sales_kpis: diagnostico, testes do banco e comparacao atual x rapido na copia (so leitura).' },
+  @{ Name = 'BIOMIE homologacao - Inteligencia 27-10'; At = '2026-10-27T21:35:00'; Args = 'intel 885ff74576cd'
+     Desc = 'Inteligencia do Estoque fases 1-5 na homologacao (copia; prazo hipotetico rotulado como teste).' }
 )
 foreach ($j in $jobs) {
   if ([datetime]$j.At -lt (Get-Date)) { Write-Host "pulado (horario ja passou): $($j.Name)"; continue }

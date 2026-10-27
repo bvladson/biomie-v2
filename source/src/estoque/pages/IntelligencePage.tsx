@@ -111,7 +111,7 @@ export function IntelligencePage() {
   const search = route.useSearch();
   const navigate = useNavigate();
   const routeNavigate = route.useNavigate();
-  const { companyId, window } = useStockCompany();
+  const { companyId, window, supplier, supplierName } = useStockCompany();
   const caps = useCapabilities();
   const { data: ctx } = useSuspenseQuery(appContextQuery());
   const isSuper = ctx.roles.includes("SUPER_ADMIN");
@@ -128,8 +128,8 @@ export function IntelligencePage() {
   const [item, setItem] = useState<IntelItem | null>(null);
 
   const overview = useQuery({
-    queryKey: ["stock", "intel", "overview", companyId, window],
-    queryFn: () => intelApi.overview(companyId, window),
+    queryKey: ["stock", "intel", "overview", companyId, window, supplier ?? null],
+    queryFn: () => intelApi.overview(companyId, window, supplier),
     placeholderData: keepPreviousData,
     retry: false,
   });
@@ -360,7 +360,14 @@ export function IntelligencePage() {
                     active={filters.state}
                     onSelect={(state) => drill({ state })}
                   />
-                  <EvolutionChart overview={o} viewCost={viewCost} />
+                  {supplierName ? (
+                    <p className="panel p-5 text-sm text-muted-foreground">
+                      Evolução diária do capital: a foto diária é da empresa inteira, não por
+                      fornecedor. Tire o filtro de {supplierName} para ver a evolução.
+                    </p>
+                  ) : (
+                    <EvolutionChart overview={o} viewCost={viewCost} />
+                  )}
                 </div>
               )}
 
@@ -382,7 +389,7 @@ export function IntelligencePage() {
                   </p>
                 ))}
 
-              {hasRun && viewCost && (
+              {hasRun && viewCost && !supplierName && (
                 <RiskMatrix companyId={companyId} onOpen={(it) => setItem(it)} />
               )}
 

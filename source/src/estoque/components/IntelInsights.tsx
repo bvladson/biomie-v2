@@ -572,12 +572,26 @@ export function ReplenishmentBlock({
         Esta análise é anterior à Reposição Inteligente.
       </p>
     );
-  if (r.status === "sem_prazo" || r.status === "sem_previsao" || r.status === "sem_demanda")
+  if (
+    r.status === "sem_fornecedor" ||
+    r.status === "fornecedor_indefinido" ||
+    r.status === "sem_prazo" ||
+    r.status === "sem_previsao" ||
+    r.status === "sem_demanda"
+  )
     return (
-      <p className="rounded-md border border-dashed px-3 py-2 text-sm">
-        {REPLENISHMENT_LABELS[r.status]}. {r.message}
-      </p>
+      <div className="space-y-2">
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm">
+          {REPLENISHMENT_LABELS[r.status]}. {r.message}
+        </p>
+        {(r.notes ?? []).map((n) => (
+          <p key={n} className="text-xs text-muted-foreground">
+            {n}
+          </p>
+        ))}
+      </div>
     );
+  const test = r.leadTimeStatus === "teste";
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-3">
@@ -593,27 +607,40 @@ export function ReplenishmentBlock({
           </span>
         )}
       </div>
+      {test && (
+        <p className="rounded-md border border-amber-500/50 px-3 py-2 text-sm" role="note">
+          Prazo configurado na simulação: {r.leadTimeDays} dias. O prazo deve ser confirmado por
+          Compras antes de servir de base a recomendações reais.
+        </p>
+      )}
       {r.risk && <p className="text-sm">{r.risk}</p>}
-      {r.explanation && <p className="text-sm text-muted-foreground">{r.explanation}.</p>}
+      {r.explanation && (
+        <p className="text-sm text-muted-foreground">{r.explanation.replace(/\.$/, "")}.</p>
+      )}
       <EvidenceList items={r.evidence ?? []} />
       <p className="text-xs text-muted-foreground">
-        Prazo de {r.leadTimeDays} dias definido para{" "}
-        {r.paramsSource === "produto"
-          ? "o produto"
-          : r.paramsSource === "familia"
-            ? "a família"
-            : "a empresa"}
-        ; revisão a cada {r.reviewDays} dias; nível de serviço{" "}
-        {Math.round((r.serviceLevel ?? 0) * 100)}%.
+        Fornecedor {r.supplier?.name ?? "—"}
+        {r.supplier?.choice === "principal"
+          ? " (principal, definido por Compras)"
+          : r.supplier?.choice === "unico_com_prazo"
+            ? " (o único vinculado com prazo)"
+            : ""}
+        : prazo de {r.leadTimeDays} dias corridos{" "}
+        {r.leadTimeSource === "produto" ? "deste produto" : "padrão do fornecedor"}
+        {test ? " (simulação)" : ""}; revisão a cada {r.reviewDays} dias; nível de serviço{" "}
+        {Math.round((r.serviceLevel ?? 0) * 100)}%
+        {r.policySource === "padrao" ? " (padrões do BIOMIE)" : " (política de Compras)"}.
         {r.reorderFromOmieMin
           ? " O ponto de reposição usa o mínimo cadastrado no Omie (maior que o calculado)."
           : ""}
       </p>
       {(r.limitations ?? []).length > 0 && (
         <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
-          {r.limitations!.map((l) => (
-            <li key={l}>{l}</li>
-          ))}
+          {r
+            .limitations!.filter((l) => !(test && l.startsWith("Prazo configurado na simulação")))
+            .map((l) => (
+              <li key={l}>{l}</li>
+            ))}
         </ul>
       )}
       <p className="text-xs text-muted-foreground">

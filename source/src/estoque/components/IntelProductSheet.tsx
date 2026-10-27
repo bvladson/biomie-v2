@@ -29,6 +29,7 @@ import { STATE_RULES, coverageText, days, evidence, integer, percentText } from 
 import { CurveBadge } from "./shared";
 import { FlagList, PriorityMeter, StateBadge } from "./IntelBits";
 import { MonthlySalesChart } from "./IntelCharts";
+import { ProductSuppliersBlock } from "./ProductSuppliersBlock";
 import {
   AlertRows,
   DiagnosisList,
@@ -213,6 +214,13 @@ function Detail({
 
       <Section title="Reposição inteligente">
         <ReplenishmentBlock r={m.replenishment} viewCost={viewCost} />
+      </Section>
+      <Section title="Fornecedores e prazo de entrega">
+        <ProductSuppliersBlock
+          companyId={d.companyId}
+          omieProductId={d.omieProductId}
+          productName={d.name}
+        />
       </Section>
 
       <Section title="Como a prioridade foi calculada">

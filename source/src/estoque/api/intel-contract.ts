@@ -58,6 +58,8 @@ export interface IntelTopItem {
 export interface IntelOverview {
   window: CurveWindow;
   companies: string[];
+  /** Filtro por fornecedor (0049): radar, estados e capital só dos produtos dele; sem evolução. */
+  supplier?: { id: string; name: string } | null | undefined;
   status: {
     enabled: boolean;
     runs: {
@@ -146,6 +148,8 @@ export interface IntelQuery {
   withAlerts?: boolean | undefined;
   /** Família do produto no Omie (a mesma lista das posições). */
   family?: string | undefined;
+  /** Código do fornecedor no Omie (exige uma empresa). */
+  supplier?: string | undefined;
   sortBy?: IntelSort | undefined;
   sortDir?: "asc" | "desc" | undefined;
   page: number; // 50 por página; -1 = todas (exportação)
@@ -368,15 +372,40 @@ export interface IntelForecast {
 // ---------------------------------------------------------------- fase 5: reposição e grupo
 
 export type ReplenishmentStatus =
-  "comprar" | "nao_comprar" | "aguardar" | "sem_prazo" | "sem_previsao" | "sem_demanda";
+  | "comprar"
+  | "nao_comprar"
+  | "aguardar"
+  | "sem_fornecedor"
+  | "fornecedor_indefinido"
+  | "sem_prazo"
+  | "sem_previsao"
+  | "sem_demanda";
+
+/** Fornecedor considerado pelo motor (0049): prazo do produto ou padrão do fornecedor. */
+export interface ReplenishmentSupplier {
+  id: string;
+  name: string;
+  leadTimeDays: number | null;
+  leadTimeSource: "produto" | "fornecedor" | null;
+  leadTimeStatus: "confirmado" | "teste" | null;
+  minLot: number | null;
+  /** principal (Compras), único vinculado ou único com prazo */
+  choice?: "principal" | "unico" | "unico_com_prazo" | undefined;
+}
 
 export interface IntelReplenishment {
   status: ReplenishmentStatus;
   message?: string;
+  supplier?: ReplenishmentSupplier;
+  suppliers?: ReplenishmentSupplier[];
+  notes?: string[];
   leadTimeDays?: number;
+  leadTimeSource?: "produto" | "fornecedor" | null;
+  leadTimeStatus?: "confirmado" | "teste" | null;
   reviewDays?: number;
   serviceLevel?: number;
-  paramsSource?: "empresa" | "familia" | "produto";
+  /** compras = política da empresa; padrao = padrões do BIOMIE (30 dias, 90%) */
+  policySource?: "compras" | "padrao";
   minLot?: number | null;
   maxCoverageDays?: number | null;
   dailyDemand?: number;
@@ -413,9 +442,13 @@ export interface ReplenishmentSummary {
   comprar: number;
   naoComprar: number;
   aguardar: number;
+  semFornecedor?: number;
+  fornecedorIndefinido?: number;
   semPrazo: number;
   semPrevisao: number;
   semDemanda: number;
+  /** produtos cujo prazo é de teste (homologação) */
+  testLeadTime?: number;
   costEstimate: number | null;
   costEstimateMissing: number;
 }
@@ -424,43 +457,13 @@ export interface ReplenishmentQuery {
   companyId: CompanyFilter;
   status?: ReplenishmentStatus | "all" | undefined;
   search?: string | undefined;
+  /** Código do fornecedor no Omie (exige uma empresa). */
+  supplier?: string | undefined;
   page: number;
 }
 
-export type ParamScope = "empresa" | "familia" | "produto";
 export const SERVICE_LEVELS = [0.8, 0.85, 0.9, 0.95, 0.97, 0.98, 0.99] as const;
 export type ServiceLevel = (typeof SERVICE_LEVELS)[number];
-
-export interface ReplenishmentParam {
-  companyId: string;
-  companyName: string;
-  scope: ParamScope;
-  key: string;
-  productName: string | null;
-  sku: string | null;
-  leadTimeDays: number;
-  reviewDays: number;
-  serviceLevel: number;
-  minLot: number | null;
-  maxCoverageDays: number | null;
-  reason: string;
-  updatedAt: string;
-  updatedBy: string | null;
-}
-
-export interface ReplenishmentParamInput {
-  companyId: string;
-  scope: ParamScope;
-  key: string;
-  values: {
-    leadTimeDays: number;
-    reviewDays?: number | undefined;
-    serviceLevel?: ServiceLevel | undefined;
-    minLot?: number | null | undefined;
-    maxCoverageDays?: number | null | undefined;
-  } | null; // null = remover
-  reason: string;
-}
 
 export interface Opportunity {
   sku: string;
@@ -554,7 +557,11 @@ export interface IntelPareto {
 
 export interface IntelApi {
   status(): Promise<IntelStatus>;
-  overview(companyId: CompanyFilter, window?: CurveWindow): Promise<IntelOverview>;
+  overview(
+    companyId: CompanyFilter,
+    window?: CurveWindow,
+    supplier?: string | undefined,
+  ): Promise<IntelOverview>;
   products(query: IntelQuery): Promise<{ rows: IntelProductRow[]; total: number }>;
   product(companyId: string, omieProductId: string): Promise<IntelProductDetail | null>;
   pareto(companyId: string, window?: CurveWindow): Promise<IntelPareto>;
@@ -572,10 +579,6 @@ export interface IntelApi {
   exportReplenishmentCsv(
     query: Omit<ReplenishmentQuery, "page">,
   ): Promise<{ fileName: string; csv: string }>;
-  replenishmentParams(
-    companyId: CompanyFilter,
-  ): Promise<{ canEdit: boolean; serviceLevels: number[]; rows: ReplenishmentParam[] }>;
-  setReplenishment(input: ReplenishmentParamInput): Promise<{ saved?: boolean; removed?: boolean }>;
   opportunities(
     query: OpportunityQuery,
   ): Promise<{ rows: Opportunity[]; total: number; note: string }>;

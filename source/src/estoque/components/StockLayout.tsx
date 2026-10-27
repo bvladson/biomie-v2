@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { LayoutDashboard, Lightbulb, ListFilter, SlidersHorizontal } from "lucide-react";
+import { LayoutDashboard, Lightbulb, ListFilter, SlidersHorizontal, Truck } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useGlobalFilters } from "@/hooks/use-filters";
 import { appContextQuery } from "@/lib/queries";
@@ -9,13 +9,16 @@ import type { CompanyFilter, CurveWindow } from "../api/contract";
 import { StockContext, canOpenStock } from "../lib/hooks";
 import { CURVE_WINDOWS, DEFAULT_WINDOW, WINDOW_LABELS, isCurveWindow } from "../lib/curves";
 import { intelApi } from "../api/intel";
+import { stockApi } from "../api";
 import { Notice } from "./shared";
+import { SupplierPicker } from "./SupplierPicker";
 
 const navigation = [
   { to: "/estoque", label: "Visão geral", icon: LayoutDashboard, exact: true },
   { to: "/estoque/inteligencia", label: "Inteligência", icon: Lightbulb, exact: false },
   { to: "/estoque/posicoes", label: "Posições", icon: ListFilter, exact: false },
   { to: "/estoque/simulacao", label: "Simulação", icon: SlidersHorizontal, exact: false },
+  { to: "/estoque/fornecedores", label: "Fornecedores e prazos", icon: Truck, exact: false },
 ] as const;
 
 type Scope = "company" | "all";
@@ -46,6 +49,7 @@ export function StockLayout() {
   const { resolved, company } = useGlobalFilters();
   const [scope, setScope] = useState<Scope>("company");
   const [curveWindow, setCurveWindow] = useState<CurveWindow>(DEFAULT_WINDOW);
+  const [supplier, setSupplier] = useState<string | undefined>(undefined);
   const allowed = canOpenStock(ctx);
   const isSuper = ctx.roles.includes("SUPER_ADMIN");
   // A aba Inteligência aparece quando o motor está ligado ou já publicou (o Super admin sempre vê).
@@ -86,12 +90,69 @@ export function StockLayout() {
     );
   const companyId: CompanyFilter = scope === "all" || !resolved ? "all" : resolved.company;
   return (
+    <StockShell
+      companyId={companyId}
+      scope={scope}
+      choose={choose}
+      curveWindow={curveWindow}
+      chooseWindow={chooseWindow}
+      supplier={supplier}
+      setSupplier={setSupplier}
+      showIntel={showIntel}
+      companyName={company?.name}
+      isDemo={scope === "company" && Boolean(company?.isDemo)}
+    />
+  );
+}
+
+function StockShell({
+  companyId,
+  scope,
+  choose,
+  curveWindow,
+  chooseWindow,
+  supplier,
+  setSupplier,
+  showIntel,
+  companyName,
+  isDemo,
+}: {
+  companyId: CompanyFilter;
+  scope: Scope;
+  choose: (s: Scope) => void;
+  curveWindow: CurveWindow;
+  chooseWindow: (w: CurveWindow) => void;
+  supplier: string | undefined;
+  setSupplier: (v: string | undefined) => void;
+  showIntel: boolean;
+  companyName: string | undefined;
+  isDemo: boolean;
+}) {
+  // Fornecedores da empresa (o código é de cada conta do Omie): com "todas", o filtro fica desligado.
+  const options = useQuery({
+    queryKey: ["stock", "options", companyId],
+    queryFn: () => stockApi.filterOptions(companyId),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const suppliers = useMemo(() => options.data?.suppliers ?? [], [options.data]);
+  const needsCompany = companyId === "all" && (options.data?.suppliersNeedCompany ?? true);
+  // Trocou de empresa (ou o fornecedor não é desta): o filtro sai.
+  useEffect(() => {
+    if (supplier && (needsCompany || (options.data && !suppliers.some((s) => s.id === supplier))))
+      setSupplier(undefined);
+  }, [supplier, needsCompany, options.data, suppliers, setSupplier]);
+  const supplierName = suppliers.find((s) => s.id === supplier)?.name;
+  return (
     <StockContext.Provider
       value={{
         companyId,
         setCompanyId: (v) => choose(v === "all" ? "all" : "company"),
         window: curveWindow,
         setWindow: chooseWindow,
+        supplier: supplierName ? supplier : undefined,
+        supplierName,
+        setSupplier,
       }}
     >
       <main
@@ -126,7 +187,7 @@ export function StockLayout() {
               className="flex-wrap justify-start"
             >
               <ToggleGroupItem value="company" className="min-h-11 max-w-[18rem] px-3">
-                <span className="truncate">{company?.name ?? "Empresa do filtro"}</span>
+                <span className="truncate">{companyName ?? "Empresa do filtro"}</span>
               </ToggleGroupItem>
               <ToggleGroupItem value="all" className="min-h-11 px-3">
                 Todas as minhas empresas
@@ -140,25 +201,42 @@ export function StockLayout() {
             estoque. A curva A/B/C/D vem do faturamento da janela escolhida (a mesma base da página
             Produtos); D = saldo positivo sem venda na janela.
           </p>
-          <div className="min-w-0 space-y-1.5">
-            <span className="block text-xs font-medium text-muted-foreground">Janela da curva</span>
-            <ToggleGroup
-              type="single"
-              variant="outline"
-              value={curveWindow}
-              onValueChange={(v) => isCurveWindow(v) && chooseWindow(v)}
-              aria-label="Janela da curva"
-              className="flex-wrap justify-start"
-            >
-              {CURVE_WINDOWS.map((w) => (
-                <ToggleGroupItem key={w} value={w} className="min-h-11 px-3">
-                  {WINDOW_LABELS[w]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+          <div className="flex flex-wrap items-end gap-4">
+            <SupplierPicker
+              options={suppliers}
+              value={supplierName ? supplier : undefined}
+              onChange={setSupplier}
+              needsCompany={needsCompany}
+              loading={options.isLoading}
+            />
+            <div className="min-w-0 space-y-1.5">
+              <span className="block text-xs font-medium text-muted-foreground">
+                Janela da curva
+              </span>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                value={curveWindow}
+                onValueChange={(v) => isCurveWindow(v) && chooseWindow(v)}
+                aria-label="Janela da curva"
+                className="flex-wrap justify-start"
+              >
+                {CURVE_WINDOWS.map((w) => (
+                  <ToggleGroupItem key={w} value={w} className="min-h-11 px-3">
+                    {WINDOW_LABELS[w]}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
           </div>
         </div>
-        {scope === "company" && company?.isDemo && (
+        {supplierName && (
+          <p className="-mt-3 text-sm" role="status">
+            Filtrando pelo fornecedor <strong>{supplierName}</strong>: painel, posições, radar e
+            reposição mostram só os produtos vinculados a ele nesta empresa.
+          </p>
+        )}
+        {isDemo && (
           <Notice>
             A empresa selecionada é de demonstração e não tem estoque. Escolha outra empresa no
             filtro do topo ou veja todas as suas empresas.

@@ -22,6 +22,9 @@
                                                                    # 1 página do Omie, nada gravado
     python ops/remote.py ops/40_stock.py movements-backfill <empresa-slug> [dias]
                                                                    # carga (re)feita em blocos de 31 dias
+  Fornecedores e prazos (migração 0048):
+    python ops/remote.py ops/40_stock.py suppliers on|off          # importação diária (só leitura do Omie)
+    python ops/remote.py ops/40_stock.py suppliers-status          # importações, vínculos e prazos
 
 Ordem da ativação (runbook, seção 12): release com a 0041 -> probe em cada empresa -> reading on
 -> validate (bate com o Omie?) -> mode pilot -> teste no navegador -> mode on. Retorno: mode off
@@ -293,6 +296,30 @@ a as (insert into public.audit_log (actor_id, action, entity, entity_id, payload
       select null, 'stock.movements.toggled', 'stock', null,
              jsonb_build_object('ligada', u.movements_enabled, 'origem', 'ops') from u)
 select json_build_object('movementsEnabled', (select movements_enabled from u));""", write=True), indent=1))
+elif command == 'suppliers':
+    if len(sys.argv) < 3 or sys.argv[2] not in ('on', 'off'):
+        raise SystemExit('uso: suppliers on|off')
+    enabled = 'true' if sys.argv[2] == 'on' else 'false'
+    print(json.dumps(psql(f"""
+with u as (update private.stock_settings set suppliers_enabled = {enabled}, updated_at = now(), updated_by = null
+           returning suppliers_enabled),
+l as (insert into public.audit_log (actor_id, action, entity, entity_id, payload)
+      select null, 'stock.suppliers.toggled', 'stock', null,
+             jsonb_build_object('ligada', u.suppliers_enabled, 'origem', 'ops') from u)
+select json_build_object('suppliersEnabled', (select suppliers_enabled from u));""", write=True), indent=1))
+elif command == 'suppliers-status':
+    print(json.dumps(psql("""select json_build_object(
+  'enabled', (select s.suppliers_enabled from private.stock_settings s),
+  'testLeadTimesOn', (select value from private.app_settings where key = 'stock.test_lead_times'),
+  'companies', (select json_agg(json_build_object('company', c.slug,
+      'suppliers', (select count(*) from private.stock_suppliers s where s.company_id = c.id and s.in_omie),
+      'links', (select count(*) from private.stock_product_suppliers l where l.company_id = c.id),
+      'leadTimes', (select json_object_agg(t.status, t.n) from (select status, count(*) n from private.stock_lead_times
+                    where company_id = c.id group by 1) t),
+      'lastJob', (select json_build_object('status', j.status, 'trigger', j.trigger, 'created', j.created_at,
+                    'finished', j.finished_at, 'error', j.error) from private.stock_supplier_jobs j
+                  where j.company_id = c.id order by j.created_at desc limit 1)) order by c.slug)
+    from public.companies c where not c.is_demo));"""), indent=1))
 elif command == 'movements-status':
     print(json.dumps(psql("""
 select json_build_object(
