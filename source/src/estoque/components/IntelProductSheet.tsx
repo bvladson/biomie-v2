@@ -162,10 +162,12 @@ function Detail({
   d,
   viewCost,
   canAck,
+  canSeeSuppliers,
 }: {
   d: IntelProductDetail;
   viewCost: boolean;
   canAck: boolean;
+  canSeeSuppliers: boolean;
 }) {
   const m = d.metrics;
   const refresh = useAlertRefresh();
@@ -215,13 +217,15 @@ function Detail({
       <Section title="Reposição inteligente">
         <ReplenishmentBlock r={m.replenishment} viewCost={viewCost} />
       </Section>
-      <Section title="Fornecedores e prazo de entrega">
-        <ProductSuppliersBlock
-          companyId={d.companyId}
-          omieProductId={d.omieProductId}
-          productName={d.name}
-        />
-      </Section>
+      {canSeeSuppliers && (
+        <Section title="Fornecedores e prazo de entrega">
+          <ProductSuppliersBlock
+            companyId={d.companyId}
+            omieProductId={d.omieProductId}
+            productName={d.name}
+          />
+        </Section>
+      )}
 
       <Section title="Como a prioridade foi calculada">
         <PriorityExplained priority={d.priority} parts={d.priorityParts} />
@@ -434,11 +438,14 @@ export function IntelProductSheet({
   onClose,
   viewCost,
   canAck = false,
+  canSeeSuppliers = false,
 }: {
   item: IntelItem | null;
   onClose: () => void;
   viewCost: boolean;
   canAck?: boolean;
+  /** Fornecedores e prazos do produto: quem vê custo ou é Compras (o Comercial não). */
+  canSeeSuppliers?: boolean;
 }) {
   const q = useQuery({
     queryKey: ["stock", "intel", "product", item?.companyId ?? null, item?.omieProductId ?? null],
@@ -475,7 +482,7 @@ export function IntelProductSheet({
             Este produto não está na última análise publicada.
           </p>
         ) : (
-          <Detail d={d} viewCost={viewCost} canAck={canAck} />
+          <Detail d={d} viewCost={viewCost} canAck={canAck} canSeeSuppliers={canSeeSuppliers} />
         )}
       </SheetContent>
     </Sheet>

@@ -1,7 +1,8 @@
 \set ON_ERROR_STOP on
 -- Estoque, migração 0049: Inteligência fase 5 (reposição por fornecedor, oportunidades entre empresas, base
--- de preço), revista com fornecedores e prazos da 0048. Política de reposição só de Compras e do Super admin
--- (validação, observação, histórico e Auditoria antes/depois); o motor recebe, por empresa, vínculos, prazos
+-- de preço), revista com fornecedores e prazos da 0048. Política de reposição com nível de serviço por curva,
+-- só de Compras e do Super admin (validação, observação, histórico e Auditoria antes/depois); Comercial vê a
+-- reposição sem o fornecedor; o motor recebe, por empresa, vínculos, prazos
 -- confirmados (os de teste só com o ajuste da homologação) e fornecedor principal; lista da reposição com
 -- custo só para quem vê custo e filtro por fornecedor (uma empresa); Radar e lista da Inteligência por
 -- fornecedor; oportunidades só para quem acessa as duas empresas e só da execução publicada das duas; lotes
@@ -71,15 +72,21 @@ begin
   v := public.stock_replenishment_policy(ca);
   if not (v->>'canEdit')::boolean or v->'companies'->0->'policy' <> 'null'::jsonb
      or (v->'defaults'->>'reviewDays')::integer <> 30 or (v->'companies'->0->>'confirmedLeadTimes')::integer <> 2
-     or (v->'companies'->0->>'testLeadTimes')::integer <> 1 then
-    raise exception 'FALHOU: política inicial (padrões do BIOMIE): %', v;
+     or (v->'companies'->0->>'testLeadTimes')::integer <> 1
+     or v->'defaults'->'serviceLevels' <> '{"A": 0.95, "B": 0.90, "C": 0.85, "D": 0.80, "U": 0.90}'::jsonb then
+    raise exception 'FALHOU: política inicial (padrões do BIOMIE por curva): %', v;
   end if;
-  v := public.stock_replenishment_policy_set(ca, '{"reviewDays": 15, "serviceLevel": 0.95}', 'Compras revisa a cada quinzena');
+  v := public.stock_replenishment_policy_set(ca, '{"reviewDays": 15, "serviceLevels": {"A": 0.97, "B": 0.95}}',
+    'Compras revisa a cada quinzena');
   if not (v->>'saved')::boolean then raise exception 'FALHOU: política salva'; end if;
-  perform public.stock_replenishment_policy_set(ca, '{"reviewDays": 15, "serviceLevel": 0.97, "maxCoverageDays": 120}',
+  perform public.stock_replenishment_policy_set(ca,
+    '{"reviewDays": 15, "serviceLevels": {"A": 0.99, "B": 0.95, "C": 0.90, "D": 0.80, "U": 0.85}, "maxCoverageDays": 120}',
     'Nível de serviço maior para a linha');
-  begin perform public.stock_replenishment_policy_set(ca, '{"serviceLevel": 0.5}', 'Nível fora da lista');
+  begin perform public.stock_replenishment_policy_set(ca, '{"serviceLevels": {"A": 0.5}}', 'Nível fora da lista');
     raise exception 'FALHOU: nível de serviço fora da lista aceito';
+  exception when others then if sqlerrm not like '%nível de serviço da lista%' then raise; end if; end;
+  begin perform public.stock_replenishment_policy_set(ca, '{"serviceLevels": {"X": 0.9}}', 'Curva que não existe');
+    raise exception 'FALHOU: curva desconhecida aceita';
   exception when others then if sqlerrm not like '%nível de serviço da lista%' then raise; end if; end;
   begin perform public.stock_replenishment_policy_set(ca, '{"reviewDays": 400}', 'Revisão longa demais');
     raise exception 'FALHOU: revisão acima de 180 aceita';
@@ -94,7 +101,7 @@ begin
     raise exception 'FALHOU: política sem empresa aceita';
   exception when others then if sqlerrm not like '%Escolha uma empresa%' then raise; end if; end;
   v := public.stock_replenishment_policy(ca);
-  if (v->'companies'->0->'policy'->>'serviceLevel')::numeric <> 0.97
+  if v->'companies'->0->'policy'->'serviceLevels' <> '{"A": 0.99, "B": 0.95, "C": 0.90, "D": 0.80, "U": 0.85}'::jsonb
      or (v->'companies'->0->'policy'->>'maxCoverageDays')::integer <> 120
      or v->'companies'->0->'policy'->>'updatedBy' <> 'Compras Fase5' then
     raise exception 'FALHOU: política gravada: %', v;
@@ -106,8 +113,10 @@ begin
   if (select count(*) from public.audit_log where action = 'stock.replenishment_policy.changed'
       and actor_id = current_setting('f5.co')::uuid) <> 2
      or not exists (select 1 from public.audit_log where action = 'stock.replenishment_policy.changed'
-                    and payload->>'mudanca' = 'update' and (payload->'before'->>'serviceLevel')::numeric = 0.95
-                    and (payload->'after'->>'serviceLevel')::numeric = 0.97
+                    and payload->>'mudanca' = 'update' and (payload->'before'->>'serviceLevelA')::numeric = 0.97
+                    and (payload->'after'->>'serviceLevelA')::numeric = 0.99
+                    and (payload->'before'->>'serviceLevelC')::numeric = 0.85
+                    and (payload->'after'->>'serviceLevelC')::numeric = 0.90
                     and payload->'after'->>'note' = 'Nível de serviço maior para a linha') then
     raise exception 'FALHOU: auditoria da política (antes, depois e observação)';
   end if;
@@ -139,7 +148,8 @@ begin
   run := (v->>'runId')::uuid;
   perform set_config('f5.run', run::text, true);
   p := public.stock_intel_planning(run, ca);
-  if (p->>'testLeadTimes')::boolean or (p->'policy'->>'serviceLevel')::numeric <> 0.97 or (p->'policy'->>'reviewDays')::integer <> 15
+  if (p->>'testLeadTimes')::boolean or (p->'policy'->'serviceLevels'->>'A')::numeric <> 0.99
+     or (p->'policy'->'serviceLevels'->>'U')::numeric <> 0.85 or (p->'policy'->>'reviewDays')::integer <> 15
      or jsonb_array_length(p->'links') <> 3 or jsonb_array_length(p->'leadTimes') <> 2
      or p->'suppliers'->>'9001' <> 'Fornecedor Alfa' or p->'preferred'->>'501' <> '9001'
      or exists (select 1 from jsonb_array_elements(p->'leadTimes') x where x->>'status' = 'teste')
@@ -180,6 +190,7 @@ begin
       'priority', 60, 'metrics', jsonb_build_object('stock', jsonb_build_object('qty', 2, 'available', 2),
         'replenishment', jsonb_build_object('status', 'comprar', 'qty', 15, 'leadTimeDays', 60, 'coverageDays', 10,
           'costEstimate', 3000, 'risk', 'Falta estimada.', 'explanation', 'Demanda prevista de 0,2 un./dia.',
+          'leadTimeStatus', 'teste', 'suppliers', jsonb_build_array(jsonb_build_object('id', '9001')),
           'supplier', jsonb_build_object('id', '9001', 'name', 'Fornecedor Alfa', 'leadTimeStatus', 'teste'))))));
   perform public.stock_intel_publish(run, cb, 0, jsonb_build_array(
     jsonb_build_object('omieProductId', '601', 'sku', 'F5-X', 'name', 'Cadeira X', 'state', 'sem_saldo', 'flags', '[]'::jsonb,
@@ -286,14 +297,19 @@ declare v jsonb; refused boolean := false;
 begin
   v := public.stock_intel_replenishment(jsonb_build_object('companyId', 'all'));
   if (v->>'total')::integer <> 1 or v->'rows'->0 ? 'costEstimate' or v->'summary'->>'costEstimate' is not null
-     or v->'rows'->0->'supplier'->>'name' <> 'Fornecedor Alfa' then
-    raise exception 'FALHOU: vendedor vê a reposição e o fornecedor, sem custo estimado: %', v;
+     or v->'rows'->0 ? 'supplier' or v->'rows'->0 ? 'suppliers' or (v->'rows'->0->>'leadTimeDays')::integer <> 60
+     or (v->'rows'->0->>'qty')::numeric <> 15 then
+    raise exception 'FALHOU: vendedor vê a reposição sem custo estimado e sem fornecedor: %', v;
   end if;
+  begin perform public.stock_intel_replenishment(jsonb_build_object('companyId', current_setting('f5.ca'), 'supplier', '9001'));
+    raise exception 'FALHOU: vendedor filtrou a reposição por fornecedor';
+  exception when insufficient_privilege then null; end;
   v := public.stock_intel_opportunities('{}');
   if (v->>'total')::integer <> 0 then raise exception 'FALHOU: vendedor sem acesso à empresa B viu a oportunidade'; end if;
   v := public.stock_intel_product(current_setting('f5.ca'), '502');
-  if v->'metrics'->'replenishment' ? 'costEstimate' or v->'metrics'->'replenishment'->>'status' <> 'comprar' then
-    raise exception 'FALHOU: detalhe do vendedor com custo estimado: %', v->'metrics'->'replenishment';
+  if v->'metrics'->'replenishment' ? 'costEstimate' or v->'metrics'->'replenishment'->>'status' <> 'comprar'
+     or v->'metrics'->'replenishment' ? 'supplier' or v->'metrics'->'replenishment' ? 'suppliers' then
+    raise exception 'FALHOU: detalhe do vendedor com custo estimado ou fornecedor: %', v->'metrics'->'replenishment';
   end if;
   begin
     perform public.stock_intel_price_basis('all');

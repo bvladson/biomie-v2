@@ -468,24 +468,27 @@ async function screen(page, path, heading) {
                shot: await shot(ven.page, 'inteligencia-vendedor') };
     });
 
-    if (suppliers && mode === 'on') await step('vendedor: fornecedores e prazos só para consulta', async () => {
+    // Comercial (ajuste aprovado em 27/10): previsões e reposições, sem a área de fornecedores e prazos.
+    if (suppliers && mode === 'on') await step('vendedor: sem fornecedores e prazos (só previsões e reposições)', async () => {
+      await ven.page.goto(base + '/estoque');
+      await ven.page.getByRole('link', { name: 'Posições', exact: true }).waitFor({ timeout: 60000 });
+      if (await ven.page.getByRole('link', { name: 'Fornecedores e prazos' }).count())
+        throw new Error('vendedor vê o menu de fornecedores');
+      if (await ven.page.getByRole('combobox', { name: 'Fornecedor' }).count())
+        throw new Error('vendedor vê o filtro por fornecedor');
       await ven.page.goto(base + '/estoque/fornecedores');
-      await ven.page.getByRole('heading', { name: 'Fornecedores e prazos de entrega' }).waitFor({ timeout: 60000 });
-      await ven.page.getByText(/Fornecedores no Omie|Escolha uma empresa/).first().waitFor({ timeout: 60000 });
-      if (await ven.page.getByRole('button', { name: 'Atualizar do Omie' }).count()) throw new Error('vendedor pode importar');
-      const first = ven.page.locator('#stock-main table tbody tr').first().getByRole('button').first();
-      if (await first.count()) {
-        await first.click();
-        const sheet = ven.page.getByRole('dialog');
-        await sheet.getByRole('heading', { name: 'Prazo padrão do fornecedor' }).waitFor({ timeout: 60000 });
-        if (await sheet.getByRole('button', { name: /Informar prazo|Alterar|Vincular/ }).count())
-          throw new Error('vendedor pode alterar prazo ou vínculo');
-        if (await sheet.getByRole('heading', { name: 'Histórico de alterações' }).count())
-          throw new Error('vendedor vê o histórico com nomes');
-      }
-      const text = await ven.page.locator('#stock-main').innerText();
-      if (/R\$\s?\d/.test(text)) throw new Error('vendedor viu valor em R$');
-      return { shot: await shot(ven.page, 'fornecedores-vendedor') };
+      await ven.page.getByText(/não fornecedores e prazos de entrega/).first().waitFor({ timeout: 60000 });
+      if (await ven.page.locator('#stock-main table').count()) throw new Error('vendedor viu a lista de fornecedores');
+      const out = { pageShot: await shot(ven.page, 'fornecedores-vendedor') };
+      await ven.page.goto(base + '/estoque/inteligencia?aba=%22reposicao%22');
+      await ven.page.getByRole('heading', { name: REPL_HEADING }).waitFor({ timeout: 60000 });
+      await ven.page.waitForTimeout(1500);
+      if (await ven.page.getByRole('columnheader', { name: 'Fornecedor e prazo' }).count())
+        throw new Error('vendedor vê a coluna de fornecedor na reposição');
+      if (await ven.page.getByRole('link', { name: 'Fornecedores e prazos' }).count())
+        throw new Error('vendedor vê o atalho para fornecedores');
+      out.replenishmentShot = await shot(ven.page, 'reposicao-vendedor');
+      return out;
     });
   } finally {
     await browser.close();

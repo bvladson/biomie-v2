@@ -118,6 +118,8 @@ export function IntelligencePage() {
   const viewCost = caps.data?.viewCost === true;
   const canExport = caps.data?.export === true;
   const canAck = caps.data?.classify === true;
+  // Fornecedores e prazos: quem vê custo ou é Compras; o Comercial vê a reposição sem fornecedor.
+  const canSeeSuppliers = caps.data?.suppliers === true;
   const single = companyId !== "all";
   const tab: IntelTab = search.aba ?? "painel";
   const setTab = (t: IntelTab) =>
@@ -249,6 +251,7 @@ export function IntelligencePage() {
               companyId={companyId}
               viewCost={viewCost}
               canExport={canExport}
+              canSeeSuppliers={canSeeSuppliers}
               onOpen={(it) => setItem(it)}
             />
           )}
@@ -414,6 +417,7 @@ export function IntelligencePage() {
         onClose={() => setItem(null)}
         viewCost={viewCost}
         canAck={canAck}
+        canSeeSuppliers={canSeeSuppliers}
       />
     </>
   );

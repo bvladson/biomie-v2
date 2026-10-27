@@ -15,6 +15,15 @@ const companyOrAll = z.union([z.literal("all"), z.string().uuid()]);
 const company = z.string().uuid();
 const code = z.string().regex(/^[1-9]\d{0,19}$/, "Código do Omie inválido.");
 const note = z.string().trim().min(10).max(300);
+const level = z.union([
+  z.literal(0.8),
+  z.literal(0.85),
+  z.literal(0.9),
+  z.literal(0.95),
+  z.literal(0.97),
+  z.literal(0.98),
+  z.literal(0.99),
+]);
 
 export const suppliersList = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -134,15 +143,7 @@ export const replenishmentPolicySet = createServerFn({ method: "POST" })
         values: z
           .object({
             reviewDays: z.number().int().min(1).max(180),
-            serviceLevel: z.union([
-              z.literal(0.8),
-              z.literal(0.85),
-              z.literal(0.9),
-              z.literal(0.95),
-              z.literal(0.97),
-              z.literal(0.98),
-              z.literal(0.99),
-            ]),
+            serviceLevels: z.object({ A: level, B: level, C: level, D: level, U: level }).strict(),
             maxCoverageDays: z.number().int().min(7).max(730).nullable().optional(),
           })
           .strict()

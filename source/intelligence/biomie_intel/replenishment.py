@@ -3,7 +3,8 @@ pedido de compra, não transfere estoque e não altera nada no Omie.
 
 Fornecedor e prazo (migração 0048): cada produto tem os fornecedores vinculados no Omie (Produto x
 Fornecedor) ou por Compras, e cada fornecedor um prazo de entrega em dias corridos, do produto ou o padrão
-dele na empresa (o do produto prevalece). O fornecedor da reposição é o principal (definido por Compras);
+dele na empresa (o do produto prevalece). Os textos não citam o fornecedor pelo nome: o nome fica só no campo
+"supplier", que o banco tira da resposta para quem não consulta fornecedores (o Comercial). O fornecedor da reposição é o principal (definido por Compras);
 senão o único vinculado; senão o único com prazo. Vários com prazo e nenhum principal = "fornecedor a
 definir". Sem fornecedor, sem prazo confiável ou com fornecedor a definir: nenhuma quantidade (a tela diz
 por quê). Prazo de teste só existe na homologação e sai rotulado como simulação.
@@ -13,8 +14,9 @@ teste histórico (fase 4):
   d   = demanda diária prevista (modelo escolhido no teste)
   σd  = desvio semanal da demanda ÷ √7
   L   = prazo de entrega (dias corridos); R = ciclo de revisão (dias); z = nível de serviço (0,80 → 0,84 …
-        0,90 → 1,28 … 0,99 → 2,33); R, z e a cobertura máxima vêm da política de reposição da empresa
-        (Compras) ou dos padrões do BIOMIE (30 dias, 90%, sem cobertura máxima), sempre identificados
+        0,90 → 1,28 … 0,99 → 2,33), pela curva A/B/C/D de 12 meses do produto; R, os níveis por curva e a
+        cobertura máxima vêm da política de reposição da empresa (Compras) ou dos padrões do BIOMIE (30 dias;
+        A 95%, B 90%, C 85%, D 80%, sem curva 90%; sem cobertura máxima), sempre identificados
   estoque de segurança  ES  = z × σd × √L
   ponto de reposição    PR  = d × L + ES (no mínimo o estoque mínimo do Omie, quando houver)
   posição               P   = disponível + pendente de recebimento
@@ -44,7 +46,11 @@ TRANSFER_NOTE = ("Movimentação entre CNPJs pode exigir nota fiscal e processos
                  "específicos. O BIOMIE não executa transferências.")
 
 
-DEFAULT_POLICY = {"reviewDays": 30, "serviceLevel": 0.90, "maxCoverageDays": None}
+DEFAULT_POLICY = {"reviewDays": 30, "maxCoverageDays": None}
+# Nível de serviço por curva (aprovado em 27/10/2026); U = produto sem curva.
+DEFAULT_LEVELS = {"A": 0.95, "B": 0.90, "C": 0.85, "D": 0.80, "U": 0.90}
+CHOICE_TEXT = {"principal": "do fornecedor principal", "unico": "do único fornecedor vinculado",
+               "unico_com_prazo": "do fornecedor vinculado"}
 TEST_NOTE = ("Prazo configurado na simulação: {days} dias. O prazo deve ser confirmado por Compras antes de "
              "servir de base a recomendações reais.")
 MAX_ALTERNATIVES = 10
@@ -113,10 +119,14 @@ def plan(m: dict[str, Any], state: str, supply: dict[str, Any] | None,
     supply = supply or {"status": "sem_fornecedor", "suppliers": [], "notes": []}
     pol = {**DEFAULT_POLICY, **{k: v for k, v in (policy or {}).items() if v is not None}}
     review = int(pol["reviewDays"])
-    level = float(pol["serviceLevel"])
+    levels = {**DEFAULT_LEVELS, **{k: v for k, v in (pol.get("serviceLevels") or {}).items() if v is not None}}
+    curve = (m.get("curve") or {}).get("current")
+    curve = curve if curve in ("A", "B", "C", "D") else "U"
+    level = float(levels[curve])
     max_cov = pol.get("maxCoverageDays")
     info: dict[str, Any] = {"suppliers": supply.get("suppliers") or [], "reviewDays": review, "serviceLevel": level,
-                            "maxCoverageDays": max_cov, "policySource": "compras" if policy else "padrao"}
+                            "serviceLevelCurve": curve, "maxCoverageDays": max_cov,
+                            "policySource": "compras" if policy else "padrao"}
     if supply.get("notes"):
         info["notes"] = supply["notes"]
     if supply["status"] == "sem_fornecedor":
@@ -124,13 +134,14 @@ def plan(m: dict[str, Any], state: str, supply: dict[str, Any] | None,
                 "message": ("Nenhum fornecedor vinculado a este produto (no Omie ou pelo BIOMIE): a quantidade de "
                             "reposição está indisponível.")}
     if supply["status"] == "fornecedor_indefinido":
-        listed = "; ".join(f"{o['name']}: {num(o['leadTimeDays'])} dias" for o in info["suppliers"] if o["leadTimeDays"])
+        days = sorted(o["leadTimeDays"] for o in info["suppliers"] if o["leadTimeDays"])
+        span = f"{num(days[0])} dias" if days[0] == days[-1] else f"de {num(days[0])} a {num(days[-1])} dias"
         return {**info, "status": "fornecedor_indefinido",
-                "message": (f"Mais de um fornecedor com prazo informado ({listed}): Compras precisa indicar o "
+                "message": (f"{len(days)} fornecedores com prazo informado ({span}): Compras precisa indicar o "
                             "fornecedor principal. Até lá, a quantidade de reposição está indisponível.")}
     if supply["status"] == "sem_prazo":
         chosen = supply.get("supplier")
-        who = f" do fornecedor {chosen['name']}" if chosen else " dos fornecedores vinculados"
+        who = " " + CHOICE_TEXT.get(chosen.get("choice"), "do fornecedor") if chosen else " dos fornecedores vinculados"
         out = {**info, "status": "sem_prazo",
                "message": (f"Sem prazo de entrega confiável{who}: a quantidade de reposição está indisponível. "
                            "Compras informa o prazo em Estoque › Fornecedores e prazos.")}
@@ -178,7 +189,9 @@ def plan(m: dict[str, Any], state: str, supply: dict[str, Any] | None,
     lead_label = "Prazo configurado na simulação" if test else "Prazo de entrega"
     origin = "do produto" if s.get("leadTimeSource") == "produto" else "padrão do fornecedor"
     evidence = [ev("forecast.dailyRate", "Demanda prevista", round(daily, 3), "un./dia"),
-                ev("leadTimeDays", f"{lead_label} ({s['name']}, {origin})", lead, "dias corridos"),
+                ev("leadTimeDays", f"{lead_label} ({origin})", lead, "dias corridos"),
+                ev("serviceLevel", f"Nível de serviço (curva {curve})" if curve != "U" else "Nível de serviço (sem curva)",
+                   round(level * 100), "%"),
                 ev("safetyStock", "Estoque de segurança", round(safety, 1), "un."),
                 ev("reorderPoint", "Ponto de reposição", round(reorder, 1), "un."),
                 ev("position", "Disponível + pendente", round(position, 3), "un."),
@@ -189,9 +202,10 @@ def plan(m: dict[str, Any], state: str, supply: dict[str, Any] | None,
             "evidence": evidence, "limitations": limitations}
     lead_text = (f"prazo configurado na simulação de {num(lead)} dias" if test
                  else f"prazo de entrega de {num(lead)} dias corridos")
-    explanation = (f"Demanda prevista de {num(daily, 2)} un./dia; {lead_text} ({s['name']}); estoque de "
-                   f"segurança de {num(safety)} un. (nível de serviço {num(level * 100)}%); ponto de reposição de "
-                   f"{num(reorder)} un.; disponível + pendente = {num(position)} un.")
+    curve_text = f"curva {curve}" if curve != "U" else "sem curva"
+    explanation = (f"Demanda prevista de {num(daily, 2)} un./dia; {lead_text} ({origin}); estoque de "
+                   f"segurança de {num(safety)} un. (nível de serviço {num(level * 100)}%, {curve_text}); ponto de "
+                   f"reposição de {num(reorder)} un.; disponível + pendente = {num(position)} un.")
     if position <= reorder:
         need = max(target - position, 0.0)
         step = float(lot or 0)
@@ -218,9 +232,8 @@ def plan(m: dict[str, Any], state: str, supply: dict[str, Any] | None,
 def buy_recommendation(r: dict[str, Any]) -> dict[str, Any] | None:
     if r.get("status") != "comprar":
         return None
-    who = r["supplier"]["name"]
-    action = (f"Simulação: comprar {num(r['qty'])} un. de {who} (prazo de teste, não confirmado por Compras)"
-              if r.get("leadTimeStatus") == "teste" else f"Comprar {num(r['qty'])} un. de {who} (sugestão para revisão)")
+    action = (f"Simulação: comprar {num(r['qty'])} un. (prazo de teste, não confirmado por Compras)"
+              if r.get("leadTimeStatus") == "teste" else f"Comprar {num(r['qty'])} un. (sugestão para revisão)")
     return {"rule": "R08", "type": "comprar", "action": action, "why": r["risk"], "evidence": r["evidence"],
             "limitations": r["limitations"]}
 

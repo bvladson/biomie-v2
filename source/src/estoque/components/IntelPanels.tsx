@@ -350,18 +350,37 @@ function CoverageVsLeadTime({ rows }: { rows: ReplenishmentRow[] }) {
   );
 }
 
+type LevelKey = "A" | "B" | "C" | "D" | "U";
+const LEVEL_KEYS: LevelKey[] = ["A", "B", "C", "D", "U"];
+const LEVEL_LABELS: Record<LevelKey, string> = {
+  A: "Curva A",
+  B: "Curva B",
+  C: "Curva C",
+  D: "Curva D",
+  U: "Sem curva",
+};
+
 interface PolicyDraft {
   reviewDays: string;
-  serviceLevel: ServiceLevel;
+  levels: Record<LevelKey, ServiceLevel>;
   maxCoverageDays: string;
   note: string;
 }
 
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+
 /**
- * Política de reposição da empresa (0049): ciclo de revisão, nível de serviço e cobertura máxima, de
- * Compras e do Super admin. Os prazos de entrega ficam em Fornecedores e prazos (por fornecedor e produto).
+ * Política de reposição da empresa (0049): ciclo de revisão, nível de serviço por curva A/B/C/D (e para
+ * produto sem curva) e cobertura máxima, de Compras e do Super admin. Os prazos de entrega ficam em
+ * Fornecedores e prazos (por fornecedor e produto), que o Comercial não abre.
  */
-function PolicySection({ companyId }: { companyId: CompanyFilter }) {
+function PolicySection({
+  companyId,
+  canSeeSuppliers,
+}: {
+  companyId: CompanyFilter;
+  canSeeSuppliers: boolean;
+}) {
   const client = useQueryClient();
   const q = useQuery({
     queryKey: ["stock", "suppliers", "policies", companyId],
@@ -408,16 +427,18 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
           <h3 className="text-base font-semibold">Prazos de entrega e política de reposição</h3>
           <p className="mt-1 text-sm text-muted-foreground">
             O prazo de entrega é de cada fornecedor (do produto ou o padrão dele), informado por
-            Compras em Fornecedores e prazos. Sem fornecedor ou sem prazo confiável, a quantidade de
-            reposição fica indisponível. Ciclo de revisão, nível de serviço e cobertura máxima são
-            da empresa.
+            Compras. Sem fornecedor ou sem prazo confiável, a quantidade de reposição fica
+            indisponível. Ciclo de revisão, nível de serviço por curva e cobertura máxima são da
+            empresa.
           </p>
         </div>
-        <Button asChild variant="outline" className="min-h-11">
-          <Link to="/estoque/fornecedores">
-            <Truck aria-hidden /> Fornecedores e prazos
-          </Link>
-        </Button>
+        {canSeeSuppliers && (
+          <Button asChild variant="outline" className="min-h-11">
+            <Link to="/estoque/fornecedores">
+              <Truck aria-hidden /> Fornecedores e prazos
+            </Link>
+          </Button>
+        )}
       </div>
       <Status loading={q.isPending} error={q.error} retry={() => q.refetch()} />
       {q.data && q.data.testLeadTimesOn && (
@@ -433,9 +454,12 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
               <TableRow>
                 <TableHead>Empresa</TableHead>
                 <TableHead className="text-right">Revisão</TableHead>
-                <TableHead className="text-right">Nível de serviço</TableHead>
+                {LEVEL_KEYS.map((k) => (
+                  <TableHead key={k} className="text-right">
+                    {LEVEL_LABELS[k]}
+                  </TableHead>
+                ))}
                 <TableHead className="text-right">Cobertura máx.</TableHead>
-                <TableHead className="text-right">Prazos confirmados</TableHead>
                 <TableHead>Origem</TableHead>
                 {q.data.canEdit && <TableHead />}
               </TableRow>
@@ -443,26 +467,20 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
             <TableBody>
               {q.data.companies.map((c) => {
                 const p = c.policy;
-                const review = p?.reviewDays ?? defaults?.reviewDays ?? 30;
-                const level = p?.serviceLevel ?? defaults?.serviceLevel ?? 0.9;
+                const reviewDays = p?.reviewDays ?? defaults?.reviewDays ?? 30;
+                const levels = p?.serviceLevels ?? defaults?.serviceLevels;
                 const cov = p ? p.maxCoverageDays : (defaults?.maxCoverageDays ?? null);
                 return (
                   <TableRow key={c.companyId}>
                     <TableCell>{c.companyName}</TableCell>
-                    <TableCell className="text-right tabular-nums">{review} dias</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {Math.round(level * 100)}%
-                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{reviewDays} dias</TableCell>
+                    {LEVEL_KEYS.map((k) => (
+                      <TableCell key={k} className="text-right tabular-nums">
+                        {levels ? pct(levels[k]) : "—"}
+                      </TableCell>
+                    ))}
                     <TableCell className="text-right tabular-nums">
                       {cov === null ? "—" : `${cov} dias`}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {integer(c.confirmedLeadTimes)}
-                      {c.testLeadTimes > 0 && (
-                        <span className="block text-xs text-muted-foreground">
-                          + {integer(c.testLeadTimes)} de teste
-                        </span>
-                      )}
                     </TableCell>
                     <TableCell className="min-w-56 whitespace-normal text-xs text-muted-foreground">
                       {p ? (
@@ -476,6 +494,12 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
                       ) : (
                         "Padrão do BIOMIE (Compras pode ajustar)"
                       )}
+                      {canSeeSuppliers && (
+                        <span className="block">
+                          {integer(c.confirmedLeadTimes)} prazos confirmados
+                          {c.testLeadTimes > 0 ? ` + ${integer(c.testLeadTimes)} de teste` : ""}
+                        </span>
+                      )}
                     </TableCell>
                     {q.data.canEdit && (
                       <TableCell className="whitespace-nowrap">
@@ -485,11 +509,12 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
                           className="min-h-11 min-w-11"
                           aria-label={`Editar a política de ${c.companyName}`}
                           onClick={() =>
+                            levels &&
                             setEditing({
                               companyId: c.companyId,
                               draft: {
-                                reviewDays: String(review),
-                                serviceLevel: level as ServiceLevel,
+                                reviewDays: String(reviewDays),
+                                levels: { ...levels } as Record<LevelKey, ServiceLevel>,
                                 maxCoverageDays: cov === null ? "" : String(cov),
                                 note: "",
                               },
@@ -512,8 +537,9 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
           <DialogHeader>
             <DialogTitle>Política de reposição</DialogTitle>
             <DialogDescription>
-              Vale para a empresa inteira, a partir da próxima análise. A mudança fica no histórico
-              e na Auditoria, com a observação.
+              Vale para a empresa inteira, a partir da próxima análise. O nível de serviço segue a
+              curva de 12 meses do produto. A mudança fica no histórico e na Auditoria, com a
+              observação.
             </DialogDescription>
           </DialogHeader>
           {d && (
@@ -531,20 +557,6 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
                   className="h-11 bg-card"
                 />
               </label>
-              <Choice
-                label="Nível de serviço"
-                value={String(d.serviceLevel)}
-                onChange={(v) =>
-                  setEditing({
-                    ...editing!,
-                    draft: { ...d, serviceLevel: Number(v) as ServiceLevel },
-                  })
-                }
-                options={SERVICE_LEVELS.map((l) => ({
-                  value: String(l),
-                  label: `${Math.round(l * 100)}%`,
-                }))}
-              />
               <label className="space-y-1.5 text-sm">
                 <span className="block text-xs font-medium text-muted-foreground">
                   Cobertura máxima em dias (opcional)
@@ -558,6 +570,20 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
                   className="h-11 bg-card"
                 />
               </label>
+              {LEVEL_KEYS.map((k) => (
+                <Choice
+                  key={k}
+                  label={`Nível de serviço · ${LEVEL_LABELS[k]}`}
+                  value={String(d.levels[k])}
+                  onChange={(v) =>
+                    setEditing({
+                      ...editing!,
+                      draft: { ...d, levels: { ...d.levels, [k]: Number(v) as ServiceLevel } },
+                    })
+                  }
+                  options={SERVICE_LEVELS.map((l) => ({ value: String(l), label: pct(l) }))}
+                />
+              ))}
               <label className="space-y-1.5 text-sm sm:col-span-2">
                 <span className="block text-xs font-medium text-muted-foreground">
                   Observação (10 a 300 caracteres)
@@ -585,7 +611,7 @@ function PolicySection({ companyId }: { companyId: CompanyFilter }) {
               onClick={() =>
                 void save({
                   reviewDays: review!,
-                  serviceLevel: d!.serviceLevel,
+                  serviceLevels: d!.levels,
                   maxCoverageDays: maxCov,
                 })
               }
@@ -603,11 +629,14 @@ export function ReplenishmentPanel({
   companyId,
   viewCost,
   canExport,
+  canSeeSuppliers = false,
   onOpen,
 }: {
   companyId: CompanyFilter;
   viewCost: boolean;
   canExport: boolean;
+  /** Comercial (sem custo e sem Compras): reposição sem fornecedor. */
+  canSeeSuppliers?: boolean;
   onOpen: (item: IntelItem) => void;
 }) {
   const { supplier } = useStockCompany();
@@ -700,7 +729,7 @@ export function ReplenishmentPanel({
           />
         </div>
       )}
-      <PolicySection companyId={companyId} />
+      <PolicySection companyId={companyId} canSeeSuppliers={canSeeSuppliers} />
       {q.data && <CoverageVsLeadTime rows={q.data.rows} />}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
@@ -764,7 +793,9 @@ export function ReplenishmentPanel({
                   {viewCost && <TableHead className="text-right">Custo estimado</TableHead>}
                   <TableHead className="text-right">Disp. + pendente</TableHead>
                   <TableHead className="text-right">Demanda/dia</TableHead>
-                  <TableHead>Fornecedor e prazo</TableHead>
+                  <TableHead>
+                    {canSeeSuppliers ? "Fornecedor e prazo" : "Prazo de entrega"}
+                  </TableHead>
                   <TableHead className="text-right">Ponto de reposição</TableHead>
                   <TableHead className="text-right">Cobertura</TableHead>
                   <TableHead>Risco e explicação</TableHead>
@@ -834,10 +865,15 @@ export function ReplenishmentPanel({
                             </Badge>
                           )}
                         </>
+                      ) : r.leadTimeDays ? (
+                        <span className="tabular-nums">
+                          {r.leadTimeDays} dias corridos
+                          {r.leadTimeStatus === "teste" ? " (simulação)" : ""}
+                        </span>
                       ) : (
                         <span className="text-muted-foreground">
-                          {r.status === "fornecedor_indefinido"
-                            ? `${r.suppliers?.length ?? 0} fornecedores`
+                          {r.status === "fornecedor_indefinido" && r.suppliers
+                            ? `${r.suppliers.length} fornecedores`
                             : "—"}
                         </span>
                       )}

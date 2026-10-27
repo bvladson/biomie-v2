@@ -19,8 +19,8 @@
 --   pelo motor com o ajuste stock.test_lead_times = on, que a produção não tem: a produção começa sem
 --   prazo nenhum e nenhum prazo fictício é copiado para ela.
 -- - Filtro por fornecedor no painel e nas posições do Estoque, uma empresa por vez (o código do
---   fornecedor é de cada conta do Omie). Leitura: quem vê o Estoque; histórico com nomes: Compras e
---   Super admin.
+--   fornecedor é de cada conta do Omie). Consulta de fornecedores e prazos: quem vê custo ou é Compras (o
+--   Comercial consulta previsões e reposições, sem fornecedores); histórico com nomes: Compras e Super admin.
 -- Retorno: deploy/db/rollback/0048_stock_suppliers.down.sql (telas e agenda do worker voltam às da
 -- 0043; tabelas e prazos já informados ficam).
 
@@ -384,6 +384,10 @@ begin
   if v !~ '^[1-9][0-9]{0,19}$' then
     raise exception 'Fornecedor inválido.' using errcode = 'P0001';
   end if;
+  if not coalesce((stock_internal.caps()->>'suppliers')::boolean, false) then
+    raise exception 'Seu perfil consulta previsões e reposições, mas não fornecedores e prazos de entrega.'
+      using errcode = '42501';
+  end if;
   if cardinality(p_scope) <> 1 then
     raise exception 'Escolha uma empresa para filtrar por fornecedor.' using errcode = 'P0001';
   end if;
@@ -493,10 +497,11 @@ declare
   v_export boolean;
   v_refresh boolean;
   v_purchasing boolean;
+  v_suppliers boolean;
 begin
   if auth.uid() is null then
     return jsonb_build_object('view', false, 'viewCost', false, 'classify', false,
-      'saveScenarios', false, 'export', false, 'refresh', false, 'purchasing', false);
+      'saveScenarios', false, 'export', false, 'refresh', false, 'purchasing', false, 'suppliers', false);
   end if;
   v_view := r && array['SUPER_ADMIN', 'ADMIN', 'DIRETORIA', 'GESTOR', 'FINANCEIRO', 'ANALISTA', 'VENDEDOR']
     or p && array['stock.view_cost', 'stock.classify', 'stock.export', 'stock.purchasing'];
@@ -509,9 +514,12 @@ begin
   v_refresh := r && array['SUPER_ADMIN', 'ADMIN'];
   -- Fornecedores e prazos de entrega (0048): Compras, pela permissão extra, e o Super admin.
   v_purchasing := r && array['SUPER_ADMIN'] or 'stock.purchasing' = any(p);
+  -- Fornecedores e prazos (consulta): quem vê custo ou é Compras. O Comercial (Vendedor) consulta previsões
+  -- e reposições, sem a área de fornecedores (ajuste aprovado em 27/10/2026).
+  v_suppliers := v_cost or v_purchasing;
   return jsonb_build_object('view', v_view, 'viewCost', v_view and v_cost, 'classify', v_view and v_classify,
     'saveScenarios', v_view and v_save, 'export', v_view and v_export, 'refresh', v_view and v_refresh,
-    'purchasing', v_view and v_purchasing);
+    'purchasing', v_view and v_purchasing, 'suppliers', v_view and v_suppliers);
 end $$;
 
 create or replace function stock_internal.require(p_cap text) returns jsonb
@@ -535,6 +543,7 @@ begin
       when 'export' then 'Você não pode exportar o estoque.'
       when 'refresh' then 'Você não pode solicitar leitura.'
       when 'purchasing' then 'Só Compras ou o Super admin alteram fornecedores e prazos de entrega.'
+      when 'suppliers' then 'Seu perfil consulta previsões e reposições, mas não fornecedores e prazos de entrega.'
       else 'Acesso negado.' end using errcode = '42501';
   end if;
   return v_caps;
@@ -768,7 +777,7 @@ end $$;
 create or replace function stock_internal.suppliers(p_query jsonb) returns jsonb
 language plpgsql stable security definer set search_path = pg_catalog, public, pg_temp as $$
 declare
-  v_caps jsonb := stock_internal.require('view');
+  v_caps jsonb := stock_internal.require('suppliers');
   v_edit boolean := coalesce((v_caps->>'purchasing')::boolean, false);
   v_company uuid := stock_internal.one_company(p_query->>'companyId',
     'Escolha uma empresa: fornecedores e prazos são de cada empresa (cada uma tem a sua conta no Omie).');
@@ -874,7 +883,7 @@ end $$;
 create or replace function stock_internal.supplier(p_company text, p_supplier text) returns jsonb
 language plpgsql stable security definer set search_path = pg_catalog, public, pg_temp as $$
 declare
-  v_caps jsonb := stock_internal.require('view');
+  v_caps jsonb := stock_internal.require('suppliers');
   v_edit boolean := coalesce((v_caps->>'purchasing')::boolean, false);
   v_company uuid := stock_internal.one_company(p_company, 'Escolha uma empresa.');
   v_supplier text := stock_internal.valid_code(p_supplier);
@@ -967,7 +976,7 @@ end $$;
 create or replace function stock_internal.product_suppliers(p_company text, p_omie text) returns jsonb
 language plpgsql stable security definer set search_path = pg_catalog, public, pg_temp as $$
 declare
-  v_caps jsonb := stock_internal.require('view');
+  v_caps jsonb := stock_internal.require('suppliers');
   v_edit boolean := coalesce((v_caps->>'purchasing')::boolean, false);
   v_company uuid := stock_internal.one_company(p_company, 'Escolha uma empresa.');
   v_omie text := stock_internal.valid_code(p_omie);
@@ -1561,7 +1570,7 @@ begin
       from (select distinct x.family from x where x.family is not null) f), '[]'::jsonb),
     'defaultWindow', stock_internal.pick_window(null),
     -- Fornecedores (0048): só com uma empresa, porque o código do fornecedor é de cada conta do Omie.
-    'suppliers', case when cardinality(v_scope) = 1 then coalesce((
+    'suppliers', case when cardinality(v_scope) = 1 and coalesce((v_caps->>'suppliers')::boolean, false) then coalesce((
         select jsonb_agg(jsonb_build_object('id', s.supplier_id, 'name', s.name, 'products', s.products)
                          order by s.name, s.supplier_id)
         from (select ps.supplier_id, stock_internal.supplier_display(ps.company_id, ps.supplier_id) as name,
@@ -1570,7 +1579,8 @@ begin
               where ps.company_id = v_scope[1]
                 and exists (select 1 from x where x.company_id = ps.company_id and x.omie_product_id = ps.omie_product_id)
               group by ps.company_id, ps.supplier_id) s), '[]'::jsonb) else '[]'::jsonb end,
-    'suppliersNeedCompany', cardinality(v_scope) > 1)
+    'suppliersNeedCompany', cardinality(v_scope) > 1,
+    'suppliersAllowed', coalesce((v_caps->>'suppliers')::boolean, false))
   into v;
   return v;
 end $$;

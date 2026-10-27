@@ -619,17 +619,23 @@ export function ReplenishmentBlock({
       )}
       <EvidenceList items={r.evidence ?? []} />
       <p className="text-xs text-muted-foreground">
-        Fornecedor {r.supplier?.name ?? "—"}
-        {r.supplier?.choice === "principal"
-          ? " (principal, definido por Compras)"
-          : r.supplier?.choice === "unico_com_prazo"
-            ? " (o único vinculado com prazo)"
-            : ""}
-        : prazo de {r.leadTimeDays} dias corridos{" "}
+        {r.supplier
+          ? `Fornecedor ${r.supplier.name}${
+              r.supplier.choice === "principal"
+                ? " (principal, definido por Compras)"
+                : r.supplier.choice === "unico_com_prazo"
+                  ? " (o único vinculado com prazo)"
+                  : ""
+            }: p`
+          : "P"}
+        razo de {r.leadTimeDays} dias corridos{" "}
         {r.leadTimeSource === "produto" ? "deste produto" : "padrão do fornecedor"}
         {test ? " (simulação)" : ""}; revisão a cada {r.reviewDays} dias; nível de serviço{" "}
         {Math.round((r.serviceLevel ?? 0) * 100)}%
-        {r.policySource === "padrao" ? " (padrões do BIOMIE)" : " (política de Compras)"}.
+        {r.serviceLevelCurve && r.serviceLevelCurve !== "U"
+          ? ` (curva ${r.serviceLevelCurve}`
+          : " (sem curva"}
+        {r.policySource === "padrao" ? ", padrão do BIOMIE)" : ", política de Compras)"}.
         {r.reorderFromOmieMin
           ? " O ponto de reposição usa o mínimo cadastrado no Omie (maior que o calculado)."
           : ""}

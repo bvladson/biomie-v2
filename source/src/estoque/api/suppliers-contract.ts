@@ -162,9 +162,12 @@ export interface CustomerMatch {
   isSupplier: boolean;
 }
 
+/** Nível de serviço por curva A/B/C/D de 12 meses; U = produto sem curva. */
+export type ServiceLevelsByCurve = Record<"A" | "B" | "C" | "D" | "U", number>;
+
 export interface ReplenishmentPolicy {
   reviewDays: number;
-  serviceLevel: number;
+  serviceLevels: ServiceLevelsByCurve;
   maxCoverageDays: number | null;
   note: string;
   updatedAt: string;
@@ -174,7 +177,11 @@ export interface ReplenishmentPolicy {
 export interface ReplenishmentPolicies {
   canEdit: boolean;
   serviceLevels: number[];
-  defaults: { reviewDays: number; serviceLevel: number; maxCoverageDays: number | null };
+  defaults: {
+    reviewDays: number;
+    serviceLevels: ServiceLevelsByCurve;
+    maxCoverageDays: number | null;
+  };
   testLeadTimesOn: boolean;
   companies: {
     companyId: string;
@@ -224,7 +231,7 @@ export interface SuppliersApi {
     companyId: string;
     values: {
       reviewDays: number;
-      serviceLevel: number;
+      serviceLevels: ServiceLevelsByCurve;
       maxCoverageDays?: number | null | undefined;
     } | null;
     note: string;

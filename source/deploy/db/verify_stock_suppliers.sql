@@ -2,8 +2,8 @@
 -- Estoque, migração 0048: fornecedores do Omie e prazos de entrega por empresa, produto e fornecedor.
 -- Importação (fila, página fora de ordem, total que muda, idempotência, vínculos que somem, importação
 -- vazia que não apaga, falha com espera mínima), cadastro do BIOMIE reaproveitado (sem duplicar),
--- permissão de Compras (stock.purchasing) e do Super admin, Admin sem a permissão barrado, vendedor só
--- lendo e sem histórico, validações, histórico e Auditoria com valor anterior e novo, prazo de teste só
+-- permissão de Compras (stock.purchasing) e do Super admin, Admin sem a permissão só lê, Comercial
+-- (vendedor) sem a área de fornecedores (ajuste de 27/10: consulta previsões e reposições), validações, histórico e Auditoria com valor anterior e novo, prazo de teste só
 -- lido com o ajuste da homologação, filtros por fornecedor (uma empresa), dados oficiais intocados.
 -- Empresas, produtos e usuários sintéticos; tudo é desfeito no fim. Banco de TESTE.
 begin;
@@ -158,7 +158,8 @@ do $$
 declare v jsonb; ca text := current_setting('sup.ca');
 begin
   v := public.stock_capabilities();
-  if not (v->>'purchasing')::boolean or not (v->>'view')::boolean or (v->>'viewCost')::boolean or (v->>'classify')::boolean then
+  if not (v->>'purchasing')::boolean or not (v->>'view')::boolean or (v->>'viewCost')::boolean or (v->>'classify')::boolean
+     or not (v->>'suppliers')::boolean then
     raise exception 'FALHOU: capacidades de Compras: %', v;
   end if;
   v := public.stock_suppliers(jsonb_build_object('companyId', ca));
@@ -246,7 +247,8 @@ begin
 end $$;
 reset role;
 
--- 3. Admin sem a permissão de Compras: lê, não altera, não vê o histórico. Vendedor: só lê.
+-- 3. Admin sem a permissão de Compras: lê, não altera, não vê o histórico. Comercial (vendedor): não entra
+--    na área de fornecedores nem filtra por fornecedor.
 select set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('sup.ad'), 'role', 'authenticated')::text, true);
 set local role authenticated;
 do $$
@@ -266,19 +268,37 @@ set local role authenticated;
 do $$
 declare v jsonb; ca text := current_setting('sup.ca'); refused boolean := false;
 begin
-  v := public.stock_suppliers(jsonb_build_object('companyId', 'all'));
-  if (v->>'canEdit')::boolean or (v->>'total')::integer <> 4 or v->'summary'->'lastJob'->'error' <> 'null'::jsonb then
-    raise exception 'FALHOU: vendedor lê os fornecedores da empresa dele, sem editar: %', v;
+  v := public.stock_capabilities();
+  if (v->>'suppliers')::boolean or (v->>'purchasing')::boolean or not (v->>'view')::boolean then
+    raise exception 'FALHOU: capacidades do vendedor: %', v;
   end if;
+  begin perform public.stock_suppliers(jsonb_build_object('companyId', 'all'));
+  exception when insufficient_privilege then refused := true; end;
+  if not refused then raise exception 'FALHOU: vendedor abriu a lista de fornecedores'; end if;
+  refused := false;
+  begin perform public.stock_supplier(ca, '9001'); exception when insufficient_privilege then refused := true; end;
+  if not refused then raise exception 'FALHOU: vendedor abriu o fornecedor'; end if;
+  refused := false;
+  begin perform public.stock_product_suppliers(ca, '501'); exception when insufficient_privilege then refused := true; end;
+  if not refused then raise exception 'FALHOU: vendedor viu os fornecedores do produto'; end if;
+  refused := false;
   begin perform public.stock_supplier_search(ca, 'gama'); exception when insufficient_privilege then refused := true; end;
   if not refused then raise exception 'FALHOU: vendedor buscou no cadastro inteiro'; end if;
   refused := false;
   begin perform public.stock_preferred_supplier_set(ca, '501', null, 'Vendedor tirando o principal');
   exception when insufficient_privilege then refused := true; end;
   if not refused then raise exception 'FALHOU: vendedor mudou o fornecedor principal'; end if;
-  v := public.stock_product_suppliers(ca, '501');
-  if (v->>'canEdit')::boolean or v->'preferred'->'updatedBy' <> 'null'::jsonb then
-    raise exception 'FALHOU: vendedor vê quem alterou: %', v;
+  refused := false;
+  begin perform public.stock_positions(jsonb_build_object('companyId', ca, 'supplier', '9001', 'page', 0));
+  exception when insufficient_privilege then refused := true; end;
+  if not refused then raise exception 'FALHOU: vendedor filtrou posições por fornecedor'; end if;
+  v := public.stock_filter_options(ca);
+  if v->'suppliers' <> '[]'::jsonb or (v->>'suppliersAllowed')::boolean then
+    raise exception 'FALHOU: vendedor recebeu a lista de fornecedores no filtro: %', v;
+  end if;
+  -- O resto do Estoque continua igual para o vendedor.
+  if (public.stock_overview(ca)->'totals'->>'positions')::integer <> 4 then
+    raise exception 'FALHOU: painel do vendedor';
   end if;
 end $$;
 reset role;

@@ -17,6 +17,8 @@ export interface StockCapabilities {
   refresh: boolean; // pedir nova leitura ao worker
   /** Fornecedores e prazos de entrega (0048): Compras (permissão extra) e Super admin. */
   purchasing?: boolean | undefined;
+  /** Consultar fornecedores e prazos: quem vê custo ou é Compras (o Comercial não). */
+  suppliers?: boolean | undefined;
 }
 
 export interface StockReading {
@@ -174,6 +176,8 @@ export interface StockFilterOptions {
   /** Fornecedores da empresa (vazio com várias empresas: o código é de cada conta do Omie). */
   suppliers?: SupplierOption[] | undefined;
   suppliersNeedCompany?: boolean | undefined;
+  /** O perfil consulta fornecedores (senão a lista vem vazia e o filtro some). */
+  suppliersAllowed?: boolean | undefined;
 }
 
 export interface StockOverview {
