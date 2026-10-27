@@ -6,6 +6,7 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
     python ops/noturno.py sales-kpis [release]         # sales_kpis: diagnóstico, testes do banco e comparação
     python ops/noturno.py intel [release]              # Inteligência (fases 1–5) na homologação
     python ops/noturno.py intel-fornecedores <release> # idem, com fornecedores e prazos (0048/0049)
+    python ops/noturno.py banco <release>              # só as suítes do banco da release (22), com a trava
 
 Uma tarefa por vez: cada uma espera a anterior terminar (trava em ops/logs/noturno/.trava, solta
 sozinha quando o processo acaba, mesmo se cair).
@@ -214,12 +215,31 @@ def intel(release, suppliers=False):
     return done()
 
 
+def banco(release):
+    """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-banco-{release}'
+    out.mkdir(parents=True, exist_ok=True)
+    rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
+    summary = {'release': release, 'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
+               'migrations': (tests or {}).get('migrations_applied'),
+               'suites': {k: ('pulada' if v.get('skipped') else v.get('ok'))
+                          for k, v in (tests or {}).get('suites', {}).items()},
+               'failures': {k: v.get('error') for k, v in (tests or {}).get('suites', {}).items() if not v.get('ok')},
+               'rollbackScripts': (tests or {}).get('rollback_scripts')}
+    (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+
 if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
-    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores') else None
+    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco') else None
     if task == 'intel':
         intel(sys.argv[2] if len(sys.argv) > 2 else INTEL_RELEASE)
+    elif task == 'banco':
+        if len(sys.argv) < 3:
+            raise SystemExit('uso: banco <release>')
+        banco(sys.argv[2])
     elif task == 'intel-fornecedores':
         if len(sys.argv) < 3:
             raise SystemExit('uso: intel-fornecedores <release>')
