@@ -148,7 +148,9 @@ try:
            'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp,
            'BIOMIE_STOCK_MODE': STOCK_EXPECTED,
            'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0',
-           'BIOMIE_STOCK_INTEL': '1' if '--intel' in sys.argv else 'empty' if '--intel-empty' in sys.argv else '0'}
+           'BIOMIE_STOCK_INTEL': '1' if '--intel' in sys.argv else 'empty' if '--intel-empty' in sys.argv else '0',
+           # Fornecedores e prazos (0048/0049): página, ficha do fornecedor e filtro por fornecedor; só leitura.
+           'BIOMIE_STOCK_SUPPLIERS': '1' if '--suppliers' in sys.argv else '0'}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]

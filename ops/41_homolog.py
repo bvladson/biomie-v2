@@ -8,6 +8,8 @@
     python ops/remote.py ops/41_homolog.py movements-probe <empresa-slug> [dias]   # 1 página do Omie, nada gravado
     python ops/remote.py ops/41_homolog.py movements-load [minutos]   # processa a fila de movimentações
                                                                       # da cópia (só LÊ o Omie)
+    python ops/remote.py ops/41_homolog.py suppliers-load [minutos]   # fornecedores do Omie (Produto x
+                                                                      # Fornecedor) na cópia (só LÊ o Omie)
     python ops/remote.py ops/41_homolog.py intel-run [args do motor]  # BIOMIE Intelligence na cópia
                                                                       # (ex.: run --trigger ops --force)
     python ops/remote.py ops/41_homolog.py tx-probe <release> <empresa-slug> <entidades> [dias]
@@ -175,6 +177,12 @@ begin
   if to_regclass('private.stock_movement_jobs') is not null then
     update private.stock_settings set movements_enabled = false;
     update private.stock_movement_jobs set status = 'failed', error = 'Cópia de homologação', next_attempt_at = null
+      where status in ('queued', 'running');
+  end if;
+  -- Importação de fornecedores (0048): só pelo comando suppliers-load, nunca pela agenda da cópia.
+  if to_regclass('private.stock_supplier_jobs') is not null then
+    update private.stock_settings set suppliers_enabled = false;
+    update private.stock_supplier_jobs set status = 'failed', error = 'Cópia de homologação', next_attempt_at = null
       where status in ('queued', 'running');
   end if;
 end $$;
@@ -700,6 +708,26 @@ elif command == 'movements-load':
     if not minutes.isdigit():
         raise SystemExit('minutos: número inteiro')
     out = oneoff(['.output/stock-movements-load.mjs', f'--minutes={minutes}'], int(minutes) * 60 + 600)
+elif command == 'suppliers-load':
+    minutes = sys.argv[2] if len(sys.argv) > 2 else '30'
+    if not minutes.isdigit():
+        raise SystemExit('minutos: número inteiro')
+    # A chave do Omie de cada empresa é a mesma da produção: não começa com a produção usando alguma delas.
+    slugs = psql("""select string_agg(c.slug, ' ' order by c.slug) from public.companies c
+      join public.company_integrations ci on ci.company_id = c.id
+      where ci.provider = 'omie' and ci.status = 'CONNECTED' and not c.is_demo;""", db='biomie_v2').split()
+    busy = {s: key_conflicts(s) for s in slugs}
+    busy = {s: c for s, c in busy.items() if c}
+    if busy:
+        out = {'skipped': 'chave do Omie em uso pela produção agora', 'conflicts': busy}
+    else:
+        out = oneoff(['.output/stock-suppliers-load.mjs', f'--minutes={minutes}'], int(minutes) * 60 + 600)
+        out['after'] = psql("""select json_build_object('suppliers', (select count(*) from private.stock_suppliers),
+          'links', (select count(*) from private.stock_product_suppliers),
+          'jobs', (select json_agg(json_build_object('company', c.slug, 'status', j.status, 'pages', j.pages_done,
+             'suppliers', j.suppliers_saved, 'links', j.links_saved, 'removed', j.links_removed, 'error', j.error))
+             from (select distinct on (company_id) * from private.stock_supplier_jobs order by company_id, created_at desc) j
+             join public.companies c on c.id = j.company_id));""")
 elif command == 'tx-probe':
     if len(sys.argv) < 5:
         raise SystemExit('uso: tx-probe <release-12> <empresa-slug> <entidades> [dias]')

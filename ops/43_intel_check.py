@@ -150,7 +150,7 @@ select json_build_object(
                                 and not coalesce((metrics->'cost'->>'known')::boolean, false)),
     'buyUnits', (select sum((r->>'qty')::numeric) from rp where r->>'status' = 'comprar'),
     'buyCostEstimate', (select sum((r->>'costEstimate')::numeric) from rp where r->>'status' = 'comprar'),
-    'params', (select count(*) from private.intel_replenishment_params),
+    __PARAMS__,
     'opportunities', (select count(*) from private.intel_opportunities o join private.intel_current a
                         on a.company_id = o.from_company and a.run_id = o.run_id)));
 select json_build_object('runs', (select json_agg(json_build_object('status', r.status, 'trigger', r.trigger,
@@ -165,6 +165,25 @@ commit;
 
 cmd = ['docker', 'compose', '--env-file', '/opt/biomie-v2/shared/stack.env', '-f', '/opt/biomie-v2/compose.yml',
        'exec', '-T', 'db', 'psql', '-X', '-U', 'postgres', '-d', DB, '-At', '-v', 'ON_ERROR_STOP=1']
+# Modelo de prazos: o antigo (0048 de 25/10, por empresa/família/produto) ou o de fornecedores (0048/0049).
+probe = subprocess.run(cmd, input="select to_regclass('private.stock_lead_times') is not null;",
+                       capture_output=True, text=True, timeout=120)
+SUPPLIERS = probe.returncode == 0 and probe.stdout.strip().endswith('t')
+PARAMS = ("""'leadTimes', (select coalesce(json_object_agg(status, n), '{}') from (select status, count(*) n
+                   from private.stock_lead_times group by 1) t),
+    'testLeadTimesOn', (select value from private.app_settings where key = 'stock.test_lead_times'),
+    'suppliers', (select count(*) from private.stock_suppliers where in_omie),
+    'links', (select count(*) from private.stock_product_suppliers),
+    'lastSupplierImport', (select json_agg(json_build_object('company', c.slug, 'status', j.status,
+        'finished', j.finished_at, 'suppliers', j.suppliers_saved, 'links', j.links_saved, 'error', j.error))
+        from (select distinct on (company_id) * from private.stock_supplier_jobs order by company_id, created_at desc) j
+        join public.companies c on c.id = j.company_id),
+    'buyWithoutSupplier', (select count(*) from rp where r->>'status' = 'comprar' and r->'supplier'->>'id' is null),
+    'buyWithTestLeadTime', (select count(*) from rp where r->>'status' = 'comprar' and r->>'leadTimeStatus' = 'teste'),
+    'policySource', (select coalesce(json_object_agg(k, n), '{}') from (select r->>'policySource' k, count(*) n
+                     from rp where r ? 'policySource' group by 1) t)"""
+          if SUPPLIERS else "'params', (select count(*) from private.intel_replenishment_params)")
+SQL = SQL.replace('__PARAMS__', PARAMS)
 p = subprocess.run(cmd, input=SQL, capture_output=True, text=True, timeout=900)
 if p.returncode:
     raise SystemExit(p.stderr[-2000:])
@@ -178,6 +197,9 @@ for c in companies:
                and not c['semSaldoWithStock'] and bool(c['snapshotMatchesCurves']))
 p5 = phases['phase5']
 phases_ok = (not phases['phase3']['textsWithMoney'] and not p5['buyWithoutForecastOrLead'] and not p5['buyRecMismatch']
-             and not p5['costEstimateWithoutCost'])
+             and not p5['costEstimateWithoutCost'] and not p5.get('buyWithoutSupplier'))
+# Prazo de teste nunca na produção.
+if DB == 'biomie_v2' and (p5.get('leadTimes') or {}).get('teste'):
+    phases_ok = False
 print(json.dumps({'db': DB, 'allOk': all(c['ok'] for c in companies) and phases_ok, 'phasesOk': phases_ok,
                   'companies': companies, **phases, **summary}, indent=1, ensure_ascii=False, default=str))
