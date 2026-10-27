@@ -86,6 +86,7 @@ export const PERMISSION_LABELS: Record<GrantablePermission, string> = {
   "stock.view_cost": "Estoque: ver custo e simular",
   "stock.classify": "Estoque: classificar curvas",
   "stock.export": "Estoque: exportar",
+  "stock.purchasing": "Estoque: fornecedores e prazos (Compras)",
 };
 export const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS) as GrantablePermission[];
 export const STATUS_LABELS: Record<UserStatus, string> = {

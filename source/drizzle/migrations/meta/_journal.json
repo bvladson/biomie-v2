@@ -328,7 +328,14 @@
       "idx": 48,
       "version": "7",
       "when": 1792501600000,
-      "tag": "0048_stock_intel_commercial",
+      "tag": "0048_stock_suppliers",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792501700000,
+      "tag": "0049_stock_intel_commercial",
       "breakpoints": true
     }
   ]

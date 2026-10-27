@@ -20,7 +20,8 @@ export type GrantablePermission =
   | "finance.export" // Exportar financeiro
   | "stock.view_cost" // Estoque: ver custo (CMC) e simular
   | "stock.classify" // Estoque: classificar curvas
-  | "stock.export"; // Estoque: exportar
+  | "stock.export" // Estoque: exportar
+  | "stock.purchasing"; // Estoque: fornecedores e prazos de entrega (Compras)
 export type UserStatus = "ACTIVE" | "BLOCKED" | "INVITED" | "NEVER_SIGNED_IN";
 export type AccessDelivery = "INVITE_LINK" | "TEMP_PASSWORD";
 

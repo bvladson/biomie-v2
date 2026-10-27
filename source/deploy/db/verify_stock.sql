@@ -60,7 +60,7 @@ begin
      or has_function_privilege('authenticated', 'stock_internal.caps()', 'EXECUTE') then
     raise exception 'FALHOU: função interna do Estoque executável pela API';
   end if;
-  if has_function_privilege('anon', 'public.stock_overview(text, text)', 'EXECUTE')
+  if has_function_privilege('anon', 'public.stock_overview(text, text, text)', 'EXECUTE')
      or has_function_privilege('anon', 'public.my_features()', 'EXECUTE') then
     raise exception 'FALHOU: visitante sem sessão executa função do Estoque';
   end if;

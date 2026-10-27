@@ -17,8 +17,10 @@ import {
   YAxis,
   ZAxis,
 } from "recharts";
-import { ChevronLeft, ChevronRight, Download, Pencil, Plus, Trash2 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { ChevronLeft, ChevronRight, Download, Pencil, Truck } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChartContainer, ChartTooltip } from "@/components/ui/chart";
 import {
@@ -44,13 +46,13 @@ import {
   SERVICE_LEVELS,
   type IntelAlert,
   type IntelSeverity,
-  type ParamScope,
-  type ReplenishmentParam,
   type ReplenishmentRow,
   type ReplenishmentStatus,
   type ServiceLevel,
 } from "../api/intel-contract";
 import { intelApi } from "../api/intel";
+import { suppliersApi } from "../api/suppliers";
+import { useStockCompany } from "../lib/hooks";
 import { dateTime, downloadCsv, errorMessage, money, quantity } from "../lib/format";
 import { CURVE_COLORS, STATE_LABELS, compactMoney, compactNumber, integer } from "../lib/intel";
 import {
@@ -262,6 +264,8 @@ const STATUS_FILTERS: (ReplenishmentStatus | "all")[] = [
   "comprar",
   "aguardar",
   "nao_comprar",
+  "sem_fornecedor",
+  "fornecedor_indefinido",
   "sem_prazo",
   "sem_previsao",
   "sem_demanda",
@@ -346,379 +350,247 @@ function CoverageVsLeadTime({ rows }: { rows: ReplenishmentRow[] }) {
   );
 }
 
-interface ParamDraft {
-  scope: ParamScope;
-  key: string;
-  leadTimeDays: string;
+interface PolicyDraft {
   reviewDays: string;
   serviceLevel: ServiceLevel;
-  minLot: string;
   maxCoverageDays: string;
-  reason: string;
+  note: string;
 }
 
-const EMPTY_DRAFT: ParamDraft = {
-  scope: "empresa",
-  key: "",
-  leadTimeDays: "",
-  reviewDays: "30",
-  serviceLevel: 0.9,
-  minLot: "",
-  maxCoverageDays: "",
-  reason: "",
-};
-
-function ParamDialog({
-  companyId,
-  draft,
-  onClose,
-  onSaved,
-}: {
-  companyId: string;
-  draft: ParamDraft | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [d, setD] = useState<ParamDraft>(draft ?? EMPTY_DRAFT);
-  const [busy, setBusy] = useState(false);
-  const [lastDraft, setLastDraft] = useState(draft);
-  if (draft !== lastDraft) {
-    setLastDraft(draft);
-    setD(draft ?? EMPTY_DRAFT);
-  }
-  const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
-  const lead = num(d.leadTimeDays);
-  const valid =
-    lead !== null &&
-    Number.isInteger(lead) &&
-    lead >= 1 &&
-    lead <= 365 &&
-    d.reason.trim().length >= 10 &&
-    (d.scope === "empresa" || d.key.trim().length > 0);
-  return (
-    <Dialog open={draft !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Parâmetro de reposição</DialogTitle>
-          <DialogDescription>
-            O prazo vale para a empresa inteira, uma família ou um produto (o mais específico
-            ganha). Sem prazo informado, o BIOMIE não sugere quantidade. A mudança fica na auditoria
-            com a justificativa.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Choice
-            label="Vale para"
-            value={d.scope}
-            onChange={(v) =>
-              setD({ ...d, scope: v as ParamScope, key: v === "empresa" ? "" : d.key })
-            }
-            options={[
-              { value: "empresa", label: "A empresa inteira" },
-              { value: "familia", label: "Uma família" },
-              { value: "produto", label: "Um produto" },
-            ]}
-          />
-          {d.scope !== "empresa" && (
-            <label className="space-y-1.5 text-sm">
-              <span className="block text-xs font-medium text-muted-foreground">
-                {d.scope === "familia"
-                  ? "Nome da família (como no Omie)"
-                  : "Código do produto no Omie"}
-              </span>
-              <Input
-                value={d.key}
-                maxLength={120}
-                onChange={(e) => setD({ ...d, key: e.target.value })}
-                className="h-11 bg-card"
-              />
-            </label>
-          )}
-          <label className="space-y-1.5 text-sm">
-            <span className="block text-xs font-medium text-muted-foreground">
-              Prazo de reposição (dias)
-            </span>
-            <Input
-              inputMode="numeric"
-              value={d.leadTimeDays}
-              onChange={(e) => setD({ ...d, leadTimeDays: e.target.value })}
-              className="h-11 bg-card"
-            />
-          </label>
-          <label className="space-y-1.5 text-sm">
-            <span className="block text-xs font-medium text-muted-foreground">
-              Revisão a cada (dias)
-            </span>
-            <Input
-              inputMode="numeric"
-              value={d.reviewDays}
-              onChange={(e) => setD({ ...d, reviewDays: e.target.value })}
-              className="h-11 bg-card"
-            />
-          </label>
-          <Choice
-            label="Nível de serviço"
-            value={String(d.serviceLevel)}
-            onChange={(v) => setD({ ...d, serviceLevel: Number(v) as ServiceLevel })}
-            options={SERVICE_LEVELS.map((l) => ({
-              value: String(l),
-              label: `${Math.round(l * 100)}%`,
-            }))}
-          />
-          <label className="space-y-1.5 text-sm">
-            <span className="block text-xs font-medium text-muted-foreground">
-              Lote mínimo (opcional)
-            </span>
-            <Input
-              inputMode="decimal"
-              value={d.minLot}
-              onChange={(e) => setD({ ...d, minLot: e.target.value })}
-              className="h-11 bg-card"
-            />
-          </label>
-          <label className="space-y-1.5 text-sm">
-            <span className="block text-xs font-medium text-muted-foreground">
-              Cobertura máxima em dias (opcional)
-            </span>
-            <Input
-              inputMode="numeric"
-              value={d.maxCoverageDays}
-              onChange={(e) => setD({ ...d, maxCoverageDays: e.target.value })}
-              className="h-11 bg-card"
-            />
-          </label>
-        </div>
-        <label className="space-y-1.5 text-sm">
-          <span className="block text-xs font-medium text-muted-foreground">
-            Justificativa (10 a 300 caracteres)
-          </span>
-          <Textarea
-            value={d.reason}
-            maxLength={300}
-            onChange={(e) => setD({ ...d, reason: e.target.value })}
-          />
-        </label>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button
-            disabled={!valid || busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                const review = num(d.reviewDays);
-                await intelApi.setReplenishment({
-                  companyId,
-                  scope: d.scope,
-                  key: d.scope === "empresa" ? "" : d.key.trim(),
-                  values: {
-                    leadTimeDays: lead!,
-                    reviewDays: review ?? undefined,
-                    serviceLevel: d.serviceLevel,
-                    minLot: num(d.minLot),
-                    maxCoverageDays: num(d.maxCoverageDays),
-                  },
-                  reason: d.reason.trim(),
-                });
-                toast.success("Parâmetro salvo. Vale a partir da próxima análise.");
-                onSaved();
-              } catch (e) {
-                toast.error(errorMessage(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Salvar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ParamsSection({ companyId }: { companyId: CompanyFilter }) {
+/**
+ * Política de reposição da empresa (0049): ciclo de revisão, nível de serviço e cobertura máxima, de
+ * Compras e do Super admin. Os prazos de entrega ficam em Fornecedores e prazos (por fornecedor e produto).
+ */
+function PolicySection({ companyId }: { companyId: CompanyFilter }) {
   const client = useQueryClient();
   const q = useQuery({
-    queryKey: ["stock", "intel", "replenishment-params", companyId],
-    queryFn: () => intelApi.replenishmentParams(companyId),
+    queryKey: ["stock", "suppliers", "policies", companyId],
+    queryFn: () => suppliersApi.policies(companyId),
     retry: false,
   });
-  const [draft, setDraft] = useState<ParamDraft | null>(null);
-  const [removing, setRemoving] = useState<ReplenishmentParam | null>(null);
-  const [reason, setReason] = useState("");
-  const single = companyId !== "all";
-  const reload = () =>
-    client.invalidateQueries({ queryKey: ["stock", "intel", "replenishment-params"] });
-  const scopeLabel = (p: ReplenishmentParam) =>
-    p.scope === "empresa"
-      ? "Empresa inteira"
-      : p.scope === "familia"
-        ? `Família ${p.key}`
-        : `Produto ${p.sku ?? p.key}${p.productName ? ` · ${p.productName}` : ""}`;
+  const [editing, setEditing] = useState<{ companyId: string; draft: PolicyDraft } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
+  const d = editing?.draft;
+  const review = d ? num(d.reviewDays) : null;
+  const maxCov = d ? num(d.maxCoverageDays) : null;
+  const valid =
+    d !== undefined &&
+    review !== null &&
+    Number.isInteger(review) &&
+    review >= 1 &&
+    review <= 180 &&
+    (maxCov === null || (Number.isInteger(maxCov) && maxCov >= 7 && maxCov <= 730)) &&
+    d.note.trim().length >= 10;
+  async function save(values: Parameters<typeof suppliersApi.setPolicy>[0]["values"]) {
+    if (!editing || !d) return;
+    setBusy(true);
+    try {
+      await suppliersApi.setPolicy({ companyId: editing.companyId, values, note: d.note.trim() });
+      toast.success(
+        values
+          ? "Política salva. Vale a partir da próxima análise."
+          : "Voltou aos padrões do BIOMIE.",
+      );
+      setEditing(null);
+      void client.invalidateQueries({ queryKey: ["stock", "suppliers", "policies"] });
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const defaults = q.data?.defaults;
   return (
     <section className="panel space-y-3 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold">Prazos de reposição</h3>
+          <h3 className="text-base font-semibold">Prazos de entrega e política de reposição</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Informados por quem classifica curvas. A sugestão de compra só existe para produtos com
-            prazo.
+            O prazo de entrega é de cada fornecedor (do produto ou o padrão dele), informado por
+            Compras em Fornecedores e prazos. Sem fornecedor ou sem prazo confiável, a quantidade de
+            reposição fica indisponível. Ciclo de revisão, nível de serviço e cobertura máxima são
+            da empresa.
           </p>
         </div>
-        {q.data?.canEdit && single && (
-          <Button
-            variant="outline"
-            className="min-h-11"
-            onClick={() => setDraft({ ...EMPTY_DRAFT })}
-          >
-            <Plus aria-hidden /> Definir prazo
-          </Button>
-        )}
+        <Button asChild variant="outline" className="min-h-11">
+          <Link to="/estoque/fornecedores">
+            <Truck aria-hidden /> Fornecedores e prazos
+          </Link>
+        </Button>
       </div>
-      {q.data?.canEdit && !single && (
-        <p className="text-xs text-muted-foreground">
-          Para definir um prazo, escolha uma empresa no topo.
-        </p>
-      )}
       <Status loading={q.isPending} error={q.error} retry={() => q.refetch()} />
-      {q.data && q.data.rows.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nenhum prazo informado ainda.</p>
+      {q.data && q.data.testLeadTimesOn && (
+        <Notice>
+          Homologação: prazos de teste ligados. Prazo configurado na simulação não foi confirmado
+          por Compras e não pode servir de base a recomendações reais.
+        </Notice>
       )}
-      {q.data && q.data.rows.length > 0 && (
+      {q.data && (
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                {companyId === "all" && <TableHead>Empresa</TableHead>}
-                <TableHead>Vale para</TableHead>
-                <TableHead className="text-right">Prazo</TableHead>
+                <TableHead>Empresa</TableHead>
                 <TableHead className="text-right">Revisão</TableHead>
-                <TableHead className="text-right">Serviço</TableHead>
-                <TableHead className="text-right">Lote</TableHead>
+                <TableHead className="text-right">Nível de serviço</TableHead>
                 <TableHead className="text-right">Cobertura máx.</TableHead>
-                <TableHead>Justificativa</TableHead>
-                {q.data.canEdit && single && <TableHead />}
+                <TableHead className="text-right">Prazos confirmados</TableHead>
+                <TableHead>Origem</TableHead>
+                {q.data.canEdit && <TableHead />}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {q.data.rows.map((p) => (
-                <TableRow key={`${p.companyId}:${p.scope}:${p.key}`}>
-                  {companyId === "all" && <TableCell>{p.companyName}</TableCell>}
-                  <TableCell className="whitespace-normal">{scopeLabel(p)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{p.leadTimeDays} dias</TableCell>
-                  <TableCell className="text-right tabular-nums">{p.reviewDays} dias</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {Math.round(p.serviceLevel * 100)}%
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {p.minLot === null ? "—" : quantity(p.minLot)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {p.maxCoverageDays === null ? "—" : `${p.maxCoverageDays} dias`}
-                  </TableCell>
-                  <TableCell className="min-w-56 whitespace-normal text-xs text-muted-foreground">
-                    {p.reason}
-                    <span className="block">
-                      {p.updatedBy ?? "—"} · {dateTime(p.updatedAt)}
-                    </span>
-                  </TableCell>
-                  {q.data.canEdit && single && (
-                    <TableCell className="whitespace-nowrap">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="min-h-11 min-w-11"
-                        aria-label={`Editar ${scopeLabel(p)}`}
-                        onClick={() =>
-                          setDraft({
-                            scope: p.scope,
-                            key: p.key,
-                            leadTimeDays: String(p.leadTimeDays),
-                            reviewDays: String(p.reviewDays),
-                            serviceLevel: p.serviceLevel as ServiceLevel,
-                            minLot: p.minLot === null ? "" : String(p.minLot),
-                            maxCoverageDays:
-                              p.maxCoverageDays === null ? "" : String(p.maxCoverageDays),
-                            reason: "",
-                          })
-                        }
-                      >
-                        <Pencil aria-hidden />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="min-h-11 min-w-11"
-                        aria-label={`Remover ${scopeLabel(p)}`}
-                        onClick={() => {
-                          setReason("");
-                          setRemoving(p);
-                        }}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
+              {q.data.companies.map((c) => {
+                const p = c.policy;
+                const review = p?.reviewDays ?? defaults?.reviewDays ?? 30;
+                const level = p?.serviceLevel ?? defaults?.serviceLevel ?? 0.9;
+                const cov = p ? p.maxCoverageDays : (defaults?.maxCoverageDays ?? null);
+                return (
+                  <TableRow key={c.companyId}>
+                    <TableCell>{c.companyName}</TableCell>
+                    <TableCell className="text-right tabular-nums">{review} dias</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {Math.round(level * 100)}%
                     </TableCell>
-                  )}
-                </TableRow>
-              ))}
+                    <TableCell className="text-right tabular-nums">
+                      {cov === null ? "—" : `${cov} dias`}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {integer(c.confirmedLeadTimes)}
+                      {c.testLeadTimes > 0 && (
+                        <span className="block text-xs text-muted-foreground">
+                          + {integer(c.testLeadTimes)} de teste
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="min-w-56 whitespace-normal text-xs text-muted-foreground">
+                      {p ? (
+                        <>
+                          {p.note}
+                          <span className="block">
+                            {p.updatedBy ? `${p.updatedBy} · ` : ""}
+                            {dateTime(p.updatedAt)}
+                          </span>
+                        </>
+                      ) : (
+                        "Padrão do BIOMIE (Compras pode ajustar)"
+                      )}
+                    </TableCell>
+                    {q.data.canEdit && (
+                      <TableCell className="whitespace-nowrap">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="min-h-11 min-w-11"
+                          aria-label={`Editar a política de ${c.companyName}`}
+                          onClick={() =>
+                            setEditing({
+                              companyId: c.companyId,
+                              draft: {
+                                reviewDays: String(review),
+                                serviceLevel: level as ServiceLevel,
+                                maxCoverageDays: cov === null ? "" : String(cov),
+                                note: "",
+                              },
+                            })
+                          }
+                        >
+                          <Pencil aria-hidden />
+                        </Button>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
       )}
-      {single && (
-        <ParamDialog
-          companyId={companyId}
-          draft={draft}
-          onClose={() => setDraft(null)}
-          onSaved={() => {
-            setDraft(null);
-            void reload();
-          }}
-        />
-      )}
-      <Dialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
-        <DialogContent>
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Remover o prazo?</DialogTitle>
+            <DialogTitle>Política de reposição</DialogTitle>
             <DialogDescription>
-              {removing ? scopeLabel(removing) : ""}: sem este prazo vale o mais geral (família ou
-              empresa) ou nenhum. A remoção fica na auditoria.
+              Vale para a empresa inteira, a partir da próxima análise. A mudança fica no histórico
+              e na Auditoria, com a observação.
             </DialogDescription>
           </DialogHeader>
-          <label className="space-y-1.5 text-sm">
-            <span className="block text-xs font-medium text-muted-foreground">
-              Justificativa (10 a 300 caracteres)
-            </span>
-            <Textarea value={reason} maxLength={300} onChange={(e) => setReason(e.target.value)} />
-          </label>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoving(null)}>
-              Cancelar
+          {d && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1.5 text-sm">
+                <span className="block text-xs font-medium text-muted-foreground">
+                  Revisão a cada (dias)
+                </span>
+                <Input
+                  inputMode="numeric"
+                  value={d.reviewDays}
+                  onChange={(e) =>
+                    setEditing({ ...editing!, draft: { ...d, reviewDays: e.target.value } })
+                  }
+                  className="h-11 bg-card"
+                />
+              </label>
+              <Choice
+                label="Nível de serviço"
+                value={String(d.serviceLevel)}
+                onChange={(v) =>
+                  setEditing({
+                    ...editing!,
+                    draft: { ...d, serviceLevel: Number(v) as ServiceLevel },
+                  })
+                }
+                options={SERVICE_LEVELS.map((l) => ({
+                  value: String(l),
+                  label: `${Math.round(l * 100)}%`,
+                }))}
+              />
+              <label className="space-y-1.5 text-sm">
+                <span className="block text-xs font-medium text-muted-foreground">
+                  Cobertura máxima em dias (opcional)
+                </span>
+                <Input
+                  inputMode="numeric"
+                  value={d.maxCoverageDays}
+                  onChange={(e) =>
+                    setEditing({ ...editing!, draft: { ...d, maxCoverageDays: e.target.value } })
+                  }
+                  className="h-11 bg-card"
+                />
+              </label>
+              <label className="space-y-1.5 text-sm sm:col-span-2">
+                <span className="block text-xs font-medium text-muted-foreground">
+                  Observação (10 a 300 caracteres)
+                </span>
+                <Textarea
+                  value={d.note}
+                  maxLength={300}
+                  onChange={(e) =>
+                    setEditing({ ...editing!, draft: { ...d, note: e.target.value } })
+                  }
+                />
+              </label>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              disabled={busy || !d || d.note.trim().length < 10}
+              onClick={() => void save(null)}
+            >
+              Voltar aos padrões
             </Button>
             <Button
-              variant="destructive"
-              disabled={reason.trim().length < 10 || !removing || !single}
-              onClick={async () => {
-                if (!removing || !single) return;
-                try {
-                  await intelApi.setReplenishment({
-                    companyId,
-                    scope: removing.scope,
-                    key: removing.key,
-                    values: null,
-                    reason: reason.trim(),
-                  });
-                  toast.success("Prazo removido.");
-                  setRemoving(null);
-                  void reload();
-                } catch (e) {
-                  toast.error(errorMessage(e));
-                }
-              }}
+              disabled={!valid || busy}
+              onClick={() =>
+                void save({
+                  reviewDays: review!,
+                  serviceLevel: d!.serviceLevel,
+                  maxCoverageDays: maxCov,
+                })
+              }
             >
-              Remover
+              Salvar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -738,11 +610,12 @@ export function ReplenishmentPanel({
   canExport: boolean;
   onOpen: (item: IntelItem) => void;
 }) {
+  const { supplier } = useStockCompany();
   const [status, setStatus] = useState<ReplenishmentStatus | "all">("comprar");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [busy, setBusy] = useState(false);
-  const query = { companyId, status, search: search.trim() || undefined, page };
+  const query = { companyId, status, search: search.trim() || undefined, supplier, page };
   const q = useQuery({
     queryKey: ["stock", "intel", "replenishment", query],
     queryFn: () => intelApi.replenishment(query),
@@ -758,10 +631,18 @@ export function ReplenishmentPanel({
     <section className="min-w-0 space-y-5">
       <Notice>
         Sugestões para revisão humana. O BIOMIE não cria pedido de compra no Omie. Quantidade só com
-        prazo de reposição informado e previsão de demanda aprovada no teste histórico.
+        fornecedor definido, prazo de entrega confirmado por Compras e previsão de demanda aprovada
+        no teste histórico.
       </Notice>
+      {s && (s.testLeadTime ?? 0) > 0 && (
+        <Notice>
+          {integer(s.testLeadTime ?? 0)} produto(s) com prazo configurado na simulação
+          (homologação). O prazo deve ser confirmado por Compras antes de servir de base a
+          recomendações reais.
+        </Notice>
+      )}
       {s && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
           <StatTile
             label="Comprar"
             value={integer(s.comprar)}
@@ -786,7 +667,21 @@ export function ReplenishmentPanel({
             onSelect={() => pick("nao_comprar")}
           />
           <StatTile
-            label="Sem prazo informado"
+            label="Sem fornecedor"
+            value={integer(s.semFornecedor ?? 0)}
+            foot="Nenhum fornecedor vinculado"
+            active={status === "sem_fornecedor"}
+            onSelect={() => pick("sem_fornecedor")}
+          />
+          <StatTile
+            label="Fornecedor a definir"
+            value={integer(s.fornecedorIndefinido ?? 0)}
+            foot="Vários com prazo, sem principal"
+            active={status === "fornecedor_indefinido"}
+            onSelect={() => pick("fornecedor_indefinido")}
+          />
+          <StatTile
+            label="Sem prazo de entrega"
             value={integer(s.semPrazo)}
             active={status === "sem_prazo"}
             onSelect={() => pick("sem_prazo")}
@@ -805,7 +700,7 @@ export function ReplenishmentPanel({
           />
         </div>
       )}
-      <ParamsSection companyId={companyId} />
+      <PolicySection companyId={companyId} />
       {q.data && <CoverageVsLeadTime rows={q.data.rows} />}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
@@ -869,7 +764,7 @@ export function ReplenishmentPanel({
                   {viewCost && <TableHead className="text-right">Custo estimado</TableHead>}
                   <TableHead className="text-right">Disp. + pendente</TableHead>
                   <TableHead className="text-right">Demanda/dia</TableHead>
-                  <TableHead className="text-right">Prazo</TableHead>
+                  <TableHead>Fornecedor e prazo</TableHead>
                   <TableHead className="text-right">Ponto de reposição</TableHead>
                   <TableHead className="text-right">Cobertura</TableHead>
                   <TableHead>Risco e explicação</TableHead>
@@ -921,8 +816,31 @@ export function ReplenishmentPanel({
                         ? "—"
                         : quantity(Math.round(r.dailyDemand * 100) / 100)}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {r.leadTimeDays ? `${r.leadTimeDays} d` : "—"}
+                    <TableCell className="min-w-44 whitespace-normal text-xs">
+                      {r.supplier ? (
+                        <>
+                          <span className="font-medium">{r.supplier.name}</span>
+                          {r.supplier.leadTimeDays ? (
+                            <span className="block tabular-nums">
+                              {r.supplier.leadTimeDays} dias corridos
+                              {r.supplier.leadTimeSource === "fornecedor" ? " (padrão)" : ""}
+                            </span>
+                          ) : (
+                            <span className="block text-muted-foreground">sem prazo</span>
+                          )}
+                          {r.supplier.leadTimeStatus === "teste" && (
+                            <Badge variant="outline" className="mt-1">
+                              Simulação
+                            </Badge>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          {r.status === "fornecedor_indefinido"
+                            ? `${r.suppliers?.length ?? 0} fornecedores`
+                            : "—"}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.reorderPoint === undefined ? "—" : quantity(Math.round(r.reorderPoint))}

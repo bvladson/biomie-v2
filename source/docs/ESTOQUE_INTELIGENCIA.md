@@ -1,6 +1,6 @@
 # BIOMIE Intelligence — Inteligência do Estoque (fases 1 a 5)
 
-Documento técnico do motor analítico do Estoque, das telas e da operação. Situação em 26/10/2026:
+Documento técnico do motor analítico do Estoque, das telas e da operação. Situação em 27/10/2026:
 desenvolvido e testado; **nada em produção**. A ativação segue as etapas aprovadas pelo revisor
 (A código com tudo desligado → B motor manual só para o Super admin → C telas para usuários piloto →
 D execução diária), cada uma com autorização própria.
@@ -122,12 +122,53 @@ custo vêm marcados `requiresCost` — o banco remove os dois para quem não vê
 - Limitação: não há histórico diário de saldo por produto, então semana sem venda pode ter sido falta
   de estoque; produto hoje sem saldo recebe o aviso de demanda possivelmente reprimida.
 
-## 7. Reposição Inteligente (fase 5, `replenishment.py`)
+## 7. Fornecedores e prazos de entrega (migração 0048; decisão do usuário de 26/10/2026)
 
-Só com **prazo de reposição informado** (produto > família > empresa; tela "Prazos de reposição", perfis
-que classificam curvas, justificativa obrigatória, auditoria com valores anteriores e novos) e
-**previsão aprovada no teste**. Com `d` = demanda diária prevista, `σd` = desvio semanal ÷ √7, `L` =
-prazo, `R` = revisão, `z` = nível de serviço (80% → 0,84 … 90% → 1,28 … 99% → 2,33):
+- **Fornecedores e vínculos** vêm do Omie, só leitura: `estoque/produtofornecedor/ListarProdutoFornecedor`
+  ("Produto x Fornecedor"), 10 cadastros por página (máximo documentado), pelo worker uma vez por dia
+  quando `stock_settings.suppliers_enabled` está ligado (desligado por padrão) ou pela tela (Compras/Super
+  admin, uma a cada 30 min). Campos usados: `nCodForn` (= `codigo_cliente_omie`), `cRazaoSocial`,
+  `cNomeFantasia`, `produtos[].nCodProd` e `produtos[].cCodigo` (código do produto como o fornecedor usa).
+  `cCpfCnpj` não é lido. A API documentada **não traz prazo de entrega**.
+- **Sem duplicar cadastro**: o fornecedor é o cadastro que o BIOMIE já importa do Omie
+  (`public.customers`, mesmo código); `private.stock_suppliers` guarda só o código, o vínculo com esse
+  cadastro e o nome que a API devolveu (usado só enquanto o cadastro não chega).
+- **Importação**: fila `private.stock_supplier_jobs` (uma aberta por empresa), páginas idempotentes, total
+  que muda no meio recomeça, nova tentativa nunca antes de 2 min (o Omie recusa a mesma consulta repetida
+  em menos de 1 min), credencial recusada encerra. No fim, vínculo que o Omie não trouxe deixa de ser do
+  Omie (o manual fica); importação vazia com vínculos anteriores não apaga nada; prazos e fornecedor
+  principal nunca são apagados pela importação.
+- **Prazo de entrega** (`private.stock_lead_times`): por empresa, fornecedor e produto, ou o padrão do
+  fornecedor na empresa (o do produto prevalece); dias corridos (1 a 365); lote mínimo opcional;
+  observação obrigatória (10 a 300). Informado pela tela "Estoque › Fornecedores e prazos" ou pela ficha do
+  produto, só por **Compras** (permissão extra `stock.purchasing` no Admin 2.0) e pelo **Super admin**.
+  Ninguém precisa alterar o banco para informar um prazo.
+- **Vários fornecedores**: Compras indica o fornecedor principal (`private.stock_preferred_suppliers`) e
+  pode vincular ao produto um fornecedor do cadastro que o Omie não vinculou (vínculo manual, removível; o
+  do Omie só muda no Omie).
+- **Histórico e Auditoria**: toda alteração (prazo, principal, vínculo, política) grava
+  `private.stock_supplier_changes` (usuário, data, valor anterior, valor novo, observação) e o mesmo evento
+  na Auditoria (`stock.lead_time.changed`, `stock.preferred_supplier.changed`,
+  `stock.supplier_link.changed`, `stock.replenishment_policy.changed`), com fornecedor e produto pelo nome.
+- **Prazo de teste**: status `teste` só existe na homologação (roteiro `ops/47_hml_replenishment_seed.py`)
+  e só é lido pelo motor com o ajuste `private.app_settings['stock.test_lead_times'] = 'on'`, que a produção
+  não tem. Sai rotulado: "Prazo configurado na simulação: N dias. O prazo deve ser confirmado por Compras
+  antes de servir de base a recomendações reais." A cópia de homologação é refeita da produção (o dado
+  só vai da produção para a cópia), e Compras ao salvar transforma o prazo em `confirmado`.
+- **Prazo realizado (futuro)**: o prazo médio por histórico precisa de pedidos de compra (data do pedido)
+  e recebimentos (data da entrada) ligados ao fornecedor; hoje o BIOMIE lê só as movimentações de estoque
+  (entrada sem o pedido). Prazo prometido (Compras) e prazo realizado (histórico) ficarão separados.
+
+## 8. Reposição Inteligente (fase 5, `replenishment.py`)
+
+**Fornecedor da reposição**: o principal; senão o único vinculado; senão o único com prazo. Vários com
+prazo e nenhum principal = "fornecedor a definir". Sem fornecedor, sem prazo confiável ou com fornecedor a
+definir: **a quantidade de reposição fica indisponível** e a tela diz por quê. Ciclo de revisão, nível de
+serviço e cobertura máxima vêm da **política de reposição da empresa** (`private.stock_replenishment_policy`,
+de Compras e do Super admin, com histórico e Auditoria) ou dos padrões do BIOMIE (30 dias, 90%, sem
+cobertura máxima), sempre identificados. Exige também **previsão aprovada no teste**. Com `d` = demanda
+diária prevista, `σd` = desvio semanal ÷ √7, `L` = prazo de entrega, `R` = revisão, `z` = nível de serviço
+(80% → 0,84 … 90% → 1,28 … 99% → 2,33):
 
 - estoque de segurança `ES = z · σd · √L`; ponto de reposição `PR = d · L + ES` (no mínimo o mínimo do
   Omie); posição `P = disponível + pendente de recebimento`; alvo `A = PR + d · R` (limitado à cobertura
@@ -137,7 +178,7 @@ prazo, `R` = revisão, `z` = nível de serviço (80% → 0,84 … 90% → 1,28 �
 - custo estimado só com custo conhecido e não provisório; risco de não comprar = dias de cobertura
   contra o prazo e falta estimada até a próxima entrega.
 
-## 8. Oportunidades entre empresas (fase 5)
+## 9. Oportunidades entre empresas (fase 5)
 
 Mesma SKU (critério do "vendido no grupo" das curvas) com sobra numa empresa (excesso, possível
 obsolescência, sem venda na janela ou baixo giro; sobra = disponível − demanda prevista dela em 90
@@ -146,7 +187,7 @@ necessidade = demanda de 90 dias − posição). Quantidade = menor das duas. S�
 empresas, só para quem acessa as duas empresas, e sempre com o aviso: movimentação entre CNPJs pode
 exigir nota fiscal e processos fiscais e operacionais específicos; o BIOMIE não executa transferências.
 
-## 9. Simulador de liquidação (melhorias)
+## 10. Simulador de liquidação (melhorias)
 
 O cálculo original (saída = piso(qtd × %), redução = saída × CMC, receita = saída × preço × (1 −
 desconto)) não muda. Acréscimos: descontos prontos de 5 a 30% e personalizado; base do preço explícita
@@ -156,7 +197,7 @@ concedido, receita na venda integral e produtos abaixo da margem. Avisos: receit
 garantida; o desconto não muda a quantidade vendida (sem histórico que sustente esse efeito); impostos,
 frete e comissões não incluídos; nenhuma simulação altera preço no Omie.
 
-## 10. Parâmetros (`stock_internal.intel_params`, sobrescritos por `private.intel_settings.params`)
+## 11. Parâmetros (`stock_internal.intel_params`, sobrescritos por `private.intel_settings.params`)
 
 | Chave | Padrão | Uso |
 |---|---|---|
@@ -175,56 +216,74 @@ frete e comissões não incluídos; nenhuma simulação altera preço no Omie.
 | returnsAttentionPct | 10 | D13 |
 | alertsKeptDays | 180 | histórico de alertas |
 
-## 11. Banco (migrações aditivas)
+## 12. Banco (migrações aditivas)
 
 | Migração | Conteúdo |
 |---|---|
 | 0044 | `intel_settings`, `intel_runs`, `intel_product_metrics`, `intel_current`, `stock_snapshots`, `stock_curve_history`; funções do motor e de leitura |
 | 0045 | máscara de custo nos sinais, prioridade e lista |
 | 0047 | `intel_alerts`; extração com os campos da fase 3; máscara dos itens; lista com diagnóstico/ação/alertas/previsão e filtros (recomendação, com alerta, família); detalhe com alertas e movimentações por dia |
-| 0048 | `intel_replenishment_params`, `intel_opportunities`; planejamento e oportunidades para o motor; listas de reposição e oportunidades; base de preço e matriz (só com custo) |
+| 0048 | fornecedores e prazos: permissão `stock.purchasing`; `stock_suppliers`, `stock_product_suppliers`, `stock_supplier_jobs`, `stock_lead_times`, `stock_preferred_suppliers`, `stock_supplier_changes`; importação pelo worker; telas e filtros por fornecedor no painel, nas posições e nas opções (painel, posições e opções da 0043 copiados com o filtro; retorno em `deploy/db/rollback/0048_stock_suppliers.down.sql`) |
+| 0049 | `stock_replenishment_policy`, `intel_opportunities`; entrada do motor por empresa (vínculos, prazos confirmados, principal, política); reposição com fornecedor e filtro; Radar (painel da 0045) e lista (0047) com filtro por fornecedor; oportunidades; base de preço e matriz (só com custo) |
 
-Nenhuma migração altera saldos, notas, movimentações, curvas ou funções das curvas.
+Nenhuma migração altera saldos, notas, movimentações, curvas ou funções das curvas. A importação de
+fornecedores só lê o Omie.
 
-## 12. Permissões
+## 13. Permissões
 
 `stock.view` (ver a inteligência), `stock.view_cost` (capital, custo, faturamento, margem, Pareto,
-matriz, custo estimado, base de preço), `stock.classify` (ciência de alertas e prazos de reposição),
-`stock.export` (CSV no servidor). O menu do Estoque segue o modo do módulo (off/pilot/on); a aba
+matriz, custo estimado, base de preço), `stock.classify` (ciência de alertas), `stock.export` (CSV no
+servidor), `stock.purchasing` (Compras: fornecedores, prazos de entrega, vínculos manuais, fornecedor
+principal, política de reposição e importação pela tela; o Super admin tem tudo isso pelo papel). Quem vê
+o Estoque consulta fornecedores e prazos; histórico com nomes e busca no cadastro inteiro só para Compras e
+Super admin. O menu do Estoque segue o modo do módulo (off/pilot/on); a aba
 Inteligência aparece quando o motor está ligado, quando há análise publicada ou para o Super admin.
 
-## 13. Operação
+## 14. Operação
 
 - Produção (só com autorização da etapa): `python ops/remote.py ops/42_intel.py status|run [--force]|enable|disable`.
-- Homologação: `python ops/noturno.py intel <release>` (suítes, up, prazo hipotético só na cópia,
-  motor, conferência, navegador, down) ou os passos avulsos `41_homolog.py up|intel-run`,
+- Homologação: `python ops/noturno.py intel-fornecedores <release>` (suítes, cópia nova, up,
+  fornecedores do Omie na cópia, prazo de teste só na cópia, motor, conferência, navegador, down) ou os
+  passos avulsos `41_homolog.py up|suppliers-load|intel-run`,
   `43_intel_check.py biomie_v2_hml`, `29_smoke.py --stock --stock-mode on --curves-readonly --intel --hml`.
 - Monitoramento: `private.intel_runs` (status, segundos, estatísticas por empresa: estados, alertas,
   previsões, reposição) e as linhas JSON do motor (`intel_company`, `intel_published`, `intel_failed`).
 - Desligar: `42_intel.py disable` (a tela fica com a última análise e avisa que não se atualiza).
+- Fornecedores na produção (só com autorização): `40_stock.py suppliers on|off` (importação diária) e
+  `40_stock.py suppliers-status`.
 
-## 14. Testes
+## 15. Testes
 
-- Motor: 59 testes (`intelligence/tests`), inclusive vazamento temporal, reprodutibilidade, séries
-  esparsas, previsão não confiável, prioridade, reposição e oportunidades.
-- Banco: `verify_stock_intel.sql`, `verify_stock_intel_insights.sql`, `verify_stock_intel_commercial.sql`
-  (máscara de custo, ciclo dos alertas, ciência e auditoria, parâmetros, oportunidades por acesso às
-  duas empresas, dados oficiais intocados), mais as suítes das curvas e de segurança.
+- Motor: 60 testes (`intelligence/tests`), inclusive vazamento temporal, reprodutibilidade, séries
+  esparsas, previsão não confiável, prioridade, escolha do fornecedor, prazo do produto × padrão, prazo de
+  teste rotulado, política da empresa, reposição e oportunidades.
+- Banco: `verify_stock_suppliers.sql` (importação, Compras/Super admin, Admin sem a permissão e vendedor só
+  leem, validações, histórico e Auditoria antes/depois, prazo de teste só com o ajuste, filtros numa
+  empresa), `verify_stock_intel.sql`, `verify_stock_intel_insights.sql`, `verify_stock_intel_commercial.sql`
+  (política, entrada do motor, reposição por fornecedor, Radar e lista filtrados, oportunidades por acesso
+  às duas empresas, dados oficiais intocados), mais as suítes das curvas e de segurança.
+- Worker: `stock-suppliers.test.ts` (só ListarProdutoFornecedor, 10 por página, sem CPF/CNPJ, orçamento
+  de tempo, chave ocupada, bloqueio de 30 min, nova tentativa ≥ 2 min, credencial sem vazar).
 - Telas: testes de `intel.ts`, `intel-insights.ts`, `intel-search.ts`, `simulation.ts`; teste de
   navegador (`ops/browser/stock-smoke.cjs`) com as abas novas e o vendedor sem custo.
 
-## 15. Retorno
+## 16. Retorno
 
 - Etapa A (código com tudo desligado): reativar a release anterior. O executor ignora as migrações
   mais novas; as tabelas `intel_*` ficam sem uso; nada oficial muda.
 - Motor: `42_intel.py disable`. Telas: o modo do Estoque (`40_stock.py mode off|pilot`).
-- Parâmetros de reposição e alertas são dados da inteligência: podem ser removidos pela própria tela
-  (com auditoria) ou ficar sem uso.
+- Fornecedores: `40_stock.py suppliers off` para a importação; a release anterior ignora as tabelas; o
+  retorno da 0048 (`deploy/db/rollback/0048_stock_suppliers.down.sql`, `psql -1`) volta painel, posições,
+  opções e agenda do worker às da 0043 e mantém as tabelas com o que Compras já informou.
+- Prazos, política e alertas são dados da inteligência: podem ser removidos pela própria tela (com
+  histórico e Auditoria) ou ficar sem uso.
 
-## 16. Limitações conhecidas
+## 17. Limitações conhecidas
 
 - Sem histórico diário de saldo por produto (falta de estoque não identificada nas semanas sem venda).
 - Vendas no BIOMIE desde 01/01/2026: sazonalidade não avaliável; algumas janelas de 12 meses são parciais.
-- Prazo de reposição, lote mínimo e restrições de fornecimento não existem no Omie lido pelo BIOMIE:
-  dependem de cadastro na tela. Fornecedor do produto também não está disponível (sem filtro).
+- Prazo de entrega e lote mínimo não existem na API do Omie: dependem de Compras na tela. Produto sem
+  vínculo em "Produto x Fornecedor" fica sem fornecedor até Compras vincular.
+- O código do fornecedor é de cada conta do Omie: o filtro por fornecedor vale para uma empresa por vez.
+- No Radar filtrado por fornecedor, a evolução diária não aparece (as fotos diárias são por empresa).
 - Equivalência entre empresas pela SKU: produtos diferentes com a mesma SKU apareceriam como iguais.

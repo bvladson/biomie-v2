@@ -26,7 +26,9 @@ begin
         'stock_worker_refresh_curves','stock_worker_curve_failed','stock_worker_movements_claim',
         'stock_worker_movements_save_page','stock_worker_movements_finish','stock_worker_movements_fail',
         'stock_intel_begin','stock_intel_extract','stock_intel_publish','stock_intel_finish','stock_intel_fail',
-        'stock_intel_planning','stock_intel_publish_opportunities');
+        'stock_intel_planning','stock_intel_publish_opportunities',
+        'stock_worker_suppliers_enqueue','stock_worker_suppliers_claim','stock_worker_suppliers_save_page',
+        'stock_worker_suppliers_finish','stock_worker_suppliers_fail');
   if bad is not null then raise exception 'authenticated can execute server-only: %', bad; end if;
 
   select string_agg(x, ', ') into bad from unnest(array['fact_sales','sales_kpis','cockpit_summary',

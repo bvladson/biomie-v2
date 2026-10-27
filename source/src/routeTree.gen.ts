@@ -33,6 +33,7 @@ import { Route as AuthenticatedShellAdminEmpresasRouteImport } from './routes/_a
 import { Route as AuthenticatedShellClientesIndexRouteImport } from './routes/_authenticated/_shell/clientes.index'
 import { Route as AuthenticatedShellClientesCustomerIdRouteImport } from './routes/_authenticated/_shell/clientes.$customerId'
 import { Route as AuthenticatedShellEstoqueIndexRouteImport } from './routes/_authenticated/_shell/estoque.index'
+import { Route as AuthenticatedShellEstoqueFornecedoresRouteImport } from './routes/_authenticated/_shell/estoque.fornecedores'
 import { Route as AuthenticatedShellEstoqueInteligenciaRouteImport } from './routes/_authenticated/_shell/estoque.inteligencia'
 import { Route as AuthenticatedShellEstoquePosicoesRouteImport } from './routes/_authenticated/_shell/estoque.posicoes'
 import { Route as AuthenticatedShellEstoqueSimulacaoRouteImport } from './routes/_authenticated/_shell/estoque.simulacao'
@@ -181,6 +182,12 @@ const AuthenticatedShellEstoqueIndexRoute =
     path: '/',
     getParentRoute: () => AuthenticatedShellEstoqueRoute,
   } as any)
+const AuthenticatedShellEstoqueFornecedoresRoute =
+  AuthenticatedShellEstoqueFornecedoresRouteImport.update({
+    id: '/fornecedores',
+    path: '/fornecedores',
+    getParentRoute: () => AuthenticatedShellEstoqueRoute,
+  } as any)
 const AuthenticatedShellEstoqueInteligenciaRoute =
   AuthenticatedShellEstoqueInteligenciaRouteImport.update({
     id: '/inteligencia',
@@ -275,6 +282,7 @@ export interface FileRoutesByFullPath {
   '/admin/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
   '/admin/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
+  '/estoque/fornecedores': typeof AuthenticatedShellEstoqueFornecedoresRoute
   '/estoque/inteligencia': typeof AuthenticatedShellEstoqueInteligenciaRoute
   '/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
   '/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
@@ -310,6 +318,7 @@ export interface FileRoutesByTo {
   '/admin/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
   '/admin/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
+  '/estoque/fornecedores': typeof AuthenticatedShellEstoqueFornecedoresRoute
   '/estoque/inteligencia': typeof AuthenticatedShellEstoqueInteligenciaRoute
   '/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
   '/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
@@ -349,6 +358,7 @@ export interface FileRoutesById {
   '/_authenticated/_shell/admin_/auditoria': typeof AuthenticatedShellAdminAuditoriaRoute
   '/_authenticated/_shell/admin_/empresas': typeof AuthenticatedShellAdminEmpresasRoute
   '/_authenticated/_shell/clientes/$customerId': typeof AuthenticatedShellClientesCustomerIdRoute
+  '/_authenticated/_shell/estoque/fornecedores': typeof AuthenticatedShellEstoqueFornecedoresRoute
   '/_authenticated/_shell/estoque/inteligencia': typeof AuthenticatedShellEstoqueInteligenciaRoute
   '/_authenticated/_shell/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
   '/_authenticated/_shell/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
@@ -387,6 +397,7 @@ export interface FileRouteTypes {
     | '/admin/auditoria'
     | '/admin/empresas'
     | '/clientes/$customerId'
+    | '/estoque/fornecedores'
     | '/estoque/inteligencia'
     | '/estoque/posicoes'
     | '/estoque/simulacao'
@@ -422,6 +433,7 @@ export interface FileRouteTypes {
     | '/admin/auditoria'
     | '/admin/empresas'
     | '/clientes/$customerId'
+    | '/estoque/fornecedores'
     | '/estoque/inteligencia'
     | '/estoque/posicoes'
     | '/estoque/simulacao'
@@ -460,6 +472,7 @@ export interface FileRouteTypes {
     | '/_authenticated/_shell/admin_/auditoria'
     | '/_authenticated/_shell/admin_/empresas'
     | '/_authenticated/_shell/clientes/$customerId'
+    | '/_authenticated/_shell/estoque/fornecedores'
     | '/_authenticated/_shell/estoque/inteligencia'
     | '/_authenticated/_shell/estoque/posicoes'
     | '/_authenticated/_shell/estoque/simulacao'
@@ -656,6 +669,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedShellEstoqueIndexRouteImport
       parentRoute: typeof AuthenticatedShellEstoqueRoute
     }
+    '/_authenticated/_shell/estoque/fornecedores': {
+      id: '/_authenticated/_shell/estoque/fornecedores'
+      path: '/fornecedores'
+      fullPath: '/estoque/fornecedores'
+      preLoaderRoute: typeof AuthenticatedShellEstoqueFornecedoresRouteImport
+      parentRoute: typeof AuthenticatedShellEstoqueRoute
+    }
     '/_authenticated/_shell/estoque/inteligencia': {
       id: '/_authenticated/_shell/estoque/inteligencia'
       path: '/inteligencia'
@@ -744,6 +764,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedShellEstoqueRouteChildren {
+  AuthenticatedShellEstoqueFornecedoresRoute: typeof AuthenticatedShellEstoqueFornecedoresRoute
   AuthenticatedShellEstoqueInteligenciaRoute: typeof AuthenticatedShellEstoqueInteligenciaRoute
   AuthenticatedShellEstoquePosicoesRoute: typeof AuthenticatedShellEstoquePosicoesRoute
   AuthenticatedShellEstoqueSimulacaoRoute: typeof AuthenticatedShellEstoqueSimulacaoRoute
@@ -752,6 +773,8 @@ interface AuthenticatedShellEstoqueRouteChildren {
 
 const AuthenticatedShellEstoqueRouteChildren: AuthenticatedShellEstoqueRouteChildren =
   {
+    AuthenticatedShellEstoqueFornecedoresRoute:
+      AuthenticatedShellEstoqueFornecedoresRoute,
     AuthenticatedShellEstoqueInteligenciaRoute:
       AuthenticatedShellEstoqueInteligenciaRoute,
     AuthenticatedShellEstoquePosicoesRoute:

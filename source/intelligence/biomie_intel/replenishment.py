@@ -1,20 +1,27 @@
 """Reposição Inteligente e oportunidades entre empresas (fase 5). Tudo consultivo: o BIOMIE não cria
 pedido de compra, não transfere estoque e não altera nada no Omie.
 
-Reposição (por produto e empresa), só quando há prazo de reposição informado por um usuário autorizado
-(produto > família > empresa) e previsão de demanda aprovada no teste histórico (fase 4):
+Fornecedor e prazo (migração 0048): cada produto tem os fornecedores vinculados no Omie (Produto x
+Fornecedor) ou por Compras, e cada fornecedor um prazo de entrega em dias corridos, do produto ou o padrão
+dele na empresa (o do produto prevalece). O fornecedor da reposição é o principal (definido por Compras);
+senão o único vinculado; senão o único com prazo. Vários com prazo e nenhum principal = "fornecedor a
+definir". Sem fornecedor, sem prazo confiável ou com fornecedor a definir: nenhuma quantidade (a tela diz
+por quê). Prazo de teste só existe na homologação e sai rotulado como simulação.
+
+Reposição (por produto e empresa), com o prazo do fornecedor escolhido e a previsão de demanda aprovada no
+teste histórico (fase 4):
   d   = demanda diária prevista (modelo escolhido no teste)
   σd  = desvio semanal da demanda ÷ √7
-  L   = prazo de reposição (dias); R = ciclo de revisão (dias); z = nível de serviço (0,80 → 0,84 …
-        0,90 → 1,28 … 0,99 → 2,33)
+  L   = prazo de entrega (dias corridos); R = ciclo de revisão (dias); z = nível de serviço (0,80 → 0,84 …
+        0,90 → 1,28 … 0,99 → 2,33); R, z e a cobertura máxima vêm da política de reposição da empresa
+        (Compras) ou dos padrões do BIOMIE (30 dias, 90%, sem cobertura máxima), sempre identificados
   estoque de segurança  ES  = z × σd × √L
   ponto de reposição    PR  = d × L + ES (no mínimo o estoque mínimo do Omie, quando houver)
   posição               P   = disponível + pendente de recebimento
   alvo                  A   = PR + d × R (limitado a d × cobertura máxima, quando informada, sem ficar
                               abaixo de PR)
-  P ≤ PR → comprar A − P, arredondado para cima ao lote mínimo (quando informado);
+  P ≤ PR → comprar A − P, arredondado para cima ao lote mínimo do fornecedor (quando informado);
   P > A  → não comprar agora; entre PR e A → sem compra neste ciclo.
-Sem prazo, sem previsão confiável ou sem demanda: nenhuma quantidade (e a tela diz por quê).
 
 Oportunidades entre empresas: mesma SKU (o critério do "vendido no grupo" da curva) com sobra numa
 empresa (excesso, possível obsolescência, sem venda na janela ou baixo giro; sobra = disponível −
@@ -37,33 +44,106 @@ TRANSFER_NOTE = ("Movimentação entre CNPJs pode exigir nota fiscal e processos
                  "específicos. O BIOMIE não executa transferências.")
 
 
-def resolve_params(rows: list[dict[str, Any]], company_id: str, omie: str, family: str | None) -> dict[str, Any] | None:
-    """Parâmetro mais específico: produto > família > empresa."""
-    mine = [r for r in rows if r.get("companyId") == company_id]
-    for scope, key in (("produto", omie), ("familia", family or None), ("empresa", "")):
-        if key is None:
-            continue
-        for r in mine:
-            if r.get("scope") == scope and (r.get("key") or "") == key:
-                return r
-    return None
+DEFAULT_POLICY = {"reviewDays": 30, "serviceLevel": 0.90, "maxCoverageDays": None}
+TEST_NOTE = ("Prazo configurado na simulação: {days} dias. O prazo deve ser confirmado por Compras antes de "
+             "servir de base a recomendações reais.")
+MAX_ALTERNATIVES = 10
 
 
-def plan(m: dict[str, Any], state: str, params_row: dict[str, Any] | None) -> dict[str, Any]:
+def index_planning(planning: dict[str, Any] | None) -> dict[str, Any]:
+    """Entrada de uma empresa (stock_intel_planning) em mapas por produto e fornecedor."""
+    p = planning or {}
+    links: dict[str, list[str]] = {}
+    for omie, supplier in p.get("links") or []:
+        links.setdefault(str(omie), []).append(str(supplier))
+    lead = {(str(t["supplierId"]), str(t.get("omie") or "")): t for t in p.get("leadTimes") or []}
+    return {"links": links, "lead": lead,
+            "preferred": {str(k): str(v) for k, v in (p.get("preferred") or {}).items()},
+            "names": {str(k): v for k, v in (p.get("suppliers") or {}).items()},
+            "policy": p.get("policy") or None}
+
+
+def supplier_option(idx: dict[str, Any], supplier: str, omie: str) -> dict[str, Any]:
+    own = idx["lead"].get((supplier, omie))
+    row = own or idx["lead"].get((supplier, ""))
+    return {"id": supplier, "name": idx["names"].get(supplier) or f"Fornecedor {supplier}",
+            "leadTimeDays": int(row["days"]) if row else None,
+            "leadTimeSource": ("produto" if own else "fornecedor") if row else None,
+            "leadTimeStatus": row.get("status") if row else None,
+            "minLot": float(row["minLot"]) if row and row.get("minLot") is not None else None}
+
+
+def resolve_supply(idx: dict[str, Any], omie: str) -> dict[str, Any]:
+    """Fornecedor da reposição: principal > único vinculado > único com prazo; senão diz o que falta."""
+    linked = sorted(set(idx["links"].get(omie, [])))
+    if not linked:
+        return {"status": "sem_fornecedor", "suppliers": [], "notes": []}
+    options = sorted((supplier_option(idx, s, omie) for s in linked),
+                     key=lambda o: (o["leadTimeDays"] is None, o["name"], o["id"]))
+    alternatives = options[:MAX_ALTERNATIVES]
+    notes: list[str] = []
+    preferred = idx["preferred"].get(omie)
+    chosen, choice = None, None
+    if preferred in linked:
+        chosen, choice = next(o for o in options if o["id"] == preferred), "principal"
+    else:
+        if preferred:
+            notes.append("O fornecedor principal definido por Compras não está mais vinculado ao produto.")
+        with_lead = [o for o in options if o["leadTimeDays"]]
+        if len(options) == 1:
+            chosen, choice = options[0], "unico"
+        elif len(with_lead) == 1:
+            chosen, choice = with_lead[0], "unico_com_prazo"
+        elif with_lead:
+            return {"status": "fornecedor_indefinido", "suppliers": alternatives, "notes": notes}
+        else:
+            return {"status": "sem_prazo", "suppliers": alternatives, "notes": notes}
+    supplier = {**chosen, "choice": choice}
+    if not chosen["leadTimeDays"]:
+        return {"status": "sem_prazo", "supplier": supplier, "suppliers": alternatives, "notes": notes}
+    return {"status": "ok", "supplier": supplier, "suppliers": alternatives, "notes": notes}
+
+
+def plan(m: dict[str, Any], state: str, supply: dict[str, Any] | None,
+         policy: dict[str, Any] | None = None) -> dict[str, Any]:
     f = m.get("forecast") or {}
     stock, cost = m["stock"], m["cost"]
     available = float(stock["available"] or 0)
     pending = float(stock["pending"] or 0)
-    if params_row is None or not params_row.get("leadTimeDays"):
-        return {"status": "sem_prazo",
-                "message": "Prazo de reposição não informado: defina-o para calcular a sugestão de compra."}
-    lead = int(params_row["leadTimeDays"])
-    review = int(params_row.get("reviewDays") or 30)
-    level = float(params_row.get("serviceLevel") or 0.90)
+    supply = supply or {"status": "sem_fornecedor", "suppliers": [], "notes": []}
+    pol = {**DEFAULT_POLICY, **{k: v for k, v in (policy or {}).items() if v is not None}}
+    review = int(pol["reviewDays"])
+    level = float(pol["serviceLevel"])
+    max_cov = pol.get("maxCoverageDays")
+    info: dict[str, Any] = {"suppliers": supply.get("suppliers") or [], "reviewDays": review, "serviceLevel": level,
+                            "maxCoverageDays": max_cov, "policySource": "compras" if policy else "padrao"}
+    if supply.get("notes"):
+        info["notes"] = supply["notes"]
+    if supply["status"] == "sem_fornecedor":
+        return {**info, "status": "sem_fornecedor",
+                "message": ("Nenhum fornecedor vinculado a este produto (no Omie ou pelo BIOMIE): a quantidade de "
+                            "reposição está indisponível.")}
+    if supply["status"] == "fornecedor_indefinido":
+        listed = "; ".join(f"{o['name']}: {num(o['leadTimeDays'])} dias" for o in info["suppliers"] if o["leadTimeDays"])
+        return {**info, "status": "fornecedor_indefinido",
+                "message": (f"Mais de um fornecedor com prazo informado ({listed}): Compras precisa indicar o "
+                            "fornecedor principal. Até lá, a quantidade de reposição está indisponível.")}
+    if supply["status"] == "sem_prazo":
+        chosen = supply.get("supplier")
+        who = f" do fornecedor {chosen['name']}" if chosen else " dos fornecedores vinculados"
+        out = {**info, "status": "sem_prazo",
+               "message": (f"Sem prazo de entrega confiável{who}: a quantidade de reposição está indisponível. "
+                           "Compras informa o prazo em Estoque › Fornecedores e prazos.")}
+        if chosen:
+            out["supplier"] = chosen
+        return out
+    s = supply["supplier"]
+    lead = int(s["leadTimeDays"])
+    lot = s.get("minLot")
+    test = s.get("leadTimeStatus") == "teste"
     z = Z_SCORES.get(round(level, 2), 1.28)
-    common: dict[str, Any] = {"leadTimeDays": lead, "reviewDays": review, "serviceLevel": level,
-                              "paramsSource": params_row.get("scope"), "minLot": params_row.get("minLot"),
-                              "maxCoverageDays": params_row.get("maxCoverageDays")}
+    common: dict[str, Any] = {**info, "supplier": s, "leadTimeDays": lead, "leadTimeSource": s.get("leadTimeSource"),
+                              "leadTimeStatus": s.get("leadTimeStatus"), "minLot": lot}
     if f.get("status") != "ok":
         return {**common, "status": "sem_previsao",
                 "message": "Sem previsão de demanda confiável: sugestão de compra suspensa."}
@@ -78,20 +158,27 @@ def plan(m: dict[str, Any], state: str, params_row: dict[str, Any] | None) -> di
     reorder = max(reorder, min_qty)
     position = available + pending
     target = reorder + daily * review
-    max_cov = params_row.get("maxCoverageDays")
     if max_cov:
         target = max(reorder, min(target, daily * float(max_cov)))
     coverage = position / daily if position > 0 else 0.0
     limitations = []
+    if test:
+        limitations.append(TEST_NOTE.format(days=num(lead)))
+    limitations.extend(supply.get("notes") or [])
     quality = (f.get("backtest") or {}).get("quality")
     if quality == "fraca":
         wape = (f.get("backtest") or {}).get("wape")
         limitations.append(f"Previsão de qualidade fraca no teste histórico (erro de {num((wape or 0) * 100)}% do vendido).")
-    if not params_row.get("minLot"):
-        limitations.append("Lote mínimo de compra não informado.")
-    limitations.append("Restrições de fornecimento e preço de compra não estão no BIOMIE.")
+    if not lot:
+        limitations.append("Lote mínimo de compra do fornecedor não informado.")
+    if not policy:
+        limitations.append("Ciclo de revisão e nível de serviço padrão do BIOMIE (30 dias, 90%): Compras pode "
+                           "ajustar a política de reposição da empresa.")
+    limitations.append("Preço de compra e restrições do fornecedor não estão no BIOMIE.")
+    lead_label = "Prazo configurado na simulação" if test else "Prazo de entrega"
+    origin = "do produto" if s.get("leadTimeSource") == "produto" else "padrão do fornecedor"
     evidence = [ev("forecast.dailyRate", "Demanda prevista", round(daily, 3), "un./dia"),
-                ev("leadTimeDays", "Prazo de reposição", lead, "dias"),
+                ev("leadTimeDays", f"{lead_label} ({s['name']}, {origin})", lead, "dias corridos"),
                 ev("safetyStock", "Estoque de segurança", round(safety, 1), "un."),
                 ev("reorderPoint", "Ponto de reposição", round(reorder, 1), "un."),
                 ev("position", "Disponível + pendente", round(position, 3), "un."),
@@ -100,16 +187,18 @@ def plan(m: dict[str, Any], state: str, params_row: dict[str, Any] | None) -> di
             "reorderFromOmieMin": reorder_from_min, "position": round(position, 3), "target": round(target, 2),
             "coverageDays": round(coverage, 1), "model": f.get("model"), "forecastQuality": quality,
             "evidence": evidence, "limitations": limitations}
-    explanation = (f"Demanda prevista de {num(daily, 2)} un./dia; prazo de reposição de {num(lead)} dias; estoque de "
+    lead_text = (f"prazo configurado na simulação de {num(lead)} dias" if test
+                 else f"prazo de entrega de {num(lead)} dias corridos")
+    explanation = (f"Demanda prevista de {num(daily, 2)} un./dia; {lead_text} ({s['name']}); estoque de "
                    f"segurança de {num(safety)} un. (nível de serviço {num(level * 100)}%); ponto de reposição de "
                    f"{num(reorder)} un.; disponível + pendente = {num(position)} un.")
     if position <= reorder:
         need = max(target - position, 0.0)
-        lot = float(params_row.get("minLot") or 0)
-        qty = math.ceil(need / lot) * lot if lot > 0 else math.ceil(need)
+        step = float(lot or 0)
+        qty = math.ceil(need / step) * step if step > 0 else math.ceil(need)
         if coverage < lead:
             shortage = daily * (lead - coverage)
-            risk = (f"Sem comprar agora, o saldo cobre cerca de {num(coverage)} dias, menos que o prazo de reposição "
+            risk = (f"Sem comprar agora, o saldo cobre cerca de {num(coverage)} dias, menos que o prazo de entrega "
                     f"de {num(lead)} dias: falta estimada de {num(shortage)} un. até a próxima entrega.")
         else:
             risk = (f"O saldo cobre cerca de {num(coverage)} dias e já está no ponto de reposição: "
@@ -129,8 +218,11 @@ def plan(m: dict[str, Any], state: str, params_row: dict[str, Any] | None) -> di
 def buy_recommendation(r: dict[str, Any]) -> dict[str, Any] | None:
     if r.get("status") != "comprar":
         return None
-    return {"rule": "R08", "type": "comprar", "action": f"Comprar {num(r['qty'])} un. (sugestão para revisão)",
-            "why": r["risk"], "evidence": r["evidence"], "limitations": r["limitations"]}
+    who = r["supplier"]["name"]
+    action = (f"Simulação: comprar {num(r['qty'])} un. de {who} (prazo de teste, não confirmado por Compras)"
+              if r.get("leadTimeStatus") == "teste" else f"Comprar {num(r['qty'])} un. de {who} (sugestão para revisão)")
+    return {"rule": "R08", "type": "comprar", "action": action, "why": r["risk"], "evidence": r["evidence"],
+            "limitations": r["limitations"]}
 
 
 # --------------------------------------------------------------------------- entre empresas

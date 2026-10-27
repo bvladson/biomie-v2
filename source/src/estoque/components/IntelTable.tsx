@@ -35,6 +35,7 @@ import type {
 } from "../api/intel-contract";
 import { intelApi } from "../api/intel";
 import { stockApi } from "../api";
+import { useStockCompany } from "../lib/hooks";
 import { downloadCsv, errorMessage, money, quantity } from "../lib/format";
 import { shortDate } from "../lib/curves";
 import {
@@ -134,7 +135,9 @@ export function IntelTable({
     queryFn: () => stockApi.filterOptions(companyId),
     retry: false,
   });
-  const query = toQuery(companyId, filters);
+  // Fornecedor escolhido no topo do Estoque (uma empresa), como o radar e a reposição.
+  const { supplier } = useStockCompany();
+  const query = { ...toQuery(companyId, filters), supplier };
   const q = useQuery({
     queryKey: ["stock", "intel", "products", query],
     queryFn: () => intelApi.products(query),

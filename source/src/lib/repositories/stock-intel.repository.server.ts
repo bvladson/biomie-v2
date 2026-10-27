@@ -20,8 +20,6 @@ import type {
   Opportunity,
   OpportunityQuery,
   PriceBasisRow,
-  ReplenishmentParam,
-  ReplenishmentParamInput,
   ReplenishmentQuery,
   ReplenishmentRow,
   ReplenishmentSummary,
@@ -45,10 +43,16 @@ async function call<T>(db: Db, name: string, args?: Record<string, unknown>): Pr
 
 export const status = (db: Db) => call<IntelStatus>(db, "stock_intel_status");
 
-export const overview = (db: Db, companyId: CompanyFilter, window?: CurveWindow) =>
+export const overview = (
+  db: Db,
+  companyId: CompanyFilter,
+  window?: CurveWindow,
+  supplier?: string,
+) =>
   call<IntelOverview>(db, "stock_intel_overview", {
     p_company: companyId,
     p_window: window ?? null,
+    p_supplier: supplier ?? null,
   });
 
 export const products = (db: Db, query: IntelQuery) =>
@@ -83,22 +87,6 @@ export const replenishment = (db: Db, query: ReplenishmentQuery) =>
     "stock_intel_replenishment",
     { p_query: query },
   );
-
-export const replenishmentParams = (db: Db, companyId: CompanyFilter) =>
-  call<{ canEdit: boolean; serviceLevels: number[]; rows: ReplenishmentParam[] }>(
-    db,
-    "stock_intel_replenishment_params",
-    { p_company: companyId },
-  );
-
-export const setReplenishment = (db: Db, input: ReplenishmentParamInput) =>
-  call<{ saved?: boolean; removed?: boolean }>(db, "stock_intel_set_replenishment", {
-    p_company: input.companyId,
-    p_scope: input.scope,
-    p_key: input.key,
-    p_values: input.values,
-    p_reason: input.reason,
-  });
 
 export const opportunities = (db: Db, query: OpportunityQuery) =>
   call<{ rows: Opportunity[]; total: number; note: string }>(db, "stock_intel_opportunities", {

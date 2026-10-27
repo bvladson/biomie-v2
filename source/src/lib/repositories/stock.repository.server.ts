@@ -15,6 +15,7 @@ import type {
   SimulationItem,
   StockApiError,
   StockCapabilities,
+  StockFilterOptions,
   StockOverview,
   StockPosition,
 } from "@/estoque/api/contract";
@@ -53,18 +54,23 @@ const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
 
 export const capabilities = (db: Db) => call<StockCapabilities>(db, "stock_capabilities");
 
-export const overview = (db: Db, companyId: CompanyFilter, window?: CurveWindow) =>
-  call<StockOverview>(db, "stock_overview", { p_company: companyId, p_window: window ?? null });
+export const overview = (
+  db: Db,
+  companyId: CompanyFilter,
+  window?: CurveWindow,
+  supplier?: string,
+) =>
+  call<StockOverview>(db, "stock_overview", {
+    p_company: companyId,
+    p_window: window ?? null,
+    p_supplier: supplier ?? null,
+  });
 
 export const positions = (db: Db, query: PositionQuery) =>
   call<{ rows: StockPosition[]; total: number }>(db, "stock_positions", { p_query: query });
 
 export const filterOptions = (db: Db, companyId: CompanyFilter) =>
-  call<{ locations: { code: string; name: string | null }[]; families: string[] }>(
-    db,
-    "stock_filter_options",
-    { p_company: companyId },
-  );
+  call<StockFilterOptions>(db, "stock_filter_options", { p_company: companyId });
 
 export const setCurve = (
   db: Db,

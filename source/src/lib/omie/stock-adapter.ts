@@ -270,3 +270,54 @@ export function toMovementRow(m: Record<string, unknown>): MovementRow | null {
     document: text(m["numDoc"])?.slice(0, 20) ?? null,
   };
 }
+
+// ------------------------------------------------------------------------- fornecedores (0048)
+
+/**
+ * estoque/produtofornecedor:ListarProdutoFornecedor ("Produto x Fornecedor"). Campos conferidos na
+ * referência oficial em 26/10/2026: pagina, registros_por_pagina (máximo 10), apenas_importado_api; na
+ * resposta, cadastros[] com nCodForn (= codigo_cliente_omie do cadastro de clientes/fornecedores),
+ * cRazaoSocial, cNomeFantasia, cCpfCnpj (NÃO é lido) e produtos[] com nCodProd e cCodigo (código do
+ * produto como o fornecedor usa). A API não traz prazo de entrega: o prazo é informado no BIOMIE.
+ */
+export const SUPPLIERS_PATH = "estoque/produtofornecedor/";
+export const SUPPLIERS_CALL = "ListarProdutoFornecedor";
+export const SUPPLIERS_LIST_KEYS = ["cadastros"];
+export const SUPPLIERS_PAGE_SIZE = 10;
+export const MAX_SUPPLIER_PAGES = 2000;
+
+export interface SupplierRow {
+  supplier_id: string;
+  name: string | null;
+  trade_name: string | null;
+  products: { omie: string; code: string | null }[];
+}
+
+const OMIE_CODE = /^[1-9]\d{0,19}$/;
+
+export function suppliersPageParams(page: number): Record<string, unknown> {
+  if (!Number.isInteger(page) || page < 1 || page > MAX_SUPPLIER_PAGES)
+    throw new StockRecordError("Lista de fornecedores do Omie grande demais.");
+  return { pagina: page, registros_por_pagina: SUPPLIERS_PAGE_SIZE, apenas_importado_api: "N" };
+}
+
+/** Um cadastro da lista; sem código válido, null. Produtos sem código válido ficam de fora. */
+export function toSupplierRow(c: Record<string, unknown>): SupplierRow | null {
+  const id = text(c["nCodForn"]);
+  if (!id || !OMIE_CODE.test(id)) return null;
+  const list = Array.isArray(c["produtos"]) ? (c["produtos"] as unknown[]) : [];
+  const products: SupplierRow["products"] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const p = item as Record<string, unknown>;
+    const omie = text(p["nCodProd"]);
+    if (omie && OMIE_CODE.test(omie))
+      products.push({ omie, code: text(p["cCodigo"])?.slice(0, 60) ?? null });
+  }
+  return {
+    supplier_id: id,
+    name: text(c["cRazaoSocial"])?.slice(0, 120) ?? null,
+    trade_name: text(c["cNomeFantasia"])?.slice(0, 120) ?? null,
+    products,
+  };
+}
