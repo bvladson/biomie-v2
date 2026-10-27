@@ -53,8 +53,8 @@ SALES_KPIS_RELEASE = 'fe85acab7ae6'
 INTEL_RELEASE = '885ff74576cd'
 # Fornecedores e prazos (0048/0049) e o trem de integração; a tarefa do Agendador usa estes valores, então
 # trocar a release aqui (commit) muda o que roda à noite sem registrar a tarefa de novo.
-SUPPLIERS_RELEASE = 'bf130eec0648'
-TRAIN_RELEASE = 'b5bc1c60303e'
+SUPPLIERS_RELEASE = '2bd5c7c701c4'
+TRAIN_RELEASE = '266d297add0b'
 # Release em produção (retorno do trem): sobe sobre o banco já migrado e precisa funcionar.
 PRODUCTION_RELEASE = '1240466bf0c3'
 
