@@ -251,6 +251,19 @@ def main():
     down = (rel / 'deploy/db/rollback/0046_sales_kpis_fast.down.sql').read_text(encoding='utf-8')
     started = time.time()
     report = {'db': DB, 'release': short, 'minutes': minutes, 'parallel': 0}
+    # A referência tem de ser o sales_kpis que está na produção: se a cópia já recebeu a 0046 (ex.: o trem
+    # subiu antes), a comparação seria do rápido com ele mesmo. Confere o texto da função nos dois bancos.
+    md5 = f'select md5(pg_get_functiondef({SIG}));'
+    prod = subprocess.run(COMPOSE + ['exec', '-T', 'db', 'psql', '-X', '-U', 'postgres', '-d', 'biomie_v2', '-At',
+                                     '-c', 'begin read only; ' + md5 + ' commit;'],
+                          capture_output=True, text=True, timeout=120).stdout.split()
+    copy = psql(md5).split()
+    pick = lambda tokens: next((t for t in tokens if len(t) == 32), None)  # noqa: E731
+    report['referenceIsProduction'] = pick(prod) is not None and pick(prod) == pick(copy)
+    if not report['referenceIsProduction']:
+        report['skipped'] = 'o sales_kpis da cópia não é o da produção (a cópia já tem outra versão): refaça a cópia'
+        print(json.dumps(report, indent=1, ensure_ascii=False))
+        return
     try:
         report['compare'] = last_json(psql(build_main(mig, down, minutes)))
     except RuntimeError as exc:
