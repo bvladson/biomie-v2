@@ -24,8 +24,9 @@ IDX = index_planning(PLANNING)
 
 
 def metrics(available=10, pending=5, min_qty=0, unit_cost=50.0, known=True, suspect=False, status="ok",
-            daily=2.0, weekly_std=7.0, quality="regular"):
+            daily=2.0, weekly_std=7.0, quality="regular", curve=None):
     return {"stock": {"available": available, "pending": pending, "minQty": min_qty, "qty": available},
+            "curve": {"current": curve},
             "cost": {"unitCost": unit_cost if known else None, "known": known, "suspect": suspect},
             "forecast": {"status": status, "dailyRate": daily, "weeklyStd": weekly_std, "model": "sba",
                          "backtest": {"quality": quality, "wape": 0.4}}}
@@ -58,7 +59,9 @@ def test_without_supplier_lead_time_or_forecast_there_is_no_quantity():
     for omie, status in (("99", "sem_fornecedor"), ("8", "fornecedor_indefinido"), ("9", "sem_prazo")):
         r = plan(metrics(), "risco_ruptura", resolve_supply(IDX, omie))
         assert r["status"] == status and "qty" not in r and "indisponível" in r["message"]
-    assert "Alfa: 30 dias" in plan(metrics(), "saudavel", resolve_supply(IDX, "8"))["message"]
+    message = plan(metrics(), "saudavel", resolve_supply(IDX, "8"))["message"]
+    assert "2 fornecedores com prazo informado (de 30 a 45 dias)" in message and "Alfa" not in message
+    assert "do fornecedor principal" in plan(metrics(), "saudavel", resolve_supply(IDX, "13"))["message"]
     r = plan(metrics(status="insuficiente"), "saudavel", supply())
     assert r["status"] == "sem_previsao" and "qty" not in r
     assert plan(metrics(daily=0.0), "saudavel", supply())["status"] == "sem_demanda"
@@ -75,14 +78,20 @@ def test_buy_quantity_safety_stock_and_risk():
     assert r["qty"] == math.ceil(target - 15) and r["costEstimate"] == round(r["qty"] * 50.0, 2)
     assert r["coverageDays"] == 7.5 and "menos que o prazo de entrega de 14 dias" in r["risk"]
     assert any("Lote mínimo" in x for x in r["limitations"]) and any("padrão do BIOMIE" in x for x in r["limitations"])
-    assert "Comprar" in buy_recommendation(r)["action"] and "Alfa" in buy_recommendation(r)["action"]
+    assert buy_recommendation(r)["action"] == f"Comprar {r['qty']} un. (sugestão para revisão)"
+    # O nome do fornecedor só no campo estruturado (o banco o tira para o Comercial), nunca nos textos.
+    texts = " ".join([r["explanation"], r["risk"], *r["limitations"], *(e["label"] for e in r["evidence"])])
+    assert r["supplier"]["name"] == "Alfa" and "Alfa" not in texts
 
 
 def test_company_policy_lot_omie_minimum_and_maximum_coverage():
-    policy = {"reviewDays": 15, "serviceLevel": 0.95, "maxCoverageDays": None}
+    policy = {"reviewDays": 15, "serviceLevels": {"A": 0.99, "B": 0.95, "C": 0.90, "D": 0.80, "U": 0.95},
+              "maxCoverageDays": None}
     r = plan(metrics(), "saudavel", supply(), policy)
     assert r["policySource"] == "compras" and r["reviewDays"] == 15 and r["serviceLevel"] == 0.95
+    assert r["serviceLevelCurve"] == "U"
     assert r["safetyStock"] == round(1.64 * (7.0 / math.sqrt(7)) * math.sqrt(14), 2)
+    assert plan(metrics(curve="A"), "saudavel", supply(), policy)["serviceLevel"] == 0.99
     lot = plan(metrics(), "saudavel", supply(lot=10))
     assert lot["qty"] % 10 == 0 and lot["qty"] >= 86
     high_min = plan(metrics(min_qty=60), "saudavel", supply())
@@ -91,6 +100,18 @@ def test_company_policy_lot_omie_minimum_and_maximum_coverage():
     assert capped["target"] == 50.0  # 25 dias × 2 un./dia, abaixo do alvo sem limite
     floor = plan(metrics(), "saudavel", supply(), {"maxCoverageDays": 15})
     assert floor["target"] == floor["reorderPoint"]  # 15 × 2 = 30 < ponto de reposição: fica no ponto
+
+
+def test_service_level_follows_the_curve_with_biomie_defaults():
+    expected = {"A": 0.95, "B": 0.90, "C": 0.85, "D": 0.80, None: 0.90}
+    z = {0.95: 1.64, 0.90: 1.28, 0.85: 1.04, 0.80: 0.84}
+    for curve, level in expected.items():
+        r = plan(metrics(curve=curve), "saudavel", supply())
+        assert r["serviceLevel"] == level and r["serviceLevelCurve"] == (curve or "U") and r["policySource"] == "padrao"
+        assert r["safetyStock"] == round(z[level] * (7.0 / math.sqrt(7)) * math.sqrt(14), 2)
+    r = plan(metrics(curve="C"), "risco_ruptura", supply())
+    assert "nível de serviço 85%, curva C" in r["explanation"]
+    assert any(e["key"] == "serviceLevel" and e["label"] == "Nível de serviço (curva C)" for e in r["evidence"])
 
 
 def test_test_lead_time_is_labelled_as_simulation():

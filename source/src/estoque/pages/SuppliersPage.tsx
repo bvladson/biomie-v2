@@ -606,8 +606,9 @@ export function SuppliersPage() {
       </PageTitle>
       <Notice>
         Quem altera: Compras (permissão "Estoque: fornecedores e prazos") e o Super admin, sempre
-        com observação; tudo fica no histórico e na Auditoria. Os demais perfis consultam. Prazo em
-        dias corridos; o do produto prevalece sobre o padrão do fornecedor.
+        com observação; tudo fica no histórico e na Auditoria. Quem consulta: perfis que veem custo
+        e Compras (o Comercial vê previsões e reposições, sem fornecedores). Prazo em dias corridos;
+        o do produto prevalece sobre o padrão do fornecedor.
       </Notice>
       {(q.error || !data) && (
         <Status loading={q.isPending} error={q.error} retry={() => q.refetch()} />

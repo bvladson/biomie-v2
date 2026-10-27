@@ -117,7 +117,7 @@ export const setPolicy = (
     companyId: string;
     values: {
       reviewDays: number;
-      serviceLevel: number;
+      serviceLevels: Record<"A" | "B" | "C" | "D" | "U", number>;
       maxCoverageDays?: number | null | undefined;
     } | null;
     note: string;

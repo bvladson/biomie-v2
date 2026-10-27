@@ -5,11 +5,16 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
     python ops/noturno.py matriz [release] [rodadas]   # teste controlado da correção da MAG Matriz
     python ops/noturno.py sales-kpis [release]         # sales_kpis: diagnóstico, testes do banco e comparação
     python ops/noturno.py intel [release]              # Inteligência (fases 1–5) na homologação
-    python ops/noturno.py intel-fornecedores <release> # idem, com fornecedores e prazos (0048/0049)
+    python ops/noturno.py intel-fornecedores [release] # idem, com fornecedores e prazos (0048/0049)
     python ops/noturno.py banco <release>              # só as suítes do banco da release (22), com a trava
+    python ops/noturno.py trem [release]               # versão combinada: suítes, cópia nova, subida,
+                                                       # fornecedores, motor, conferências, comparação
+                                                       # com a produção, navegador e RETORNO (a release da
+                                                       # produção sobe sobre o mesmo banco e é testada)
 
-Uma tarefa por vez: cada uma espera a anterior terminar (trava em ops/logs/noturno/.trava, solta
-sozinha quando o processo acaba, mesmo se cair).
+Uma tarefa por vez e NA ORDEM em que começaram a esperar (fila de senhas em ops/logs/noturno/fila;
+trava em ops/logs/noturno/.trava, solta sozinha quando o processo acaba, mesmo se cair). As tarefas que
+mudam a cópia de banco começam com uma cópia nova da produção, então uma não depende da outra.
 
 sales-kpis: 45 (diagnóstico do sales_kpis atual na cópia) → 22 (suítes do banco da release, num banco de
 teste descartável) → 46 (atual × rápido nos dados reais da cópia, numa transação desfeita, mais o índice
@@ -46,23 +51,55 @@ LOGS = BASE / 'ops' / 'logs'
 SALES_KPIS_RELEASE = 'fe85acab7ae6'
 # Inteligência do Estoque fases 1–5 (branch feature/estoque-inteligencia, commit 885ff74).
 INTEL_RELEASE = '885ff74576cd'
+# Fornecedores e prazos (0048/0049) e o trem de integração; a tarefa do Agendador usa estes valores, então
+# trocar a release aqui (commit) muda o que roda à noite sem registrar a tarefa de novo.
+SUPPLIERS_RELEASE = 'bf130eec0648'
+TRAIN_RELEASE = 'b5bc1c60303e'
+# Release em produção (retorno do trem): sobe sobre o banco já migrado e precisa funcionar.
+PRODUCTION_RELEASE = '1240466bf0c3'
 
 
-def night_lock(hours=5):
-    """Trava exclusiva entre as tarefas noturnas (o sistema solta quando o processo termina)."""
+def _held(path):
+    """Senha de quem ainda está vivo: o dono mantém o arquivo travado; senha órfã (processo caiu) sai."""
+    try:
+        with open(path, 'a+') as h:
+            h.seek(0)
+            msvcrt.locking(h.fileno(), msvcrt.LK_NBLCK, 1)
+            msvcrt.locking(h.fileno(), msvcrt.LK_UNLCK, 1)
+        path.unlink(missing_ok=True)
+        return False
+    except OSError:
+        return True
+
+
+def night_lock(hours=6):
+    """Trava exclusiva entre as tarefas noturnas, por ordem de chegada (o sistema solta quando o processo
+    termina). Cada tarefa tira uma senha e só entra quando é a mais antiga ainda viva."""
+    queue = LOGS / 'noturno' / 'fila'
+    queue.mkdir(parents=True, exist_ok=True)
+    ticket_path = queue / f'{time.time():017.6f}-{os.getpid()}.senha'
+    ticket = open(ticket_path, 'a+')
+    ticket.seek(0)
+    msvcrt.locking(ticket.fileno(), msvcrt.LK_NBLCK, 1)
     path = LOGS / 'noturno' / '.trava'
-    path.parent.mkdir(parents=True, exist_ok=True)
     handle = open(path, 'a+')
     deadline = time.time() + hours * 3600
     while True:
-        try:
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            return handle
-        except OSError:
-            if time.time() > deadline:
-                raise SystemExit('outra tarefa noturna ainda está rodando; desisti depois de esperar')
-            time.sleep(30)
+        first = next((t for t in sorted(queue.glob('*.senha')) if t == ticket_path or _held(t)), None)
+        if first == ticket_path:
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                ticket.seek(0)
+                msvcrt.locking(ticket.fileno(), msvcrt.LK_UNLCK, 1)
+                ticket.close()
+                ticket_path.unlink(missing_ok=True)
+                return handle
+            except OSError:
+                pass
+        if time.time() > deadline:
+            raise SystemExit('outra tarefa noturna ainda está rodando; desisti depois de esperar')
+        time.sleep(30)
 
 
 def remote(args, name, outdir, timeout=5 * 3600):
@@ -162,12 +199,11 @@ def intel(release, suppliers=False):
                                        if not v.get('ok')}}
     if not (tests or {}).get('all_ok'):
         return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
-    if suppliers:
-        remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
-        rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
-        summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
-        if not refresh:
-            return done('a cópia nova da produção falhou')
+    remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
+    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
+    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+    if not refresh:
+        return done('a cópia nova da produção falhou')
     rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
     summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
     if not up:
@@ -215,6 +251,86 @@ def intel(release, suppliers=False):
     return done()
 
 
+def smoke(args, name, out):
+    started = dt.datetime.now().isoformat(timespec='seconds')
+    p = subprocess.run([sys.executable, str(BASE / 'ops' / '29_smoke.py')] + args + WAIT,
+                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=4 * 3600,
+                       env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+    (out / f'{name}.txt').write_text(f'# {started} rc={p.returncode}\n{p.stdout}\n--stderr--\n{p.stderr}',
+                                     encoding='utf-8')
+    try:
+        data = json.loads(p.stdout[p.stdout.find('{'):p.stdout.rfind('}') + 1])
+    except ValueError:
+        data = None
+    return {'rc': p.returncode, 'ok': (data or {}).get('ok'),
+            'failed': [{'name': s.get('name') or s.get('step'), 'error': s.get('error')}
+                       for s in (data or {}).get('steps', []) if not s.get('ok')],
+            'steps': len((data or {}).get('steps', [])), 'problems': (data or {}).get('problems'),
+            'error': None if data else p.stderr.strip()[-600:]}
+
+
+def trem(release):
+    """Versão combinada (Matriz + sales_kpis + Inteligência + fornecedores) na homologação, com a comparação
+    com a produção e o RETORNO: a release da produção sobe sobre o mesmo banco migrado e é testada."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-trem-{release}'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'release': release, 'production': PRODUCTION_RELEASE,
+               'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
+    summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
+                          'migrations': (tests or {}).get('migrations_applied'),
+                          'suites': {k: ('pulada' if v.get('skipped') else v.get('ok'))
+                                     for k, v in (tests or {}).get('suites', {}).items()},
+                          'failures': {k: v.get('error') for k, v in (tests or {}).get('suites', {}).items()
+                                       if not v.get('ok')},
+                          'rollbackScripts': (tests or {}).get('rollback_scripts')}
+    if not (tests or {}).get('all_ok'):
+        return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
+    remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
+    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
+    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+    if not refresh:
+        return done('a cópia nova da produção falhou')
+    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '03-subida-do-trem', out)
+    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
+    if not up:
+        return done('o trem não subiu')
+    rc, _, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '04-estoque-liberado-na-copia', out)
+    rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '30'] + WAIT, '05-fornecedores-do-omie', out)
+    summary['suppliersLoad'] = (
+        {k: load.get(k) for k in ('exit', 'skipped', 'conflicts', 'after')} if load else {'rc': rc, 'error': err})
+    rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '06-prazo-de-teste', out)
+    summary['testLeadTime'] = seed or {'rc': rc, 'error': err}
+    rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '07-motor', out)
+    summary['engine'] = {'exit': (engine or {}).get('exit'), 'runSeconds': (engine or {}).get('runSeconds'),
+                         'error': None if engine else err}
+    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '08-conferencia', out)
+    summary['check'] = {k: (check or {}).get(k) for k in ('allOk', 'phasesOk', 'phase5')} if check else {'rc': rc, 'error': err}
+    rc, cmp, err = remote(['ops/48_hml_vs_prod.py'] + WAIT, '09-copia-x-producao', out)
+    summary['vsProduction'] = cmp or {'rc': rc, 'error': err}
+    summary['browserRegression'] = smoke(['--hml'], '10-navegador-regressao', out)
+    summary['browserStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel', '--suppliers', '--hml',
+                                     '--shots', f'trem-{dt.date.today():%Y%m%d}'], '11-navegador-estoque', out)
+    # Retorno: a release da produção sobe sobre o banco com as migrações novas (o executor ignora as que não
+    # conhece) e as telas de hoje continuam funcionando.
+    rc, back, err = remote(['ops/41_homolog.py', 'up', PRODUCTION_RELEASE] + WAIT, '12-retorno-subida', out)
+    summary['rollbackUp'] = {k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if back else {'rc': rc, 'error': err}
+    if back:
+        summary['rollbackRegression'] = smoke(['--hml'], '13-retorno-navegador-regressao', out)
+        summary['rollbackStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
+                                         '14-retorno-navegador-estoque', out)
+    return done()
+
+
 def banco(release):
     """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-banco-{release}'
@@ -233,7 +349,7 @@ def banco(release):
 if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
-    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco') else None
+    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem') else None
     if task == 'intel':
         intel(sys.argv[2] if len(sys.argv) > 2 else INTEL_RELEASE)
     elif task == 'banco':
@@ -241,9 +357,9 @@ if __name__ == '__main__':
             raise SystemExit('uso: banco <release>')
         banco(sys.argv[2])
     elif task == 'intel-fornecedores':
-        if len(sys.argv) < 3:
-            raise SystemExit('uso: intel-fornecedores <release>')
-        intel(sys.argv[2], suppliers=True)
+        intel(sys.argv[2] if len(sys.argv) > 2 else SUPPLIERS_RELEASE, suppliers=True)
+    elif task == 'trem':
+        trem(sys.argv[2] if len(sys.argv) > 2 else TRAIN_RELEASE)
     elif task == 'matriz':
         release = sys.argv[2] if len(sys.argv) > 2 else 'ba4ee4b03c40'
         rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 3

@@ -9,9 +9,12 @@
 --   fica indisponível (nunca inventa prazo).
 -- - Prazo de teste (homologação) só chega ao motor com o ajuste stock.test_lead_times = on e sai rotulado
 --   ("prazo configurado na simulação"), com o aviso de que Compras precisa confirmar.
--- - Política de reposição por empresa (ciclo de revisão, nível de serviço, cobertura máxima), também de
---   Compras e do Super admin, com histórico e Auditoria; sem política, os padrões do BIOMIE (30 dias, 90%,
---   sem cobertura máxima), sempre mostrados como padrão.
+-- - Política de reposição por empresa (ciclo de revisão, nível de serviço POR CURVA A/B/C/D e para produto
+--   sem curva, cobertura máxima), também de Compras e do Super admin, com histórico e Auditoria; sem
+--   política, os padrões do BIOMIE (30 dias; A 95%, B 90%, C 85%, D 80%, sem curva 90%; sem cobertura
+--   máxima), sempre mostrados como padrão. Níveis por curva aprovados pelo usuário em 27/10/2026.
+-- - O Comercial (quem não vê custo nem é Compras) consulta previsões e reposições sem o fornecedor (nome,
+--   código e alternativas saem da reposição); a área de fornecedores e prazos é de quem vê custo ou Compras.
 -- - Filtro por fornecedor na Reposição, no Radar de Capital Parado (painel) e na lista da Inteligência
 --   (uma empresa por vez). No radar filtrado, a evolução diária some (as fotos são por empresa).
 -- - Oportunidades entre empresas e base de preço: como antes (só para quem acessa as duas empresas; valor a
@@ -23,7 +26,12 @@
 create table if not exists private.stock_replenishment_policy (
   company_id uuid primary key references public.companies(id) on delete cascade,
   review_days integer not null default 30 check (review_days between 1 and 180),
-  service_level numeric not null default 0.90 check (service_level in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99)),
+  -- nível de serviço por curva (A/B/C/D, a curva de 12 meses da análise) e para produto sem curva
+  service_level_a numeric not null default 0.95 check (service_level_a in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99)),
+  service_level_b numeric not null default 0.90 check (service_level_b in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99)),
+  service_level_c numeric not null default 0.85 check (service_level_c in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99)),
+  service_level_d numeric not null default 0.80 check (service_level_d in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99)),
+  service_level_u numeric not null default 0.90 check (service_level_u in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99)),
   max_coverage_days integer check (max_coverage_days is null or max_coverage_days between 7 and 730),
   note text not null check (char_length(note) between 10 and 300),
   updated_by uuid,
@@ -45,6 +53,24 @@ create table if not exists private.intel_opportunities (
 revoke all on private.stock_replenishment_policy, private.intel_opportunities
   from public, anon, authenticated, service_role;
 
+-- ===================================================================== apoio
+
+-- Níveis de serviço por curva de uma política (ou os padrões do BIOMIE com a política nula).
+create or replace function stock_internal.service_levels(p private.stock_replenishment_policy) returns jsonb
+language sql immutable set search_path = pg_catalog as $$
+  select case when p.company_id is null
+    then jsonb_build_object('A', 0.95, 'B', 0.90, 'C', 0.85, 'D', 0.80, 'U', 0.90)
+    else jsonb_build_object('A', p.service_level_a, 'B', p.service_level_b, 'C', p.service_level_c,
+                            'D', p.service_level_d, 'U', p.service_level_u) end
+$$;
+
+-- Níveis por curva em campos próprios (a Auditoria compara campo a campo).
+create or replace function stock_internal.levels_flat(p_levels jsonb) returns jsonb
+language sql immutable set search_path = pg_catalog as $$
+  select jsonb_build_object('serviceLevelA', p_levels->'A', 'serviceLevelB', p_levels->'B', 'serviceLevelC', p_levels->'C',
+                            'serviceLevelD', p_levels->'D', 'serviceLevelU', p_levels->'U')
+$$;
+
 -- ===================================================================== motor (service_role)
 
 -- O que a reposição de UMA empresa precisa: política, nomes dos fornecedores, vínculos, prazos
@@ -59,7 +85,7 @@ begin
     raise exception 'Empresa inválida para a execução.' using errcode = 'P0001';
   end if;
   return jsonb_build_object('runId', v_run.id, 'companyId', p_company, 'testLeadTimes', v_test,
-    'policy', (select jsonb_build_object('reviewDays', p.review_days, 'serviceLevel', p.service_level,
+    'policy', (select jsonb_build_object('reviewDays', p.review_days, 'serviceLevels', stock_internal.service_levels(p),
                  'maxCoverageDays', p.max_coverage_days)
                from private.stock_replenishment_policy p where p.company_id = p_company),
     'suppliers', coalesce((select jsonb_object_agg(s.supplier_id, stock_internal.supplier_display(s.company_id, s.supplier_id))
@@ -106,9 +132,10 @@ end $$;
 
 -- ===================================================================== máscara
 
--- 0047 + reposição sem o custo estimado para quem não vê custo.
+-- 0047 + reposição sem o custo estimado para quem não vê custo e sem o fornecedor para quem não consulta
+-- fornecedores (o Comercial): por isso lê as capacidades de quem pede (stable, não immutable).
 create or replace function stock_internal.intel_mask(p_metrics jsonb, p_cost boolean) returns jsonb
-language sql immutable set search_path = pg_catalog as $$
+language sql stable set search_path = pg_catalog as $$
   select case when p_cost then p_metrics else
     (p_metrics - array['capital', 'cost', 'avgPrice', 'marginEstPct', 'salePrice'])
     || jsonb_build_object(
@@ -121,7 +148,9 @@ language sql immutable set search_path = pg_catalog as $$
       'diagnoses', stock_internal.intel_mask_items(p_metrics->'diagnoses'),
       'recommendations', stock_internal.intel_mask_items(p_metrics->'recommendations'),
       'alerts', stock_internal.intel_mask_items(p_metrics->'alerts'),
-      'replenishment', coalesce(p_metrics->'replenishment', '{}'::jsonb) - 'costEstimate')
+      'replenishment', coalesce(p_metrics->'replenishment', '{}'::jsonb) - 'costEstimate'
+        - (case when coalesce((stock_internal.caps()->>'suppliers')::boolean, false) then '{}'::text[]
+                else array['supplier', 'suppliers', 'notes'] end))
   end
 $$;
 
@@ -137,11 +166,12 @@ declare
 begin
   return jsonb_build_object('canEdit', v_edit,
     'serviceLevels', jsonb_build_array(0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99),
-    'defaults', jsonb_build_object('reviewDays', 30, 'serviceLevel', 0.90, 'maxCoverageDays', null),
+    'defaults', jsonb_build_object('reviewDays', 30, 'serviceLevels', stock_internal.service_levels(null),
+                                   'maxCoverageDays', null),
     'testLeadTimesOn', stock_internal.test_lead_times_on(),
     'companies', coalesce((select jsonb_agg(jsonb_build_object('companyId', c.id, 'companyName', c.name,
         'policy', case when p.company_id is not null then jsonb_build_object('reviewDays', p.review_days,
-            'serviceLevel', p.service_level, 'maxCoverageDays', p.max_coverage_days, 'note', p.note,
+            'serviceLevels', stock_internal.service_levels(p), 'maxCoverageDays', p.max_coverage_days, 'note', p.note,
             'updatedAt', p.updated_at,
             'updatedBy', case when v_edit then (select coalesce(nullif(u.full_name, ''), 'Usuário') from public.profiles u
                                                 where u.id = p.updated_by) end) end,
@@ -164,12 +194,16 @@ declare
   v_note text := stock_internal.valid_note(p_note);
   v_before private.stock_replenishment_policy;
   v_before_json jsonb;
-  v_review integer; v_level numeric; v_max integer;
+  v_review integer; v_max integer;
+  v_levels jsonb := stock_internal.service_levels(null);
+  v_in jsonb;
+  v_k text;
 begin
   select * into v_before from private.stock_replenishment_policy p where p.company_id = v_company for update;
   if v_before.company_id is not null then
-    v_before_json := jsonb_build_object('reviewDays', v_before.review_days, 'serviceLevel', v_before.service_level,
-      'maxCoverageDays', v_before.max_coverage_days, 'note', v_before.note);
+    v_before_json := jsonb_build_object('reviewDays', v_before.review_days)
+      || stock_internal.levels_flat(stock_internal.service_levels(v_before))
+      || jsonb_build_object('maxCoverageDays', v_before.max_coverage_days, 'note', v_before.note);
   end if;
   if p_values is null or jsonb_typeof(p_values) = 'null' then
     if v_before.company_id is null then return jsonb_build_object('removed', false); end if;
@@ -177,27 +211,37 @@ begin
     perform stock_internal.supplier_change(v_company, null, '', 'politica', 'remove', v_before_json, null, v_note);
     return jsonb_build_object('removed', true);
   end if;
+  v_in := case when jsonb_typeof(p_values->'serviceLevels') = 'object' then p_values->'serviceLevels' else '{}'::jsonb end;
   begin
     v_review := coalesce(nullif(p_values->>'reviewDays', '')::integer, 30);
-    v_level := coalesce(nullif(p_values->>'serviceLevel', '')::numeric, 0.90);
     v_max := nullif(p_values->>'maxCoverageDays', '')::integer;
+    foreach v_k in array array['A', 'B', 'C', 'D', 'U'] loop
+      if nullif(v_in->>v_k, '') is not null then
+        v_levels := v_levels || jsonb_build_object(v_k, (v_in->>v_k)::numeric);
+      end if;
+    end loop;
   exception when others then
     raise exception 'Política de reposição inválida.' using errcode = 'P0001';
   end;
-  if v_review not between 1 and 180 or v_level not in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99)
-     or (v_max is not null and v_max not between 7 and 730) then
-    raise exception 'Revisão de 1 a 180 dias, nível de serviço da lista e cobertura máxima de 7 a 730 dias.'
+  if v_review not between 1 and 180 or (v_max is not null and v_max not between 7 and 730)
+     or exists (select 1 from jsonb_each_text(v_levels) e where e.value::numeric not in (0.80, 0.85, 0.90, 0.95, 0.97, 0.98, 0.99))
+     or exists (select 1 from jsonb_object_keys(v_in) k where k not in ('A', 'B', 'C', 'D', 'U')) then
+    raise exception 'Revisão de 1 a 180 dias, nível de serviço da lista para cada curva e cobertura máxima de 7 a 730 dias.'
       using errcode = 'P0001';
   end if;
-  insert into private.stock_replenishment_policy as t (company_id, review_days, service_level, max_coverage_days, note,
-    updated_by)
-  values (v_company, v_review, v_level, v_max, v_note, auth.uid())
-  on conflict (company_id) do update set review_days = excluded.review_days, service_level = excluded.service_level,
-    max_coverage_days = excluded.max_coverage_days, note = excluded.note, updated_by = excluded.updated_by,
-    updated_at = clock_timestamp();
+  insert into private.stock_replenishment_policy as t (company_id, review_days, service_level_a, service_level_b,
+    service_level_c, service_level_d, service_level_u, max_coverage_days, note, updated_by)
+  values (v_company, v_review, (v_levels->>'A')::numeric, (v_levels->>'B')::numeric, (v_levels->>'C')::numeric,
+    (v_levels->>'D')::numeric, (v_levels->>'U')::numeric, v_max, v_note, auth.uid())
+  on conflict (company_id) do update set review_days = excluded.review_days,
+    service_level_a = excluded.service_level_a, service_level_b = excluded.service_level_b,
+    service_level_c = excluded.service_level_c, service_level_d = excluded.service_level_d,
+    service_level_u = excluded.service_level_u, max_coverage_days = excluded.max_coverage_days, note = excluded.note,
+    updated_by = excluded.updated_by, updated_at = clock_timestamp();
   perform stock_internal.supplier_change(v_company, null, '', 'politica',
     case when v_before.company_id is null then 'create' else 'update' end, v_before_json,
-    jsonb_build_object('reviewDays', v_review, 'serviceLevel', v_level, 'maxCoverageDays', v_max, 'note', v_note), v_note);
+    jsonb_build_object('reviewDays', v_review) || stock_internal.levels_flat(v_levels)
+      || jsonb_build_object('maxCoverageDays', v_max, 'note', v_note), v_note);
   return jsonb_build_object('saved', true);
 end $$;
 
@@ -209,6 +253,7 @@ language plpgsql stable security definer set search_path = pg_catalog, public, p
 declare
   v_caps jsonb := stock_internal.require('view');
   v_cost boolean := (v_caps->>'viewCost')::boolean;
+  v_sup boolean := coalesce((v_caps->>'suppliers')::boolean, false);
   v_companies uuid[] := stock_internal.scope(p_query->>'companyId');
   v_supplier text := stock_internal.supplier_filter(v_companies, p_query->>'supplier');
   v_status text := coalesce(nullif(p_query->>'status', ''), 'comprar');
@@ -251,7 +296,8 @@ begin
       'companyId', o.company_id, 'companyName', o.company_name, 'omieProductId', o.omie_product_id, 'sku', o.sku,
       'name', o.name, 'family', o.family, 'curve', o.curve, 'state', o.state,
       'available', o.st->'available', 'pending', o.st->'pending')
-      || (case when v_cost then o.r else o.r - 'costEstimate' end) order by o.rn)
+      || ((case when v_cost then o.r else o.r - 'costEstimate' end)
+          - (case when v_sup then '{}'::text[] else array['supplier', 'suppliers', 'notes'] end)) order by o.rn)
       filter (where v_page = -1 or (o.rn > v_page * 50 and o.rn <= (v_page + 1) * 50)), '[]'::jsonb)
   into v_total, v_rows
   from o;
@@ -267,7 +313,7 @@ begin
     'semPrazo', count(*) filter (where x.metrics->'replenishment'->>'status' = 'sem_prazo'),
     'semPrevisao', count(*) filter (where x.metrics->'replenishment'->>'status' = 'sem_previsao'),
     'semDemanda', count(*) filter (where x.metrics->'replenishment'->>'status' = 'sem_demanda'),
-    'testLeadTime', count(*) filter (where x.metrics->'replenishment'->'supplier'->>'leadTimeStatus' = 'teste'),
+    'testLeadTime', count(*) filter (where x.metrics->'replenishment'->>'leadTimeStatus' = 'teste'),
     'costEstimate', case when v_cost then coalesce(sum((x.metrics->'replenishment'->>'costEstimate')::numeric)
                       filter (where x.metrics->'replenishment'->>'status' = 'comprar'), 0) end,
     'costEstimateMissing', count(*) filter (where x.metrics->'replenishment'->>'status' = 'comprar'
@@ -630,7 +676,8 @@ create or replace function public.stock_intel_overview(p_company text, p_window 
 returns jsonb language sql security invoker set search_path = pg_catalog, public as $$
   select stock_internal.intel_overview(p_company, p_window, p_supplier) $$;
 
-revoke all on function stock_internal.intel_planning(uuid, uuid),
+revoke all on function stock_internal.service_levels(private.stock_replenishment_policy),
+  stock_internal.levels_flat(jsonb), stock_internal.intel_planning(uuid, uuid),
   stock_internal.intel_publish_opportunities(uuid, integer, jsonb), stock_internal.replenishment_policy(text),
   stock_internal.replenishment_policy_set(text, jsonb, text), stock_internal.intel_replenishment(jsonb),
   stock_internal.intel_opportunities(jsonb), stock_internal.intel_price_basis(text), stock_internal.intel_matrix(text),

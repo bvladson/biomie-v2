@@ -163,10 +163,11 @@ custo vêm marcados `requiresCost` — o banco remove os dois para quem não vê
 
 **Fornecedor da reposição**: o principal; senão o único vinculado; senão o único com prazo. Vários com
 prazo e nenhum principal = "fornecedor a definir". Sem fornecedor, sem prazo confiável ou com fornecedor a
-definir: **a quantidade de reposição fica indisponível** e a tela diz por quê. Ciclo de revisão, nível de
-serviço e cobertura máxima vêm da **política de reposição da empresa** (`private.stock_replenishment_policy`,
-de Compras e do Super admin, com histórico e Auditoria) ou dos padrões do BIOMIE (30 dias, 90%, sem
-cobertura máxima), sempre identificados. Exige também **previsão aprovada no teste**. Com `d` = demanda
+definir: **a quantidade de reposição fica indisponível** e a tela diz por quê. Ciclo de revisão, **nível de
+serviço por curva** (A/B/C/D de 12 meses do produto e um nível para produto sem curva) e cobertura máxima vêm
+da **política de reposição da empresa** (`private.stock_replenishment_policy`, de Compras e do Super admin,
+com histórico e Auditoria) ou dos padrões do BIOMIE (30 dias; A 95%, B 90%, C 85%, D 80%, sem curva 90%; sem
+cobertura máxima), sempre identificados (ajuste aprovado em 27/10/2026). Exige também **previsão aprovada no teste**. Com `d` = demanda
 diária prevista, `σd` = desvio semanal ÷ √7, `L` = prazo de entrega, `R` = revisão, `z` = nível de serviço
 (80% → 0,84 … 90% → 1,28 … 99% → 2,33):
 
@@ -234,9 +235,12 @@ fornecedores só lê o Omie.
 `stock.view` (ver a inteligência), `stock.view_cost` (capital, custo, faturamento, margem, Pareto,
 matriz, custo estimado, base de preço), `stock.classify` (ciência de alertas), `stock.export` (CSV no
 servidor), `stock.purchasing` (Compras: fornecedores, prazos de entrega, vínculos manuais, fornecedor
-principal, política de reposição e importação pela tela; o Super admin tem tudo isso pelo papel). Quem vê
-o Estoque consulta fornecedores e prazos; histórico com nomes e busca no cadastro inteiro só para Compras e
-Super admin. O menu do Estoque segue o modo do módulo (off/pilot/on); a aba
+principal, política de reposição e importação pela tela; o Super admin tem tudo isso pelo papel).
+Consulta de fornecedores e prazos (capacidade `suppliers`): quem vê custo ou é Compras. O **Comercial**
+(Vendedor) consulta previsões e reposições sem fornecedor: sem a página Fornecedores e prazos, sem o filtro
+por fornecedor e sem nome, código ou alternativas de fornecedor na reposição (o banco tira esses campos; os
+textos do motor não citam o fornecedor). Histórico com nomes e busca no cadastro inteiro só para Compras e
+Super admin (ajuste de visibilidade comercial aprovado em 27/10/2026). O menu do Estoque segue o modo do módulo (off/pilot/on); a aba
 Inteligência aparece quando o motor está ligado, quando há análise publicada ou para o Super admin.
 
 ## 14. Operação
@@ -254,9 +258,10 @@ Inteligência aparece quando o motor está ligado, quando há análise publicada
 
 ## 15. Testes
 
-- Motor: 60 testes (`intelligence/tests`), inclusive vazamento temporal, reprodutibilidade, séries
+- Motor: 61 testes (`intelligence/tests`), inclusive vazamento temporal, reprodutibilidade, séries
   esparsas, previsão não confiável, prioridade, escolha do fornecedor, prazo do produto × padrão, prazo de
-  teste rotulado, política da empresa, reposição e oportunidades.
+  teste rotulado, nível de serviço por curva, textos sem nome de fornecedor, política da empresa, reposição e
+  oportunidades.
 - Banco: `verify_stock_suppliers.sql` (importação, Compras/Super admin, Admin sem a permissão e vendedor só
   leem, validações, histórico e Auditoria antes/depois, prazo de teste só com o ajuste, filtros numa
   empresa), `verify_stock_intel.sql`, `verify_stock_intel_insights.sql`, `verify_stock_intel_commercial.sql`

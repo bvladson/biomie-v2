@@ -6,7 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useGlobalFilters } from "@/hooks/use-filters";
 import { appContextQuery } from "@/lib/queries";
 import type { CompanyFilter, CurveWindow } from "../api/contract";
-import { StockContext, canOpenStock } from "../lib/hooks";
+import { StockContext, canOpenStock, useCapabilities } from "../lib/hooks";
 import { CURVE_WINDOWS, DEFAULT_WINDOW, WINDOW_LABELS, isCurveWindow } from "../lib/curves";
 import { intelApi } from "../api/intel";
 import { stockApi } from "../api";
@@ -143,6 +143,9 @@ function StockShell({
       setSupplier(undefined);
   }, [supplier, needsCompany, options.data, suppliers, setSupplier]);
   const supplierName = suppliers.find((s) => s.id === supplier)?.name;
+  // Comercial (sem custo e sem Compras): sem a área de fornecedores e sem o filtro por fornecedor.
+  const caps = useCapabilities();
+  const canSeeSuppliers = caps.data?.suppliers === true;
   return (
     <StockContext.Provider
       value={{
@@ -163,6 +166,7 @@ function StockShell({
           <nav aria-label="Estoque" className="flex flex-wrap gap-1">
             {navigation
               .filter((n) => n.to !== "/estoque/inteligencia" || showIntel)
+              .filter((n) => n.to !== "/estoque/fornecedores" || canSeeSuppliers)
               .map((n) => (
                 <Link
                   key={n.to}
@@ -202,13 +206,15 @@ function StockShell({
             Produtos); D = saldo positivo sem venda na janela.
           </p>
           <div className="flex flex-wrap items-end gap-4">
-            <SupplierPicker
-              options={suppliers}
-              value={supplierName ? supplier : undefined}
-              onChange={setSupplier}
-              needsCompany={needsCompany}
-              loading={options.isLoading}
-            />
+            {canSeeSuppliers && (
+              <SupplierPicker
+                options={suppliers}
+                value={supplierName ? supplier : undefined}
+                onChange={setSupplier}
+                needsCompany={needsCompany}
+                loading={options.isLoading}
+              />
+            )}
             <div className="min-w-0 space-y-1.5">
               <span className="block text-xs font-medium text-muted-foreground">
                 Janela da curva

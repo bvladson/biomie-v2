@@ -404,7 +404,9 @@ export interface IntelReplenishment {
   leadTimeStatus?: "confirmado" | "teste" | null;
   reviewDays?: number;
   serviceLevel?: number;
-  /** compras = política da empresa; padrao = padrões do BIOMIE (30 dias, 90%) */
+  /** curva que definiu o nível de serviço (U = sem curva) */
+  serviceLevelCurve?: "A" | "B" | "C" | "D" | "U";
+  /** compras = política da empresa; padrao = padrões do BIOMIE (30 dias; A 95%, B 90%, C 85%, D 80%) */
   policySource?: "compras" | "padrao";
   minLot?: number | null;
   maxCoverageDays?: number | null;
