@@ -7,6 +7,12 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
     python ops/noturno.py intel [release]              # Inteligência (fases 1–5) na homologação
     python ops/noturno.py intel-fornecedores [release] # idem, com fornecedores e prazos (0048/0049)
     python ops/noturno.py banco <release>              # só as suítes do banco da release (22), com a trava
+    python ops/noturno.py ativar <release> [--importar-fornecedores]
+                                                       # ATIVAÇÃO na produção (só com autorização do
+                                                       # usuário): confere a validação do dia, espera
+                                                       # minuto livre das cargas, ativa com cópia de
+                                                       # segurança verificada, roda o motor uma vez,
+                                                       # confere e testa no navegador
     python ops/noturno.py trem [release]               # versão combinada: suítes, cópia nova, subida,
                                                        # fornecedores, motor, conferências, comparação
                                                        # com a produção, navegador e RETORNO (a release da
@@ -242,12 +248,97 @@ def intel(release, suppliers=False):
     except ValueError:
         browser = None
     summary['browser'] = {'rc': p.returncode, 'ok': (browser or {}).get('ok'),
-                          'steps': [{'name': s.get('name'), 'ok': s.get('ok'), 'error': s.get('error')}
+                          'steps': [{'name': s.get('step') or s.get('name'), 'ok': s.get('ok'), 'error': s.get('error')}
                                     for s in (browser or {}).get('steps', [])],
                           'problems': (browser or {}).get('problems'),
                           'error': None if browser else p.stderr.strip()[-600:]}
+    if suppliers:
+        prod = production_release(out)
+        summary['rollbackRelease'] = prod
+        rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '07b-retorno-subida', out)
+        summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
+                                 if back else {'rc': rc, 'error': err})
+        if back:
+            summary['rollbackRegression'] = smoke(['--hml'], '07c-retorno-navegador-regressao', out)
+            summary['rollbackStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
+                                             '07d-retorno-navegador-estoque', out)
     rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
     summary['down'] = {'rc': rc}
+    return done()
+
+
+def production_release(out):
+    """Release ativa na produção agora (stack.env); se a leitura falhar, a constante PRODUCTION_RELEASE."""
+    rc, data, err = remote(['ops/49_release_ativa.py'], '00-release-da-producao', out)
+    return (data or {}).get('release') or PRODUCTION_RELEASE
+
+
+def validation_ok(release):
+    """A validação de fornecedores do dia para esta release passou inteira? Devolve (ok, motivos)."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-inteligencia-fornecedores'
+    try:
+        s = json.loads((out / 'resumo.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False, ['sem resumo da validação de hoje (ops/logs/noturno/<data>-inteligencia-fornecedores)']
+    why = []
+    if s.get('release') != release:
+        why.append(f"a validação de hoje foi da release {s.get('release')}")
+    if s.get('stopped'):
+        why.append('a validação parou: ' + s['stopped'])
+    if not (s.get('dbTests') or {}).get('allOk'):
+        why.append('suítes do banco')
+    if (s.get('engine') or {}).get('exit') != 0:
+        why.append('motor')
+    if not (s.get('check') or {}).get('allOk'):
+        why.append('conferência 43')
+    if not (s.get('browser') or {}).get('ok'):
+        why.append('navegador')
+    for key in ('rollbackRegression', 'rollbackStock'):
+        if not (s.get(key) or {}).get('ok'):
+            why.append('retorno: ' + key)
+    return not why, why
+
+
+def ativar(release, import_suppliers=False):
+    """Ativação na produção, só depois de a validação do dia passar inteira. Usa os scripts de sempre:
+    21_activate_release (cópia de segurança verificada antes das migrações, migrações, imagem, web e
+    worker), 42_intel (motor uma vez), 43 (conferência, só leitura) e o teste de navegador da produção."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-ativacao-{release}'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        summary['rollback'] = ('python ops/remote.py ops/21_activate_release.py '
+                               f"{summary.get('previous') or PRODUCTION_RELEASE} --start-worker")
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    ok, why = validation_ok(release)
+    summary['validation'] = {'ok': ok, 'problems': why}
+    if not ok:
+        return done('a validação do dia não passou inteira: ' + '; '.join(why))
+    summary['previous'] = production_release(out)
+    # Começa longe das cargas recorrentes do worker (:21/:51): minutos :00–:10 ou :30–:40.
+    while dt.datetime.now().minute % 30 > 10:
+        time.sleep(30)
+    rc, act, err = remote(['ops/21_activate_release.py', release, '--start-worker'], '01-ativacao', out,
+                          timeout=3 * 3600)
+    summary['activation'] = act or {'rc': rc, 'error': err}
+    if rc != 0:
+        return done('a ativação falhou: confira 01-ativacao.txt e, se preciso, rode o retorno')
+    summary['active'] = production_release(out)
+    rc, engine, err = remote(['ops/42_intel.py', 'run', '--force'], '02-motor', out, timeout=3600)
+    summary['engine'] = engine or {'rc': rc, 'error': err}
+    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2'] + WAIT, '03-conferencia', out)
+    summary['check'] = {k: (check or {}).get(k) for k in ('allOk', 'phasesOk', 'phase5')} if check else {'rc': rc, 'error': err}
+    if import_suppliers:
+        rc, imp, err = remote(['ops/40_stock.py', 'suppliers-import'] + WAIT, '04-importacao-unica-fornecedores', out)
+        summary['suppliersImport'] = imp or {'rc': rc, 'error': err}
+    summary['browser'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel', '--suppliers',
+                                '--shots', f'producao-{dt.date.today():%Y%m%d}'], '05-navegador-producao', out)
     return done()
 
 
@@ -322,7 +413,8 @@ def trem(release):
                                      '--shots', f'trem-{dt.date.today():%Y%m%d}'], '11-navegador-estoque', out)
     # Retorno: a release da produção sobe sobre o banco com as migrações novas (o executor ignora as que não
     # conhece) e as telas de hoje continuam funcionando.
-    rc, back, err = remote(['ops/41_homolog.py', 'up', PRODUCTION_RELEASE] + WAIT, '12-retorno-subida', out)
+    summary['production'] = production_release(out)
+    rc, back, err = remote(['ops/41_homolog.py', 'up', summary['production']] + WAIT, '12-retorno-subida', out)
     summary['rollbackUp'] = {k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if back else {'rc': rc, 'error': err}
     if back:
         summary['rollbackRegression'] = smoke(['--hml'], '13-retorno-navegador-regressao', out)
@@ -349,7 +441,8 @@ def banco(release):
 if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
-    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem') else None
+    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
+                                    'ativar') else None
     if task == 'intel':
         intel(sys.argv[2] if len(sys.argv) > 2 else INTEL_RELEASE)
     elif task == 'banco':
@@ -360,6 +453,11 @@ if __name__ == '__main__':
         intel(sys.argv[2] if len(sys.argv) > 2 else SUPPLIERS_RELEASE, suppliers=True)
     elif task == 'trem':
         trem(sys.argv[2] if len(sys.argv) > 2 else TRAIN_RELEASE)
+    elif task == 'ativar':
+        args = [a for a in sys.argv[2:] if not a.startswith('--')]
+        if not args:
+            raise SystemExit('uso: ativar <release> [--importar-fornecedores]')
+        ativar(args[0], import_suppliers='--importar-fornecedores' in sys.argv)
     elif task == 'matriz':
         release = sys.argv[2] if len(sys.argv) > 2 else 'ba4ee4b03c40'
         rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 3

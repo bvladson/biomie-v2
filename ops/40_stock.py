@@ -24,6 +24,8 @@
                                                                    # carga (re)feita em blocos de 31 dias
   Fornecedores e prazos (migração 0048):
     python ops/remote.py ops/40_stock.py suppliers on|off          # importação diária (só leitura do Omie)
+    python ops/remote.py ops/40_stock.py suppliers-import          # importação ÚNICA pelo worker (não liga a
+                                                                   # diária; o worker lê o Omie no ritmo dele)
     python ops/remote.py ops/40_stock.py suppliers-status          # importações, vínculos e prazos
 
 Ordem da ativação (runbook, seção 12): release com a 0041 -> probe em cada empresa -> reading on
@@ -307,6 +309,11 @@ l as (insert into public.audit_log (actor_id, action, entity, entity_id, payload
       select null, 'stock.suppliers.toggled', 'stock', null,
              jsonb_build_object('ligada', u.suppliers_enabled, 'origem', 'ops') from u)
 select json_build_object('suppliersEnabled', (select suppliers_enabled from u));""", write=True), indent=1))
+elif command == 'suppliers-import':
+    # Pede uma importação para cada empresa conectada; o worker a faz entre as leituras e movimentações,
+    # com o limitador de sempre. A importação diária continua como estiver (suppliers on|off).
+    print(json.dumps(psql_service("select json_build_object('queued', "
+                                  "public.stock_worker_suppliers_enqueue(null, 'ops'));"), indent=1))
 elif command == 'suppliers-status':
     print(json.dumps(psql("""select json_build_object(
   'enabled', (select s.suppliers_enabled from private.stock_settings s),
