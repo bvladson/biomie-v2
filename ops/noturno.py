@@ -439,6 +439,9 @@ def banco(release):
 
 
 if __name__ == '__main__':
+    # Os passos chamam ops/<script>.py por caminho relativo: roda sempre a partir da pasta do projeto,
+    # de onde quer que o comando tenha sido digitado.
+    os.chdir(BASE)
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
     lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
