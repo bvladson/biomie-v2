@@ -19,7 +19,7 @@ $jobs = @(
      Desc = 'Validacao da release de Inteligencia + fornecedores (SUPPLIERS_RELEASE do noturno.py) com os dados reais: copia nova, suites, subida, fornecedores do Omie (so leitura), motor, conferencia, navegador e retorno para a release da producao. A ativacao NAO e automatica.' }
 )
 # Tarefas de datas que já passaram (rodam uma vez só) saem da lista.
-Get-ScheduledTask -TaskPath '\BIOMIE' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like '*27-10*' } |
+Get-ScheduledTask -TaskPath '\BIOMIE\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like '*27-10*' } |
   Unregister-ScheduledTask -Confirm:$false
 foreach ($j in $jobs) {
   if ([datetime]$j.At -lt (Get-Date)) { Write-Host "pulado (horario ja passou): $($j.Name)"; continue }
