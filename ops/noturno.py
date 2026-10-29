@@ -275,11 +275,17 @@ def production_release(out):
 
 def validation_ok(release):
     """A validação de fornecedores do dia para esta release passou inteira? Devolve (ok, motivos)."""
-    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-inteligencia-fornecedores'
-    try:
-        s = json.loads((out / 'resumo.json').read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return False, ['sem resumo da validação de hoje (ops/logs/noturno/<data>-inteligencia-fornecedores)']
+    # A validação da noite pode terminar antes ou depois da meia-noite: vale a de hoje ou a de ontem.
+    s = None
+    for day in (dt.date.today(), dt.date.today() - dt.timedelta(days=1)):
+        try:
+            s = json.loads((LOGS / 'noturno' / f'{day:%Y%m%d}-inteligencia-fornecedores' / 'resumo.json')
+                           .read_text(encoding='utf-8'))
+            break
+        except (OSError, ValueError):
+            continue
+    if s is None:
+        return False, ['sem resumo da validação de hoje ou de ontem (ops/logs/noturno/<data>-inteligencia-fornecedores)']
     why = []
     if s.get('release') != release:
         why.append(f"a validação de hoje foi da release {s.get('release')}")

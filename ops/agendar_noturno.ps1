@@ -14,12 +14,16 @@ $log = "$dir\ops\logs\noturno\agendador.log"
 # pesado continua esperando a janela de testes (janela_testes.py --esperar), então nada roda no expediente.
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit (New-TimeSpan -Hours 6) -MultipleInstances IgnoreNew -StartWhenAvailable -WakeToRun
+# Próxima noite: hoje às 18:33 (ou amanhã, se já passou). Sem data fixa no arquivo.
+$quando = (Get-Date).Date.AddHours(18).AddMinutes(33)
+if ((Get-Date) -gt $quando) { $quando = $quando.AddDays(1) }
+$rotulo = $quando.ToString('dd-MM')
 $jobs = @(
-  @{ Name = 'BIOMIE homologacao - Fornecedores 28-10'; At = '2026-10-28T18:33:00'; Args = 'intel-fornecedores'
+  @{ Name = "BIOMIE homologacao - Fornecedores $rotulo"; At = $quando; Args = 'intel-fornecedores'
      Desc = 'Validacao da release de Inteligencia + fornecedores (SUPPLIERS_RELEASE do noturno.py) com os dados reais: copia nova, suites, subida, fornecedores do Omie (so leitura), motor, conferencia, navegador e retorno para a release da producao. A ativacao NAO e automatica.' }
 )
-# Tarefas de datas que já passaram (rodam uma vez só) saem da lista.
-Get-ScheduledTask -TaskPath '\BIOMIE\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -like '*27-10*' } |
+# Tarefas de outras noites (rodam uma vez só) saem da lista.
+Get-ScheduledTask -TaskPath '\BIOMIE\' -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -notlike "*$rotulo" } |
   Unregister-ScheduledTask -Confirm:$false
 foreach ($j in $jobs) {
   if ([datetime]$j.At -lt (Get-Date)) { Write-Host "pulado (horario ja passou): $($j.Name)"; continue }
