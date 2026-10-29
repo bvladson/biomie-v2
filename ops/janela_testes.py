@@ -43,6 +43,8 @@ def is_heavy(script: pathlib.Path, args: list[str]) -> bool:
         return True
     if name == '29_smoke.py':
         return '--hml' in args
+    if name == '50_foto_producao.py':  # a foto da produção é leve; a da cópia, não
+        return '--copia' in args
     try:
         return 'biomie_v2_hml' in script.read_text(encoding='utf-8')
     except OSError:

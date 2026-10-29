@@ -210,10 +210,15 @@ def intel(release, suppliers=False):
     summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
     if not refresh:
         return done('a cópia nova da produção falhou')
+    # Foto dos números da cópia (= a produção de agora) ANTES das migrações da release; a de depois da
+    # subida tem de ser igual (estoque, curvas, faturamento, sales_kpis e painel do Estoque).
+    photo_before = photo(out, '02c-foto-da-copia-antes', copy=True) if suppliers else None
     rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
     summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
     if not up:
         return done('a homologação não subiu')
+    if suppliers:
+        summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
     rc, mode, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '03-estoque-liberado-na-copia', out)
     summary['stockMode'] = {'rc': rc, 'error': None if rc == 0 else err}
     if suppliers:
@@ -302,16 +307,87 @@ def validation_ok(release):
     for key in ('rollbackRegression', 'rollbackStock'):
         if not (s.get(key) or {}).get('ok'):
             why.append('retorno: ' + key)
+    # Número que mudou com as migrações barra a ativação; parte que não pôde ser medida fica só registrada.
+    photo_copy = s.get('photoCopy') or {}
+    if photo_copy.get('compared') and not photo_copy.get('equal'):
+        why.append('números da cópia mudaram com as migrações: ' + ', '.join(photo_copy.get('different') or {}))
     return not why, why
 
 
+SKIP_PHOTO = ('database', 'migrations', 'timing', 'seconds', 'ok')
+
+
+def photo(out, name, copy=False):
+    """Foto dos números (50_foto_producao, só leitura) da produção ou da cópia (--copia, na janela)."""
+    rc, data, err = remote(['ops/50_foto_producao.py'] + (['--copia'] + WAIT if copy else []), name, out,
+                           timeout=3600)
+    return data or {'error': err or f'rc={rc}'}
+
+
+def compare_photos(before, after):
+    """Foto antes × depois: as partes (e, dentro delas, as chaves) que mudaram. Migrações e tempos ficam de
+    fora; parte com erro em qualquer lado fica como não comparada (não conta como diferença)."""
+    if not isinstance(before, dict) or not isinstance(after, dict) or 'error' in before or 'error' in after:
+        return {'compared': False, 'error': ((before or {}).get('error') or (after or {}).get('error')
+                                             or 'foto ausente')}
+    failed = lambda v: isinstance(v, dict) and set(v) == {'error'}  # noqa: E731
+    different, not_compared = {}, []
+    for key in sorted((set(before) | set(after)) - set(SKIP_PHOTO)):
+        a, b = before.get(key), after.get(key)
+        if failed(a) or failed(b):
+            not_compared.append(key)
+        elif a != b:
+            if isinstance(a, dict) and isinstance(b, dict):
+                different[key] = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))[:20]
+            else:
+                different[key] = [str(a)[:120], str(b)[:120]]
+    return {'compared': True, 'equal': not different, 'different': different, 'notCompared': not_compared,
+            'migrations': [before.get('migrations'), after.get('migrations')],
+            'seconds': [before.get('seconds'), after.get('seconds')]}
+
+
+def worker_state(out, name):
+    """Estado do worker da produção (25_load status, só leitura): o worker.status ou {}."""
+    rc, data, err = remote(['ops/25_load.py', 'status'], name, out)
+    return (data or {}).get('worker') or {}
+
+
+def resume_worker(out, name):
+    """Retoma o worker da produção (como em 23/10) e confere, um minuto depois, que ele saiu da pausa."""
+    rc, data, err = remote(['ops/25_load.py', 'resume'], name, out)
+    time.sleep(60)
+    state = worker_state(out, name + '-estado')
+    return {'rc': rc, 'control': data, 'state': state.get('state'), 'reason': state.get('reason'),
+            'ok': rc == 0 and state.get('state') not in (None, 'PAUSED')}
+
+
+def activation_slot():
+    """Motivos para a ativação NÃO começar agora (lista vazia = pode): perto das cargas do worker (:21/:51),
+    perto do fechamento do estoque (23:50), leitura de estoque na fila ou servidor carregado."""
+    now = dt.datetime.now()
+    why = []
+    if now.minute % 30 > 10:
+        why.append(f'minuto :{now.minute:02d} perto das cargas :21/:51')
+    if now.time() >= dt.time(23, 15) or now.time() < dt.time(1, 30):
+        why.append('perto do fechamento do estoque (23:50)')
+    if not why:
+        sys.path.insert(0, str(BASE / 'ops'))
+        import janela_testes
+        why += [r for r in janela_testes.reasons() if not r.startswith(('expediente', 'minuto'))]
+    return why
+
+
 def ativar(release, import_suppliers=False):
-    """Ativação na produção, só depois de a validação do dia passar inteira. Usa os scripts de sempre:
-    21_activate_release (cópia de segurança verificada antes das migrações, migrações, imagem, web e
-    worker), 42_intel (motor uma vez), 43 (conferência, só leitura) e o teste de navegador da produção."""
+    """Ativação na produção, só depois de a validação passar inteira, na mesma sequência da ativação de
+    23/10: horário livre (longe das cargas e do fechamento do estoque) → worker pausado e parado → foto dos
+    números → 21_activate_release (cópia de segurança verificada antes das migrações, migrações, imagem, web
+    e worker) → foto de novo (tem de ser igual) → worker retomado → 42_intel (motor uma vez) → 43
+    (conferência, só leitura) → importação única de fornecedores (se pedida) → navegador da produção.
+    Se a ativação falhar, volta sozinha para a release anterior, retoma o worker e testa no navegador."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-ativacao-{release}'
     out.mkdir(parents=True, exist_ok=True)
-    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
+    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds'),
+               'importSuppliers': import_suppliers}
 
     def done(reason=None):
         if reason:
@@ -325,26 +401,63 @@ def ativar(release, import_suppliers=False):
     ok, why = validation_ok(release)
     summary['validation'] = {'ok': ok, 'problems': why}
     if not ok:
-        return done('a validação do dia não passou inteira: ' + '; '.join(why))
+        return done('a validação não passou inteira: ' + '; '.join(why))
     summary['previous'] = production_release(out)
-    # Começa longe das cargas recorrentes do worker (:21/:51): minutos :00–:10 ou :30–:40.
-    while dt.datetime.now().minute % 30 > 10:
+    if summary['previous'] == release:
+        return done('esta release já está ativa na produção: nada a fazer')
+    deadline = time.time() + 4 * 3600
+    while (busy := activation_slot()):
+        if time.time() > deadline:
+            return done('sem horário livre para a ativação em 4 h: ' + '; '.join(busy))
         time.sleep(30)
+    summary['slotAt'] = dt.datetime.now().isoformat(timespec='seconds')
+    summary['workerBefore'] = {k: v for k, v in worker_state(out, '00b-worker-antes').items()
+                               if k in ('state', 'reason', 'at', 'commit')}
+    # Como em 23/10: pausa o worker e espera a etapa em andamento terminar (ele mostra PAUSED com o motivo).
+    reason = f'ativacao {release}'
+    remote(['ops/25_load.py', 'pause', reason], '00c-worker-pausa', out)
+    limit = time.time() + 20 * 60
+    while True:
+        state = worker_state(out, '00d-worker-pausado')
+        if state.get('state') == 'PAUSED' and state.get('reason') == reason:
+            break
+        if time.time() > limit:
+            summary['workerResumed'] = resume_worker(out, '00e-worker-retomado')
+            return done('o worker não pausou em 20 minutos: ativação cancelada e worker retomado')
+        time.sleep(20)
+    summary['workerPaused'] = {k: state.get(k) for k in ('state', 'reason', 'at')}
+    # Foto dos números com o worker parado; a de depois da ativação tem de ser igual.
+    photo_before = photo(out, '00f-foto-antes')
     rc, act, err = remote(['ops/21_activate_release.py', release, '--start-worker'], '01-ativacao', out,
                           timeout=3 * 3600)
     summary['activation'] = act or {'rc': rc, 'error': err}
     if rc != 0:
-        return done('a ativação falhou: confira 01-ativacao.txt e, se preciso, rode o retorno')
+        # Retorno automático para a release anterior: o mesmo retorno testado na validação da noite.
+        rc2, back, err2 = remote(['ops/21_activate_release.py', summary['previous'], '--start-worker'],
+                                 '01r-retorno', out, timeout=3 * 3600)
+        summary['rollbackRun'] = back or {'rc': rc2, 'error': err2}
+        if rc2 != 0:
+            return done('ATENÇÃO: a ativação falhou e o retorno automático também; o worker continua pausado')
+        summary['activeAfterRollback'] = production_release(out)
+        summary['workerResumed'] = resume_worker(out, '01s-worker-retomado')
+        summary['rollbackBrowser'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly'],
+                                           '01t-retorno-navegador', out)
+        return done(f"a ativação falhou; a produção voltou sozinha para a {summary['previous']}")
     summary['active'] = production_release(out)
+    summary['photo'] = compare_photos(photo_before, photo(out, '01a-foto-depois'))
+    summary['workerResumed'] = resume_worker(out, '01b-worker-retomado')
     rc, engine, err = remote(['ops/42_intel.py', 'run', '--force'], '02-motor', out, timeout=3600)
     summary['engine'] = engine or {'rc': rc, 'error': err}
     rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2'] + WAIT, '03-conferencia', out)
-    summary['check'] = {k: (check or {}).get(k) for k in ('allOk', 'phasesOk', 'phase5')} if check else {'rc': rc, 'error': err}
+    summary['check'] = ({k: (check or {}).get(k) for k in ('allOk', 'phasesOk', 'phase5')}
+                        if check else {'rc': rc, 'error': err})
     if import_suppliers:
         rc, imp, err = remote(['ops/40_stock.py', 'suppliers-import'] + WAIT, '04-importacao-unica-fornecedores', out)
         summary['suppliersImport'] = imp or {'rc': rc, 'error': err}
     summary['browser'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel', '--suppliers',
                                 '--shots', f'producao-{dt.date.today():%Y%m%d}'], '05-navegador-producao', out)
+    summary['workerAfter'] = {k: v for k, v in worker_state(out, '06-worker-depois').items()
+                              if k in ('state', 'reason', 'at', 'commit')}
     return done()
 
 
