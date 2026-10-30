@@ -361,13 +361,24 @@ def resume_worker(out, name):
             'ok': rc == 0 and state.get('state') not in (None, 'PAUSED')}
 
 
+#: Leituras de estoque do dia (o fechamento das 23:50 tem regra própria). O worker só abre cada leitura numa
+#: janela de 5 minutos (SLOT_WINDOW_MINUTES): pausado nela, a leitura daquele horário se perde.
+READING_SLOTS = (dt.time(7, 40), dt.time(12, 40), dt.time(17, 40))
+
+
 def activation_slot():
     """Motivos para a ativação NÃO começar agora (lista vazia = pode): perto das cargas do worker (:21/:51),
-    perto do fechamento do estoque (23:50), leitura de estoque na fila ou servidor carregado."""
+    perto de uma leitura de estoque (20 min antes até 10 min depois) ou do fechamento (23:50), leitura de
+    estoque na fila ou servidor carregado."""
     now = dt.datetime.now()
     why = []
     if now.minute % 30 > 10:
         why.append(f'minuto :{now.minute:02d} perto das cargas :21/:51')
+    minutes = now.hour * 60 + now.minute
+    for slot in READING_SLOTS:
+        start = slot.hour * 60 + slot.minute
+        if start - 20 <= minutes < start + 10:
+            why.append(f'perto da leitura de estoque das {slot:%H:%M}')
     if now.time() >= dt.time(23, 15) or now.time() < dt.time(1, 30):
         why.append('perto do fechamento do estoque (23:50)')
     if not why:
@@ -377,7 +388,29 @@ def activation_slot():
     return why
 
 
-def ativar(release, import_suppliers=False):
+def recent_db_tests(release, hours=3):
+    """As suítes do banco desta release rodadas no servidor nas últimas horas (log do 22), se passaram."""
+    limit = dt.datetime.now() - dt.timedelta(hours=hours)
+    for log in sorted(LOGS.glob('*-22_test_database.log'), reverse=True):
+        try:
+            when = dt.datetime.strptime(log.name[:15], '%Y%m%d-%H%M%S')
+        except ValueError:
+            continue
+        if when < limit:
+            break
+        text = log.read_text(encoding='utf-8', errors='replace')
+        try:
+            data = json.loads(text[text.find('{'):text.rfind('}') + 1])
+        except ValueError:
+            continue
+        if data.get('release') == release:
+            return {'log': log.name, 'allOk': bool(data.get('all_ok')),
+                    'migrations': data.get('migrations_applied'),
+                    'failures': {k: v.get('error') for k, v in (data.get('suites') or {}).items() if not v.get('ok')}}
+    return None
+
+
+def ativar(release, import_suppliers=False, now_reason=None):
     """Ativação na produção, só depois de a validação passar inteira, na mesma sequência da ativação de
     23/10: horário livre (longe das cargas e do fechamento do estoque) → worker pausado e parado → foto dos
     números → 21_activate_release (cópia de segurança verificada antes das migrações, migrações, imagem, web
@@ -398,10 +431,24 @@ def ativar(release, import_suppliers=False):
         (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
         print(json.dumps(summary, indent=1, ensure_ascii=False))
 
-    ok, why = validation_ok(release)
-    summary['validation'] = {'ok': ok, 'problems': why}
-    if not ok:
-        return done('a validação não passou inteira: ' + '; '.join(why))
+    # Passos pesados (conferência, importação) esperam a janela; no modo --agora vão como exceção registrada.
+    heavy = [f'--fora-da-janela={now_reason}'] if now_reason else WAIT
+    if now_reason:
+        # Pedido do usuário de ativar sem a validação noturna (30/10): no lugar dela, as suítes do banco da
+        # release no servidor (Postgres da produção, banco descartável) têm de passar inteiras.
+        summary['mode'] = {'agora': now_reason}
+        tests = recent_db_tests(release)
+        if not tests:
+            remote(['ops/22_test_database.py', release, f'--fora-da-janela={now_reason}'], '00a-testes-do-banco', out)
+            tests = recent_db_tests(release)
+        summary['dbTests'] = tests
+        if not (tests or {}).get('allOk'):
+            return done('as suítes do banco da release não passaram no servidor: nada mudou na produção')
+    else:
+        ok, why = validation_ok(release)
+        summary['validation'] = {'ok': ok, 'problems': why}
+        if not ok:
+            return done('a validação não passou inteira: ' + '; '.join(why))
     summary['previous'] = production_release(out)
     if summary['previous'] == release:
         return done('esta release já está ativa na produção: nada a fazer')
@@ -448,11 +495,11 @@ def ativar(release, import_suppliers=False):
     summary['workerResumed'] = resume_worker(out, '01b-worker-retomado')
     rc, engine, err = remote(['ops/42_intel.py', 'run', '--force'], '02-motor', out, timeout=3600)
     summary['engine'] = engine or {'rc': rc, 'error': err}
-    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2'] + WAIT, '03-conferencia', out)
+    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2'] + heavy, '03-conferencia', out)
     summary['check'] = ({k: (check or {}).get(k) for k in ('allOk', 'phasesOk', 'phase5')}
                         if check else {'rc': rc, 'error': err})
     if import_suppliers:
-        rc, imp, err = remote(['ops/40_stock.py', 'suppliers-import'] + WAIT, '04-importacao-unica-fornecedores', out)
+        rc, imp, err = remote(['ops/40_stock.py', 'suppliers-import'] + heavy, '04-importacao-unica-fornecedores', out)
         summary['suppliersImport'] = imp or {'rc': rc, 'error': err}
     summary['browser'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel', '--suppliers',
                                 '--shots', f'producao-{dt.date.today():%Y%m%d}'], '05-navegador-producao', out)
@@ -578,8 +625,12 @@ if __name__ == '__main__':
     elif task == 'ativar':
         args = [a for a in sys.argv[2:] if not a.startswith('--')]
         if not args:
-            raise SystemExit('uso: ativar <release> [--importar-fornecedores]')
-        ativar(args[0], import_suppliers='--importar-fornecedores' in sys.argv)
+            raise SystemExit('uso: ativar <release> [--importar-fornecedores] [--agora="motivo"]')
+        # --agora="motivo": ativação pedida pelo usuário sem a validação noturna (gate = suítes do banco).
+        now_reason = next((a.split('=', 1)[1].strip() for a in sys.argv if a.startswith('--agora=')), None)
+        if now_reason is not None and len(now_reason) < 10:
+            raise SystemExit('--agora precisa de um motivo (10 caracteres ou mais).')
+        ativar(args[0], import_suppliers='--importar-fornecedores' in sys.argv, now_reason=now_reason)
     elif task == 'matriz':
         release = sys.argv[2] if len(sys.argv) > 2 else 'ba4ee4b03c40'
         rounds = int(sys.argv[3]) if len(sys.argv) > 3 else 3
