@@ -3,8 +3,11 @@
     python ops/remote.py ops/43_intel_check.py [biomie_v2_hml|biomie_v2]
 
 Compara, por empresa, o que o motor gravou com as fontes:
-- capital somado dos produtos = saldos positivos × CMC da leitura publicada;
-- unidades vendidas em 12 meses = fact_sales (a base da página Produtos) dos produtos do Omie;
+- capital somado dos produtos = saldos positivos × CMC da leitura publicada, com a mesma conta do motor
+  (capital de cada produto arredondado em centavos e depois somado, como na 0047); a soma arredondada só
+  no fim (capitalPositions) pode diferir alguns centavos e fica como referência;
+- unidades vendidas em 12 meses = fact_sales (a base da página Produtos) dos produtos do Omie; empresa sem
+  nenhuma venda no fact_sales conta 0 e aparece em "notes";
 - produtos analisados = produtos da leitura com saldo, ou com venda em 12 meses;
 - foto do dia (stock_snapshots) = capital e produtos por curva efetiva de 12 meses;
 - sem prioridade só quem não tem saldo positivo; estado novo só com produto novo.
@@ -50,10 +53,15 @@ st as (
         group by 1, 2) t
   group by t.company_id),
 pos as (
-  select sc.company_id,
-    round(coalesce(sum(p.physical_qty * p.unit_cost) filter (where p.physical_qty > 0 and p.unit_cost > 0), 0), 2) as capital,
-    count(distinct p.omie_product_id) filter (where p.physical_qty <> 0) as products_with_qty
-  from private.stock_current sc join private.stock_positions p on p.reading_id = sc.reading_id group by 1),
+  select t.company_id,
+    round(coalesce(sum(t.value), 0), 2) as capital,
+    coalesce(sum(round(t.value, 2)), 0) as capital_by_product,
+    count(*) filter (where t.has_qty) as products_with_qty
+  from (select sc.company_id, p.omie_product_id, bool_or(p.physical_qty <> 0) as has_qty,
+          sum(p.physical_qty * p.unit_cost) filter (where p.physical_qty > 0 and p.unit_cost > 0) as value
+        from private.stock_current sc join private.stock_positions p on p.reading_id = sc.reading_id
+        group by 1, 2) t
+  group by 1),
 sales as (
   select cur.company_id, round(coalesce(sum(f.qty), 0), 3) as units365,
     count(distinct pr.external_id) as products_sold
@@ -92,7 +100,7 @@ select json_agg(json_build_object(
   'company', co.slug,
   'run', json_build_object('asOf', cur.as_of, 'publishedAt', cur.published_at, 'version', cur.algorithm_version),
   'products', m.products, 'withStock', m.with_stock,
-  'capitalEngine', m.capital, 'capitalPositions', pos.capital,
+  'capitalEngine', m.capital, 'capitalPositionsByProduct', pos.capital_by_product, 'capitalPositions', pos.capital,
   'units365Engine', m.units365, 'units365FactSales', sales.units365,
   'productsSold', sales.products_sold, 'productsWithQty', pos.products_with_qty,
   'priorityWithoutStock', m.priority_without_stock, 'stockWithoutPriority', m.stock_without_priority,
@@ -191,8 +199,14 @@ lines = [line for line in p.stdout.splitlines() if line not in ('BEGIN', 'COMMIT
 companies = json.loads(lines[0])
 phases = json.loads(lines[1])
 summary = json.loads(lines[2])
+notes = []
 for c in companies:
-    c['ok'] = (c['capitalEngine'] == c['capitalPositions'] and c['units365Engine'] == c['units365FactSales']
+    # Sem nenhuma venda em 12 meses o fact_sales não devolve linha (null): equivale a 0 unidades, mas fica anotado.
+    c['noSales'] = c['units365FactSales'] is None
+    if c['noSales']:
+        notes.append(f"{c['company']}: nenhuma venda em 12 meses no fact_sales (conta como 0 unidades)")
+    c['ok'] = (c['capitalEngine'] is not None and c['capitalEngine'] == c['capitalPositionsByProduct']
+               and c['units365Engine'] is not None and c['units365Engine'] == (c['units365FactSales'] or 0)
                and not c['priorityWithoutStock'] and not c['stockWithoutPriority'] and not c['novoNotNew']
                and not c['semSaldoWithStock'] and bool(c['snapshotMatchesCurves']))
 p5 = phases['phase5']
@@ -202,4 +216,5 @@ phases_ok = (not phases['phase3']['textsWithMoney'] and not p5['buyWithoutForeca
 if DB == 'biomie_v2' and (p5.get('leadTimes') or {}).get('teste'):
     phases_ok = False
 print(json.dumps({'db': DB, 'allOk': all(c['ok'] for c in companies) and phases_ok, 'phasesOk': phases_ok,
-                  'companies': companies, **phases, **summary}, indent=1, ensure_ascii=False, default=str))
+                  'notes': notes, 'companies': companies, **phases, **summary}, indent=1, ensure_ascii=False,
+                 default=str))
