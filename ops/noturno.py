@@ -461,6 +461,19 @@ def ativar(release, import_suppliers=False, now_reason=None):
             return done('sem horário livre para a ativação em 4 h: ' + '; '.join(busy))
         time.sleep(30)
     summary['slotAt'] = dt.datetime.now().isoformat(timespec='seconds')
+    # A produção pode ter recebido uma correção enquanto esta ativação aguardava.
+    # Confira novamente o retorno e preserve a UI ANTES de pausar o worker ou migrar.
+    summary['previous'] = production_release(out)
+    rc, ui, err = remote(['ops/51_ui_release_guard.py', release], '00a-preservacao-da-interface', out)
+    summary['uiPreservation'] = ui if isinstance(ui, dict) else {'rc': rc, 'error': err}
+    if rc != 0 or not isinstance(ui, dict) or ui.get('preserves_ui') is not True:
+        return done('a release candidata precisa ser regenerada com a barra horizontal flutuante; '
+                    'a preservação da interface não foi confirmada: nada mudou na produção')
+    if ui.get('active') != summary['previous']:
+        return done('a release da produção mudou durante a conferência: repita a ativação; '
+                    'nada mudou na produção')
+    if summary['previous'] == release:
+        return done('esta release já está ativa na produção: nada a fazer')
     summary['workerBefore'] = {k: v for k, v in worker_state(out, '00b-worker-antes').items()
                                if k in ('state', 'reason', 'at', 'commit')}
     # Como em 23/10: pausa o worker e espera a etapa em andamento terminar (ele mostra PAUSED com o motivo).
