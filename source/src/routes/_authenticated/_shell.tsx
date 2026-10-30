@@ -4,6 +4,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { FilterBar } from "@/components/layout/FilterBar";
 import { CoverageBanner } from "@/components/layout/CoverageBanner";
+import { GlobalFloatingTableScroll } from "@/components/layout/GlobalFloatingTableScroll";
 import { globalFiltersSchema } from "@/domain/filters";
 import { appContextQuery } from "@/lib/queries";
 import { useGlobalFilters } from "@/hooks/use-filters";
@@ -56,6 +57,7 @@ function ShellLayout() {
   const { resolved } = useGlobalFilters();
   return (
     <SidebarProvider>
+      <GlobalFloatingTableScroll />
       <AppSidebar />
       <SidebarInset className="min-w-0 bg-background">
         <header className="sticky top-0 z-20 border-b bg-background/85 backdrop-blur">
