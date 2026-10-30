@@ -59,10 +59,13 @@ SALES_KPIS_RELEASE = 'fe85acab7ae6'
 INTEL_RELEASE = '885ff74576cd'
 # Fornecedores e prazos (0048/0049) e o trem de integração; a tarefa do Agendador usa estes valores, então
 # trocar a release aqui (commit) muda o que roda à noite sem registrar a tarefa de novo.
-SUPPLIERS_RELEASE = '2bd5c7c701c4'
+SUPPLIERS_RELEASE = 'cdb333a1f2a5'
 TRAIN_RELEASE = '266d297add0b'
-# Release em produção (retorno do trem): sobe sobre o banco já migrado e precisa funcionar.
-PRODUCTION_RELEASE = '1240466bf0c3'
+# Release em produção desde 30/10 10:35 (Inteligência + fornecedores + barra de rolagem). Só um valor de
+# reserva: a ativação e a validação leem a release ativa no servidor (49) antes de agir.
+PRODUCTION_RELEASE = 'cdb333a1f2a5'
+# Retorno da produção: a release anterior (só o web, com a barra de rolagem; mesmo banco da 1240466bf0c3).
+PREVIOUS_RELEASE = 'cb9aeeb06539'
 
 
 def _held(path):
@@ -248,20 +251,12 @@ def intel(release, suppliers=False):
                        env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
     (out / '07-navegador.txt').write_text(f'# {started} rc={p.returncode}\n{p.stdout}\n--stderr--\n{p.stderr}',
                                          encoding='utf-8')
-    try:
-        browser = json.loads(p.stdout[p.stdout.find('{'):p.stdout.rfind('}') + 1])
-    except ValueError:
-        browser = None
-    summary['browser'] = {'rc': p.returncode, 'ok': (browser or {}).get('ok'),
-                          'steps': [{'name': s.get('step') or s.get('name'), 'ok': s.get('ok'), 'error': s.get('error')}
-                                    for s in (browser or {}).get('steps', [])],
-                          'problems': (browser or {}).get('problems'),
-                          'error': None if browser else p.stderr.strip()[-600:]}
+    summary['browser'] = browser_result(p)
     if suppliers:
         prod = production_release(out)
         # Depois da ativação (30/10) a produção já roda esta release: o retorno testado é o da anterior.
         if prod == release:
-            prod = PRODUCTION_RELEASE
+            prod = PREVIOUS_RELEASE
         summary['rollbackRelease'] = prod
         rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '07b-retorno-subida', out)
         summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
@@ -531,15 +526,39 @@ def smoke(args, name, out):
                        env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
     (out / f'{name}.txt').write_text(f'# {started} rc={p.returncode}\n{p.stdout}\n--stderr--\n{p.stderr}',
                                      encoding='utf-8')
+    return browser_result(p)
+
+
+def browser_result(p):
+    """Resultado do 29_smoke (p = o processo já terminado). O relatório traz o navegador dentro de 'browser':
+    no teste do Estoque/admin, um objeto {ok, steps, problems}; no de regressão (sem --stock), uma lista com
+    uma entrada por conta. Traz também 'browser_exit' (o próprio teste sai com 1 se algo falhou) e 'cleanup'
+    (usuários de teste apagados). Passa só com o teste inteiro aprovado e os dois processos sem erro."""
     try:
         data = json.loads(p.stdout[p.stdout.find('{'):p.stdout.rfind('}') + 1])
     except ValueError:
         data = None
-    return {'rc': p.returncode, 'ok': (data or {}).get('ok'),
-            'failed': [{'name': s.get('name') or s.get('step'), 'error': s.get('error')}
-                       for s in (data or {}).get('steps', []) if not s.get('ok')],
-            'steps': len((data or {}).get('steps', [])), 'problems': (data or {}).get('problems'),
-            'error': None if data else p.stderr.strip()[-600:]}
+    data = data if isinstance(data, dict) else {}
+    browser = data.get('browser')
+    if isinstance(browser, dict):
+        steps = browser.get('steps') or []
+        failed = [{'name': s.get('name') or s.get('step'), 'error': s.get('error')} for s in steps if not s.get('ok')]
+        passed = browser.get('ok') is True and not failed
+    elif isinstance(browser, list):
+        steps = browser
+        failed = [{'name': r.get('account'), 'error': r.get('failure') or 'login, novo login, servidor ou CSP'}
+                  for r in browser if not r.get('login') or not r.get('relogin') or r.get('failure')
+                  or r.get('serverFailures') or r.get('cspViolations')]
+        passed = bool(browser) and not failed
+    else:
+        steps, failed, passed = [], [], False
+    return {'rc': p.returncode, 'ok': passed and p.returncode == 0 and data.get('browser_exit') == 0,
+            'failed': failed, 'steps': len(steps),
+            'problems': browser.get('problems') if isinstance(browser, dict) else None,
+            'cleanupOk': any(isinstance(c, dict) and c.get('remaining_smoke_users') == 0 and not c.get('orphan_sessions')
+                             for c in data.get('cleanup') or []),
+            'error': None if browser is not None else
+            (data.get('browser_error') or p.stderr.strip() or 'sem resultado do navegador')[-600:]}
 
 
 def trem(release):
