@@ -33,6 +33,7 @@ source/dist/
 # --- Artefatos derivados (reprodutíveis a partir do git) ---
 *.tar.gz
 ops/operational-preview/
+/ops/browser/**/.vite/
 .local-pg/
 
 # --- Logs de operacao (podem conter nomes de vendedores/clientes) ---

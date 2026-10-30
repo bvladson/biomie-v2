@@ -1,0 +1,25 @@
+/* Fixture geometry only: production controls, Table, Sheet and tokens are unchanged. */
+body { margin: 0; }
+.fixture-sidebar { position: fixed; inset: 0 auto 0 0; width: 244px; padding: 20px; color: white; background: var(--sidebar); }
+.fixture-sidebar nav { margin-top: 50px; line-height: 3; }
+.fixture-sidebar small { position: absolute; bottom: 24px; left: 20px; }
+.fixture-shell { margin-left: 244px; min-width: 0; }
+.fixture-header { position: sticky; top: 0; z-index: 20; height: 105px; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--background); }
+.fixture-header div { margin-top: 16px; font-size: 13px; }
+.fixture-content { max-width: 1400px; min-width: 0; margin: 0 auto; padding: 24px; }
+.fixture-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.fixture-actions button { border: 1px solid var(--border); border-radius: 6px; background: var(--card); padding: 8px; }
+.fixture-page-title { display: flex; align-items: start; justify-content: space-between; margin-bottom: 24px; }
+.fixture-page-title h1 { font-size: 28px; font-weight: 600; }
+.fixture-page-title p { color: var(--muted-foreground); font-size: 14px; }
+#positions-slot > div { margin-bottom: 20px; }
+.fixture-sheet { display: flex !important; flex-direction: column; width: min(800px, 95vw) !important; max-width: none !important; overflow: hidden; }
+#fixture-sheet-body { min-height: 0; flex: 1; overflow-y: auto; overflow-x: hidden; }
+#fixture-sheet-footer { flex: none; padding: 20px; border-top: 1px solid var(--border); background: var(--card); }
+.fixture-panel-table { min-width: 1800px !important; }
+.fixture-fit-table { width: 100%; min-width: 0 !important; table-layout: fixed; }
+.fixture-fit-table td { white-space: normal; overflow-wrap: anywhere; }
+.fixture-force-fit table { width: 100% !important; min-width: 0 !important; table-layout: fixed; }
+.fixture-force-fit td, .fixture-force-fit th { min-width: 0 !important; overflow-wrap: anywhere; white-space: normal; }
+.fixture-force-fit td p, .fixture-force-fit td span { overflow-wrap: anywhere; white-space: normal; }
+@media (max-width: 700px) { .fixture-sidebar { display: none; } .fixture-shell { margin-left: 0; } .fixture-content { padding: 12px; } }
