@@ -259,6 +259,9 @@ def intel(release, suppliers=False):
                           'error': None if browser else p.stderr.strip()[-600:]}
     if suppliers:
         prod = production_release(out)
+        # Depois da ativação (30/10) a produção já roda esta release: o retorno testado é o da anterior.
+        if prod == release:
+            prod = PRODUCTION_RELEASE
         summary['rollbackRelease'] = prod
         rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '07b-retorno-subida', out)
         summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
