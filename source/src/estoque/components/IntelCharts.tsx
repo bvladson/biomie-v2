@@ -51,6 +51,7 @@ import {
   curveDistribution,
   evolutionRows,
   integer,
+  missingDaysText,
   monthLabel,
   niceTicks,
   paretoChart,
@@ -569,11 +570,12 @@ export function EvolutionChart({
   const yTicks = niceTicks(Math.max(0, ...rows.map((r) => r.total ?? 0)));
   const fmt = (v: number | null | undefined) =>
     v === null || v === undefined ? "—" : mode === "capital" ? money(v) : integer(v);
-  const firstDay = evolution[0]?.day;
+  const firstDay = rows[0]?.day;
+  const gaps = missingDaysText(rows);
   const description = firstDay
-    ? `Uma foto por dia desde ${shortDate(firstDay)}, na leitura publicada${
+    ? `Fotos diárias desde ${shortDate(firstDay)}, na leitura publicada${
         mode === "capital" ? " (capital em R$)" : " (produtos com saldo)"
-      }. O passado não é reconstruído a partir da posição de hoje.`
+      }. Dia sem foto fica vazio; o passado não é reconstruído a partir da posição de hoje.`
     : "A primeira foto diária aparece depois da próxima análise.";
   return (
     <ChartCard
@@ -611,7 +613,10 @@ export function EvolutionChart({
             <TableBody>
               {rows.map((r) => (
                 <TableRow key={r.day}>
-                  <TableCell>{shortDate(r.day)}</TableCell>
+                  <TableCell>
+                    {shortDate(r.day)}
+                    {r.missing && <span className="text-muted-foreground"> · sem foto</span>}
+                  </TableCell>
                   {CURVES.map((c) => (
                     <TableCell key={c} className="text-right tabular-nums">
                       {fmt(r[c])}
@@ -665,9 +670,18 @@ export function EvolutionChart({
               />
               <ChartTooltip
                 cursor={{ fill: "var(--muted)" }}
+                // Sem isto o Recharts descarta as séries vazias e o dia sem foto ficaria sem dica.
+                filterNull={false}
                 content={(props: TipProps) => {
                   const r = first<EvolutionRow>(props);
                   if (!r) return null;
+                  if (r.missing)
+                    return (
+                      <TipBox
+                        title={shortDate(r.day)}
+                        rows={[{ key: "m", label: "sem foto neste dia", value: "—" }]}
+                      />
+                    );
                   return (
                     <TipBox
                       title={shortDate(r.day)}
@@ -699,6 +713,11 @@ export function EvolutionChart({
               ))}
             </BarChart>
           </ChartContainer>
+          {gaps && (
+            <p className="text-xs text-muted-foreground">
+              Sem foto em {gaps}: a análise diária não rodou nesses dias.
+            </p>
+          )}
         </div>
       )}
     </ChartCard>
