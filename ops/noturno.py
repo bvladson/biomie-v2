@@ -25,6 +25,9 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
                                                        # o cron, liga, roda a 1ª vez, confere (43) e testa no
                                                        # navegador; 1ª execução sem análise conferida =
                                                        # desliga e retira a agenda sozinho
+    python ops/noturno.py legado-backups               # BIomie antigo (03/11/2026): backup do v2 sem o legado,
+                                                       # arquivo final CIFRADO do banco antigo e só então
+                                                       # desliga o dump sem cifra das 03:00 (nada é apagado)
 
 Uma tarefa por vez e NA ORDEM em que começaram a esperar (fila de senhas em ops/logs/noturno/fila;
 trava em ops/logs/noturno/.trava, solta sozinha quando o processo acaba, mesmo se cair). As tarefas que
@@ -802,6 +805,50 @@ def intel_diaria_ativar():
     return done()
 
 
+def night_slot():
+    """Motivos para um passo pesado na PRODUÇÃO não começar agora (a mesma janela dos testes: fora do
+    expediente, minutos :00–:12/:30–:42, sem leitura de estoque, servidor folgado)."""
+    sys.path.insert(0, str(BASE / 'ops'))
+    import janela_testes
+    return janela_testes.reasons()
+
+
+def legado_backups():
+    """BIomie antigo (autorização de 03/11/2026): backup do v2 sem depender do legado → arquivo final CIFRADO do
+    banco antigo, conferido e copiado para fora → só então desliga o dump SEM cifra das 03:00. Nada é apagado."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-legado-backups'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        rc, after, err = remote(['ops/54_legado.py', 'status'], '04-situacao-depois', out)
+        summary['after'] = after or {'rc': rc, 'error': err}
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        summary['rollback'] = {'backupV2': 'python ops/remote.py ops/54_legado.py desfazer-backup-v2',
+                               'textoPuro': 'python ops/remote.py ops/54_legado.py desfazer-parar-texto-puro'}
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    deadline = time.time() + 6 * 3600
+    while (busy := night_slot()):
+        if time.time() > deadline:
+            return done('sem horário livre em 6 h: ' + '; '.join(busy))
+        time.sleep(60)
+    rc, before, err = remote(['ops/54_legado.py', 'status'], '00-situacao-antes', out)
+    summary['before'] = before or {'rc': rc, 'error': err}
+    rc, v2, err = remote(['ops/54_legado.py', 'backup-v2'], '01-backup-v2-sem-o-legado', out, timeout=2 * 3600)
+    summary['backupV2'] = v2 or {'rc': rc, 'error': err}
+    rc, arch, err = remote(['ops/54_legado.py', 'arquivo-cifrado'], '02-arquivo-cifrado-do-legado', out, timeout=2 * 3600)
+    summary['archive'] = arch or {'rc': rc, 'error': err}
+    if rc != 0 or not (arch or {}).get('ok'):
+        return done('arquivo cifrado não conferido: o dump antigo das 03:00 continua (nada desligado)')
+    rc, stop, err = remote(['ops/54_legado.py', 'parar-texto-puro'], '03-parar-copia-sem-cifra', out)
+    summary['stopPlaintext'] = stop or {'rc': rc, 'error': err}
+    return done(None if (stop or {}).get('ok') else 'a linha do dump sem cifra não foi desligada')
+
+
 def banco(release):
     """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-banco-{release}'
@@ -824,8 +871,10 @@ if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
     lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
-                                    'ativar', 'intel-diaria-copia', 'intel-diaria-ativar') else None
-    if task == 'intel-diaria-copia':
+                                    'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups') else None
+    if task == 'legado-backups':
+        legado_backups()
+    elif task == 'intel-diaria-copia':
         intel_diaria_copia(sys.argv[2] if len(sys.argv) > 2 else None)
     elif task == 'intel-diaria-ativar':
         intel_diaria_ativar()
