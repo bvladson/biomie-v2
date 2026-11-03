@@ -10,6 +10,7 @@ import {
   days,
   evidence,
   evolutionRows,
+  missingDaysText,
   intelCsv,
   niceTicks,
   paretoChart,
@@ -109,6 +110,47 @@ describe("inteligência do estoque — formatos", () => {
     expect(evolutionRows(evo, "capital")[1]!.total).toBeNull();
     expect(evolutionRows(evo, "products")[1]!.total).toBe(5);
     expect(evolutionRows(evo, "products")[1]!.label).toBe("24/10");
+    expect(evolutionRows(evo, "products").every((r) => !r.missing)).toBe(true);
+  });
+
+  it("evolução: dia sem foto aparece vazio, nunca como zero, e fica listado", () => {
+    const evo: IntelOverview["evolution"] = [
+      { day: "2026-11-03", capital: { A: 3, B: 0, C: 0, D: 1 }, products: { A: 1, D: 1 } },
+      { day: "2026-10-30", capital: { A: 1, B: 1, C: 1, D: 1 }, products: { A: 2, D: 2 } },
+      { day: "2026-11-05", capital: { A: 2, B: 0, C: 0, D: 2 }, products: { A: 1, D: 3 } },
+    ];
+    const rows = evolutionRows(evo, "capital");
+    expect(rows.map((r) => r.label)).toEqual([
+      "30/10",
+      "31/10",
+      "01/11",
+      "02/11",
+      "03/11",
+      "04/11",
+      "05/11",
+    ]);
+    expect(rows.map((r) => r.missing)).toEqual([false, true, true, true, false, true, false]);
+    expect(rows[1]).toMatchObject({ A: null, B: null, C: null, D: null, total: null });
+    expect(rows[0]!.total).toBe(4);
+    expect(rows[4]!.total).toBe(4);
+    expect(missingDaysText(rows)).toBe("31/10 a 02/11, 04/11");
+  });
+
+  it("evolução: vira o mês e o ano sem pular dia; sem foto nenhuma, sem linhas", () => {
+    const evo: IntelOverview["evolution"] = [
+      { day: "2026-12-30", capital: null, products: { A: 1 } },
+      { day: "2027-01-02", capital: null, products: { A: 1 } },
+    ];
+    const rows = evolutionRows(evo, "products");
+    expect(rows.map((r) => r.day)).toEqual([
+      "2026-12-30",
+      "2026-12-31",
+      "2027-01-01",
+      "2027-01-02",
+    ]);
+    expect(missingDaysText(rows)).toBe("31/12 a 01/01");
+    expect(evolutionRows([], "products")).toEqual([]);
+    expect(missingDaysText(evolutionRows(evo.slice(0, 1), "products"))).toBe("");
   });
 
   it("radar com as sete faixas na ordem, mesmo vazias", () => {

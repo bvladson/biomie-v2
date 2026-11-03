@@ -224,13 +224,41 @@ export interface EvolutionRow extends Record<ClassifiedCurve, number | null> {
   day: string;
   label: string;
   total: number | null;
+  /** Dia sem foto diária entre a primeira e a última: aparece vazio, nunca como zero. */
+  missing: boolean;
+}
+
+const DAY_MS = 86_400_000;
+/** Acima disto (2 anos de calendário) os dias sem foto não são preenchidos: só os dias com foto. */
+const MAX_FILLED_DAYS = 731;
+
+function utcDay(day: string): number {
+  return Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+}
+
+function isoDay(time: number): string {
+  return new Date(time).toISOString().slice(0, 10);
 }
 
 export function evolutionRows(
   evolution: IntelOverview["evolution"],
   mode: "capital" | "products",
 ): EvolutionRow[] {
-  return evolution.map((point) => {
+  const byDay = new Map(evolution.map((point) => [point.day.slice(0, 10), point]));
+  const photos = [...byDay.keys()].sort();
+  if (photos.length === 0) return [];
+  const first = utcDay(photos[0]!);
+  const last = utcDay(photos[photos.length - 1]!);
+  // O eixo é por categoria: sem preencher, um dia sem foto sumiria e o gráfico pareceria contínuo.
+  const days =
+    (last - first) / DAY_MS + 1 > MAX_FILLED_DAYS
+      ? photos
+      : Array.from({ length: (last - first) / DAY_MS + 1 }, (_, i) => isoDay(first + i * DAY_MS));
+  return days.map((day) => {
+    const label = shortDate(day).slice(0, 5);
+    const point = byDay.get(day);
+    if (!point)
+      return { day, label, A: null, B: null, C: null, D: null, total: null, missing: true };
     const source = (mode === "capital" ? point.capital : point.products) ?? {};
     const values = {
       A: source.A ?? null,
@@ -242,8 +270,21 @@ export function evolutionRows(
       mode === "capital" && !point.capital
         ? null
         : (values.A ?? 0) + (values.B ?? 0) + (values.C ?? 0) + (values.D ?? 0);
-    return { day: point.day, label: shortDate(point.day).slice(0, 5), ...values, total };
+    return { day, label, ...values, total, missing: false };
   });
+}
+
+/** Dias sem foto em trechos legíveis: "31/10 a 02/11, 05/11". */
+export function missingDaysText(rows: EvolutionRow[]): string {
+  const runs: [string, string][] = [];
+  for (const row of rows) {
+    if (!row.missing) continue;
+    const run = runs[runs.length - 1];
+    if (run && utcDay(row.day) - utcDay(run[1]) === DAY_MS) run[1] = row.day;
+    else runs.push([row.day, row.day]);
+  }
+  const short = (day: string) => shortDate(day).slice(0, 5);
+  return runs.map(([a, b]) => (a === b ? short(a) : `${short(a)} a ${short(b)}`)).join(", ");
 }
 
 export function radarRows(radar: IntelOverview["radar"], mode: "capital" | "products") {
