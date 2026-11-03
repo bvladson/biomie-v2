@@ -3,6 +3,7 @@ sessão do Claude aberta). Cada passo pesado passa pela janela de testes (--espe
 ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqui muda a produção.
 
     python ops/noturno.py matriz [release] [rodadas]   # teste controlado da correção da MAG Matriz
+    python ops/noturno.py matriz-teste <release> [rodadas]  # idem com cópia nova e a homologação no ar
     python ops/noturno.py sales-kpis [release]         # sales_kpis: diagnóstico, testes do banco e comparação
     python ops/noturno.py intel [release]              # Inteligência (fases 1–5) na homologação
     python ops/noturno.py intel-fornecedores [release] # idem, com fornecedores e prazos (0048/0049)
@@ -177,6 +178,25 @@ def matriz(release, rounds):
     rc, after, err = remote(['ops/44_omie_ritmo.py', '6'], '99-producao-6h', out)
     summary['productionLast6h'] = None if not after else {
         'busyAnswers': after['busyAnswers']['total'], 'circuitPauseLines': after['circuitPauseLines']['total']}
+    summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+    (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+
+def matriz_teste(release, rounds):
+    """Teste controlado da correção da MAG Matriz com a cópia no ar: cópia nova → homologação com a release de
+    teste (correção + rastreio; o mesmo código do worker da candidata) → as rodadas do `matriz` → down."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-matriz-preparo'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
+    remote(['ops/41_homolog.py', 'down'], '01a-homologacao-down', out)
+    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '01b-copia-nova', out)
+    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out) if refresh else (1, None, '')
+    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
+    if up:
+        matriz(release, rounds)
+    rc, _, _ = remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
     summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
     (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
     print(json.dumps(summary, indent=1, ensure_ascii=False))
@@ -871,9 +891,14 @@ if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
     lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
-                                    'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups') else None
+                                    'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups',
+                                    'matriz-teste') else None
     if task == 'legado-backups':
         legado_backups()
+    elif task == 'matriz-teste':
+        if len(sys.argv) < 3:
+            raise SystemExit('uso: matriz-teste <release com rastreio> [rodadas]')
+        matriz_teste(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 3)
     elif task == 'intel-diaria-copia':
         intel_diaria_copia(sys.argv[2] if len(sys.argv) > 2 else None)
     elif task == 'intel-diaria-ativar':
