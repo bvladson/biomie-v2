@@ -256,6 +256,34 @@ Inteligência aparece quando o motor está ligado, quando há análise publicada
 - Fornecedores na produção (só com autorização): `40_stock.py suppliers on|off` (importação diária) e
   `40_stock.py suppliers-status`.
 
+### 14.1 Análise diária (etapa D, autorizada pelo usuário em 03/11/2026)
+
+- Rotina do servidor `ops/intel_diaria.py`, instalada em `/opt/biomie-v2/bin/intel_diaria.py` (0700) e
+  chamada pelo cron `/etc/cron.d/biomie-v2-intel` (fuso do servidor America/Fortaleza = Brasília):
+  **06:33** análise (trigger `schedule`), **07:03** nova tentativa só se a de hoje não saiu (`--se-faltar`),
+  **07:35** verificação (`--verificar`). Não depende de sessão nem de computador local.
+- Por que 06:33: usa o fechamento do estoque das 23:50 (todas as empresas com a mesma data de posição) e as
+  vendas carregadas até 06:21; termina antes do expediente e longe das cargas (:21/:51) e da leitura das 07:40.
+  A foto do dia (`stock_snapshots`) leva a data da posição: a das 06:33 de amanhã grava o fechamento de hoje.
+- Cada chamada: trava própria → chave `intel_settings.enabled` (desligada = não roda nada) → execução
+  `running` sem processo do motor vira falha (senão bloquearia por 2 h) → imagem `biomie-v2-intel:<release>`
+  (refeita se a limpeza diária do Docker das 05:01 a apagou; o contêiner `biomie-v2-intel-reserva`, que
+  nunca roda — sem rede, sem variáveis, entrada `/bin/true` — segura a imagem) → motor com tempo máximo de
+  25 min → conferência: as 5 empresas na mesma execução, diagnósticos, recomendações, foto do dia, histórico
+  das curvas e capital do motor = posições (a mesma conta do `43_intel_check.py`).
+- Idempotente: rodar duas vezes no mesmo dia publica outra execução, mas substitui (não duplica) a foto e o
+  histórico das curvas daquele dia; alertas abertos continuam únicos (índice `intel_alerts_open`).
+- Falha nunca apaga a análise anterior (o motor só troca tudo no fim). Falha, análise que não saiu até
+  07:35 ou conferência diferente viram `WARN inteligencia diaria ...` em `/var/log/biomie-v2-health.log`
+  (lido pelo `36_stability.py`).
+- Monitoramento: `python ops/remote.py ops/42_intel.py agenda status` (cron, rotina e sha256, situação de
+  `/opt/biomie-v2/ops/intel-diaria.json` com as últimas 30 chamadas, final de `/var/log/biomie-v2-intel.log`,
+  execuções, dias com foto e com histórico das curvas). Rodar à mão pela mesma rotina:
+  `42_intel.py agenda executar [--se-faltar|--verificar]`.
+- Instalação: `python ops/noturno.py intel-diaria-copia` (cópia nova, rotina enviada, teste 53 com cron de
+  verdade, 43 na cópia) e depois `python ops/noturno.py intel-diaria-ativar` (só com o teste do dia inteiro
+  e a mesma rotina: envia, `agenda instalar --sha256=…`, `enable`, primeira execução, 43, navegador).
+
 ## 15. Testes
 
 - Motor: 61 testes (`intelligence/tests`), inclusive vazamento temporal, reprodutibilidade, séries
@@ -277,6 +305,10 @@ Inteligência aparece quando o motor está ligado, quando há análise publicada
 - Etapa A (código com tudo desligado): reativar a release anterior. O executor ignora as migrações
   mais novas; as tabelas `intel_*` ficam sem uso; nada oficial muda.
 - Motor: `42_intel.py disable`. Telas: o modo do Estoque (`40_stock.py mode off|pilot`).
+- Análise diária (desligamento imediato): `42_intel.py disable` (a próxima chamada do cron não roda o
+  motor) + `42_intel.py agenda remover` (tira o cron; rotina e logs ficam como evidência); com uma execução
+  em andamento, `42_intel.py parar` antes (derruba o motor e marca a execução como falha). A tela continua
+  com a última análise publicada; fotos e histórico já gravados ficam.
 - Fornecedores: `40_stock.py suppliers off` para a importação; a release anterior ignora as tabelas; o
   retorno da 0048 (`deploy/db/rollback/0048_stock_suppliers.down.sql`, `psql -1`) volta painel, posições,
   opções e agenda do worker às da 0043 e mantém as tabelas com o que Compras já informou.

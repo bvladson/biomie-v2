@@ -17,6 +17,14 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
                                                        # fornecedores, motor, conferências, comparação
                                                        # com a produção, navegador e RETORNO (a release da
                                                        # produção sobe sobre o mesmo banco e é testada)
+    python ops/noturno.py intel-diaria-copia [release] # ANÁLISE DIÁRIA na cópia: cópia nova, subida, envio
+                                                       # da rotina (ops/intel_diaria.py) e o teste 53 com
+                                                       # cron de verdade, depois a conferência 43
+    python ops/noturno.py intel-diaria-ativar          # PRODUÇÃO (autorização de 03/11/2026): só com o teste
+                                                       # da cópia de hoje inteiro e a mesma rotina; instala
+                                                       # o cron, liga, roda a 1ª vez, confere (43) e testa no
+                                                       # navegador; 1ª execução sem análise conferida =
+                                                       # desliga e retira a agenda sozinho
 
 Uma tarefa por vez e NA ORDEM em que começaram a esperar (fila de senhas em ops/logs/noturno/fila;
 trava em ops/logs/noturno/.trava, solta sozinha quando o processo acaba, mesmo se cair). As tarefas que
@@ -40,6 +48,7 @@ uma janela sem uso real da chave pela produção) → produção nas últimas ho
 rodada encerrada por segurança ou com 2 ou mais respostas "já existe uma requisição".
 """
 import datetime as dt
+import hashlib
 import json
 import msvcrt
 import os
@@ -66,6 +75,11 @@ TRAIN_RELEASE = '266d297add0b'
 PRODUCTION_RELEASE = 'cdb333a1f2a5'
 # Retorno da produção: a release anterior (só o web, com a barra de rolagem; mesmo banco da 1240466bf0c3).
 PREVIOUS_RELEASE = 'cb9aeeb06539'
+# Rotina da análise diária (roda no servidor, chamada pelo cron); enviada por SSH, conferida pelo sha256.
+RUNNER_LOCAL = BASE / 'ops' / 'intel_diaria.py'
+RUNNER_REMOTE = '/opt/biomie-v2/bin/intel_diaria.py'
+SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=yes',
+       '-i', str(pathlib.Path.home() / '.ssh/hostinger_srv1851839_ed25519'), 'root@179.197.238.57']
 
 
 def _held(path):
@@ -624,6 +638,170 @@ def trem(release):
     return done()
 
 
+def runner_bytes():
+    """A rotina como vai para o servidor: sempre com fim de linha LF (o Windows pode gravar CRLF)."""
+    return RUNNER_LOCAL.read_bytes().replace(b'\r\n', b'\n')
+
+
+def upload_runner(out, name):
+    """Envia ops/intel_diaria.py para /opt/biomie-v2/bin/intel_diaria.py (0700, troca atômica) e confere o
+    sha256 dos dois lados. Só a rotina: o cron é instalado à parte (42_intel.py agenda instalar)."""
+    data = runner_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    command = (f'umask 077 && mkdir -p /opt/biomie-v2/bin && cat > {RUNNER_REMOTE}.novo && '
+               f'chmod 0700 {RUNNER_REMOTE}.novo && mv -f {RUNNER_REMOTE}.novo {RUNNER_REMOTE} && '
+               f'sha256sum {RUNNER_REMOTE}')
+    p = subprocess.run(SSH + [command], input=data, capture_output=True, timeout=120)
+    text = p.stdout.decode('utf-8', 'replace').split()
+    remote_digest = text[0] if p.returncode == 0 and text else None
+    result = {'local': digest, 'remote': remote_digest, 'ok': remote_digest == digest, 'bytes': len(data),
+              'rc': p.returncode, 'error': p.stderr.decode('utf-8', 'replace').strip()[-300:] or None}
+    (out / f'{name}.txt').write_text(json.dumps(result, indent=1), encoding='utf-8')
+    return result
+
+
+def intel_diaria_copia(release=None):
+    """Análise diária na cópia: cópia NOVA da produção (= a produção agora: inteligência desligada) →
+    homologação com a release da produção → rotina enviada → teste 53 (cron de verdade, idempotência, nova
+    tentativa, trava, falha no meio, execução parada, verificação e desligamento) → conferência 43 → down."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-inteligencia-diaria-copia'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        rc, _, _ = remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
+        summary['down'] = {'rc': rc}
+        test, check, runner = summary.get('test') or {}, summary.get('check') or {}, summary.get('runner') or {}
+        summary['ok'] = bool(not summary.get('stopped') and runner.get('ok') and test.get('allOk')
+                             and test.get('runnerSha256') == runner.get('local') and check.get('allOk'))
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    summary['release'] = release or production_release(out)
+    remote(['ops/41_homolog.py', 'down'], '01a-homologacao-down', out)
+    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '01b-copia-nova', out)
+    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+    if not refresh:
+        return done('a cópia nova da produção falhou')
+    rc, up, err = remote(['ops/41_homolog.py', 'up', summary['release']] + WAIT, '02-homologacao-up', out)
+    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
+    if not up:
+        return done('a homologação não subiu')
+    summary['runner'] = upload_runner(out, '03-rotina-enviada')
+    if not summary['runner']['ok']:
+        return done('a rotina não chegou inteira ao servidor')
+    rc, test, err = remote(['ops/53_intel_diaria_teste.py'] + WAIT, '04-teste-da-rotina', out, timeout=3 * 3600)
+    summary['test'] = ({k: test.get(k) for k in ('allOk', 'failed', 'checks', 'runnerSha256', 'cron', 'engineSeconds',
+                                                  'timeline', 'history')} if test else {'rc': rc, 'error': err})
+    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '05-conferencia', out)
+    summary['check'] = ({k: check.get(k) for k in ('allOk', 'phasesOk', 'notes', 'companies')}
+                        if check else {'rc': rc, 'error': err})
+    return done()
+
+
+def intel_diaria_ok():
+    """O teste da análise diária na cópia (hoje ou ontem) passou inteiro? Devolve (ok, motivos, sha256 testado)."""
+    s = None
+    for day in (dt.date.today(), dt.date.today() - dt.timedelta(days=1)):
+        try:
+            s = json.loads((LOGS / 'noturno' / f'{day:%Y%m%d}-inteligencia-diaria-copia' / 'resumo.json')
+                           .read_text(encoding='utf-8'))
+            break
+        except (OSError, ValueError):
+            continue
+    if s is None:
+        return False, ['sem resumo do teste na cópia de hoje ou de ontem'], None
+    why = []
+    if s.get('stopped'):
+        why.append('o teste parou: ' + s['stopped'])
+    if not (s.get('runner') or {}).get('ok'):
+        why.append('a rotina não chegou inteira ao servidor')
+    test = s.get('test') or {}
+    if not test.get('allOk'):
+        why.append('conferências do teste: ' + ', '.join(test.get('failed') or ['sem resultado']))
+    if test.get('runnerSha256') != (s.get('runner') or {}).get('local'):
+        why.append('a rotina testada não é a enviada')
+    if not (s.get('check') or {}).get('allOk'):
+        why.append('conferência 43 da cópia')
+    return not why, why, (s.get('runner') or {}).get('local')
+
+
+def intel_rollback(out):
+    """Desligamento da análise diária: chave desligada (a rotina deixa de rodar o motor) e cron retirado. A tela
+    continua com a última análise publicada."""
+    rc1, off, err1 = remote(['ops/42_intel.py', 'disable'], '98-inteligencia-desligada', out)
+    rc2, gone, err2 = remote(['ops/42_intel.py', 'agenda', 'remover'], '99-agenda-retirada', out)
+    return {'disabled': rc1 == 0 and (off or {}).get('enabled') is False,
+            'cronRemoved': rc2 == 0 and (gone or {}).get('cron', {}).get('installed') is False,
+            'errors': [e for e in (err1 if rc1 else None, err2 if rc2 else None) if e]}
+
+
+def intel_diaria_ativar():
+    """Liga a análise diária na PRODUÇÃO (autorização do usuário de 03/11/2026: 06:33, persistente no servidor,
+    depois do teste na cópia). Primeira execução na hora, pela mesma rotina do cron, para mostrar o resultado."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-inteligencia-diaria-ativacao'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        summary['rollback'] = ('python ops/remote.py ops/42_intel.py disable && '
+                               'python ops/remote.py ops/42_intel.py agenda remover')
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    ok, why, tested = intel_diaria_ok()
+    summary['validation'] = {'ok': ok, 'problems': why, 'testedSha256': tested}
+    if not ok:
+        return done('o teste na cópia não passou inteiro: nada mudou na produção')
+    if hashlib.sha256(runner_bytes()).hexdigest() != tested:
+        return done('a rotina mudou depois do teste na cópia: teste de novo; nada mudou na produção')
+    summary['release'] = production_release(out)
+    deadline = time.time() + 4 * 3600
+    while (busy := activation_slot()):
+        if time.time() > deadline:
+            return done('sem horário livre em 4 h: ' + '; '.join(busy))
+        time.sleep(30)
+    summary['slotAt'] = dt.datetime.now().isoformat(timespec='seconds')
+    summary['runner'] = upload_runner(out, '01-rotina-enviada')
+    if not summary['runner']['ok'] or summary['runner']['remote'] != tested:
+        return done('a rotina não chegou inteira ao servidor: nada ligado')
+    rc, inst, err = remote(['ops/42_intel.py', 'agenda', 'instalar', f'--sha256={tested}'], '02-agenda-instalada', out)
+    summary['install'] = {'rc': rc, 'cron': (inst or {}).get('cron'), 'error': None if inst else err}
+    if rc != 0 or not ((inst or {}).get('cron') or {}).get('expected'):
+        summary['rollbackRun'] = intel_rollback(out)
+        return done('a agenda não foi instalada como esperado: retirada; inteligência continua desligada')
+    rc, on, err = remote(['ops/42_intel.py', 'enable'], '03-inteligencia-ligada', out)
+    summary['enabled'] = (on or {}).get('enabled')
+    if rc != 0 or summary['enabled'] is not True:
+        summary['rollbackRun'] = intel_rollback(out)
+        return done('a inteligência não ligou: agenda retirada')
+    rc, first, err = remote(['ops/42_intel.py', 'agenda', 'executar'], '04-primeira-execucao', out, timeout=3600)
+    situation = (first or {}).get('situacao') or {}
+    summary['first'] = situation or {'rc': rc, 'error': err}
+    if situation.get('resultado') != 'publicada' or situation.get('consistente') is not True:
+        summary['rollbackRun'] = intel_rollback(out)
+        return done('a primeira execução não publicou uma análise conferida: análise diária DESLIGADA de novo e '
+                    'agenda retirada (a tela segue com a última análise publicada)')
+    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2'] + WAIT, '05-conferencia', out)
+    summary['check'] = ({k: check.get(k) for k in ('allOk', 'phasesOk', 'notes', 'companies')}
+                        if check else {'rc': rc, 'error': err})
+    if not (check or {}).get('allOk'):
+        summary['rollbackRun'] = intel_rollback(out)
+        return done('a conferência 43 da produção não passou: análise diária DESLIGADA de novo e agenda retirada')
+    rc, agenda, err = remote(['ops/42_intel.py', 'agenda', 'status'], '06-agenda', out)
+    summary['agenda'] = ({k: agenda.get(k) for k in ('cron', 'runner', 'logrotate', 'pin', 'engine')}
+                         if agenda else {'rc': rc, 'error': err})
+    summary['browser'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel',
+                                '--shots', f'intel-diaria-{dt.date.today():%Y%m%d}'], '07-navegador-producao', out)
+    return done()
+
+
 def banco(release):
     """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-banco-{release}'
@@ -646,8 +824,12 @@ if __name__ == '__main__':
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
     lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
-                                    'ativar') else None
-    if task == 'intel':
+                                    'ativar', 'intel-diaria-copia', 'intel-diaria-ativar') else None
+    if task == 'intel-diaria-copia':
+        intel_diaria_copia(sys.argv[2] if len(sys.argv) > 2 else None)
+    elif task == 'intel-diaria-ativar':
+        intel_diaria_ativar()
+    elif task == 'intel':
         intel(sys.argv[2] if len(sys.argv) > 2 else INTEL_RELEASE)
     elif task == 'banco':
         if len(sys.argv) < 3:
