@@ -8,6 +8,8 @@ preservando a capacidade de recuperação"; NÃO autoriza excluir dados, bancos 
     python ops/remote.py ops/54_legado.py parar-texto-puro           # desliga só o dump sem cifra das 03:00
     python ops/remote.py ops/54_legado.py desfazer-parar-texto-puro  # religa aquela linha
     python ops/remote.py ops/54_legado.py desfazer-backup-v2         # volta o backup.py anterior
+    python ops/remote.py ops/54_legado.py testar-restauracao         # arquivo cifrado novo restaurado num MariaDB
+                                                                     # descartável (sem rede) e contado tabela a tabela
 
 backup-v2: grava /opt/biomie-v2/shared/offsite.conf (HOST, PORT, USER e o CAMINHO da chave; nenhum segredo) com o
 mesmo destino que o backup.py hoje lê de dentro do script antigo, instala o backup.py da release ativa (a versão
@@ -352,6 +354,128 @@ def undo_stop():
     return {'restoredLines': changed, 'dbBackupActive': any('db_backup.sh' in l for _, l in cron_lines(new))}
 
 
+RESTORE_CONTAINER = 'biomie-legado-restauracao'
+RESTORE_IMAGE = 'mariadb:11.8'  # a mesma versão do servidor (11.8.8); a imagem já existe (outros sistemas a usam)
+
+
+def count_sql(schema, tables):
+    """Contagem exata de todas as tabelas num único retrato (transação com snapshot consistente)."""
+    parts = [f"select '{t}', count(*) from `{schema}`.`{t}`" for t in tables]
+    return 'start transaction with consistent snapshot;\n' + '\nunion all\n'.join(parts) + ';\ncommit;\n'
+
+
+def parse_counts(text):
+    out = {}
+    for line in text.splitlines():
+        name, sep, value = line.partition('\t')
+        if sep and value.strip().isdigit():
+            out[name] = int(value)
+    return out
+
+
+def live_tables():
+    names = run(['mariadb', '-N', '-e', "select table_name from information_schema.tables "
+                 f"where table_schema = '{DB}' and table_type = 'BASE TABLE' order by 1"]).stdout.split()
+    if any(not re.fullmatch(r'[A-Za-z0-9_]{1,64}', n) for n in names):
+        raise SystemExit('nome de tabela inesperado no banco antigo: teste não iniciado')
+    return names
+
+
+def live_counts(tables):
+    return parse_counts(run(['mariadb', '-N', DB], input=count_sql(DB, tables), timeout=900).stdout)
+
+
+def compare_counts(before, after, restored):
+    """Tabela que não mudou durante o dump (antes = depois) tem de voltar com o mesmo número de linhas;
+    tabela que mudou no meio fica listada (o dump é um retrato de um instante entre as duas contagens)."""
+    missing = sorted(set(before) - set(restored))
+    extra = sorted(set(restored) - set(before))
+    changed = {t: [before[t], after.get(t)] for t in before if after.get(t) != before[t]}
+    wrong = {t: {'banco': before[t], 'restaurado': restored.get(t)} for t in before
+             if t not in changed and t in restored and restored[t] != before[t]}
+    between = {t: v for t, v in changed.items() if restored.get(t) is not None
+               and min(v[0], v[1] if v[1] is not None else v[0]) <= restored[t] <= max(v[0], v[1] if v[1] is not None else v[0])}
+    return {'ok': not missing and not extra and not wrong, 'tables': len(before), 'restoredTables': len(restored),
+            'rowsLive': sum(before.values()), 'rowsRestored': sum(restored.values()),
+            'missing': missing, 'extra': extra, 'different': wrong,
+            'changedDuringDump': {t: {'antes': v[0], 'depois': v[1], 'restaurado': restored.get(t),
+                                      'entre': t in between} for t, v in changed.items()}}
+
+
+def restore_test():
+    """Teste de restauração (preparação da desativação, 03/11/2026): contagem exata do banco antigo → arquivo
+    cifrado NOVO (o mesmo arquivo-cifrado) → contagem de novo → restauração desse arquivo num MariaDB descartável
+    (sem rede, 1 CPU, 2 GB) → contagem do restaurado e comparação. O contêiner e o volume são apagados no fim."""
+    busy_until = now() + dt.timedelta(minutes=5)
+    while run(['pgrep', '-f', '/var/www/biomie/live/cron/hostinger/'], check=False).returncode == 0:
+        if now() > busy_until:
+            raise SystemExit('tarefa do legado rodando há mais de 5 min: teste adiado (nada mudou)')
+        subprocess.run(['sleep', '20'])
+    tables = live_tables()
+    before = live_counts(tables)
+    manifest = archive()
+    after = live_counts(tables)
+    final = pathlib.Path(manifest['file'])
+    timeline = {'countsBefore': len(before), 'archive': final.name}
+    run(['docker', 'rm', '-fv', RESTORE_CONTAINER], check=False)
+    try:
+        run(['docker', 'run', '-d', '--name', RESTORE_CONTAINER, '--network', 'none', '--cpus', '1', '--memory', '2g',
+             '-e', 'MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1', '-e', 'MARIADB_DATABASE=restaurado', RESTORE_IMAGE,
+             '--innodb-buffer-pool-size=768M', '--skip-log-bin'], timeout=300)
+        ready = False
+        for _ in range(60):
+            if run(['docker', 'exec', RESTORE_CONTAINER, 'healthcheck.sh', '--connect', '--innodb_initialized'],
+                   check=False, timeout=30).returncode == 0:
+                ready = True
+                break
+            subprocess.run(['sleep', '5'])
+        if not ready:
+            raise SystemExit('MariaDB descartável não ficou pronto em 5 min')
+        started = now()
+        errors = ARCHIVE_DIR / f'.erros-restauracao-{stamp()}.txt'
+        with open(errors, 'wb') as err:
+            dec = subprocess.Popen(['gpg', '--batch', '--quiet', '--pinentry-mode', 'loopback', '--passphrase-file',
+                                    str(PASSPHRASE), '-d', str(final)], stdout=subprocess.PIPE, stderr=err)
+            gunz = subprocess.Popen(['gzip', '-dc'], stdin=dec.stdout, stdout=subprocess.PIPE, stderr=err)
+            dec.stdout.close()
+            load = subprocess.Popen(['docker', 'exec', '-i', RESTORE_CONTAINER, 'mariadb', '-uroot',
+                                     '--max-allowed-packet=1073741824', 'restaurado'], stdin=gunz.stdout, stderr=err,
+                                    stdout=subprocess.DEVNULL)
+            gunz.stdout.close()
+            try:
+                load.wait(timeout=75 * 60)
+                gunz.wait(timeout=120)
+                dec.wait(timeout=120)
+            except subprocess.TimeoutExpired:
+                for p in (load, gunz, dec):
+                    p.kill()
+                raise SystemExit('restauração passou de 75 minutos: interrompida (contêiner apagado)')
+        messages = errors.read_text(errors='replace')[-600:]
+        errors.unlink(missing_ok=True)
+        timeline['importSeconds'] = round((now() - started).total_seconds())
+        if load.returncode or gunz.returncode or dec.returncode:
+            raise SystemExit(f'restauração falhou (mariadb {load.returncode}, gzip {gunz.returncode}, '
+                             f'gpg {dec.returncode}): {messages}')
+        restored_tables = run(['docker', 'exec', RESTORE_CONTAINER, 'mariadb', '-uroot', '-N', '-e',
+                               "select table_name from information_schema.tables where table_schema = 'restaurado' "
+                               "and table_type = 'BASE TABLE' order by 1"]).stdout.split()
+        restored = parse_counts(run(['docker', 'exec', '-i', RESTORE_CONTAINER, 'mariadb', '-uroot', '-N', 'restaurado'],
+                                    input=count_sql('restaurado', restored_tables), timeout=900).stdout)
+        size = run(['docker', 'exec', RESTORE_CONTAINER, 'mariadb', '-uroot', '-N', '-e',
+                    "select round(sum(data_length + index_length) / 1048576) from information_schema.tables "
+                    "where table_schema = 'restaurado'"]).stdout.strip()
+    finally:
+        run(['docker', 'rm', '-fv', RESTORE_CONTAINER], check=False)
+    result = compare_counts(before, after, restored)
+    result.update({'archive': manifest, 'restoredMb': size, 'timeline': timeline,
+                   'container': {'image': RESTORE_IMAGE, 'network': 'none', 'removed': True},
+                   'warnings': messages.strip()[-300:] or None})
+    path = final.with_name(final.name + '.restauracao.json')
+    path.write_text(json.dumps({k: v for k, v in result.items() if k != 'archive'}, indent=1, default=str))
+    os.chmod(path, 0o600)
+    return result
+
+
 def undo_backup_v2():
     saved = sorted(BACKUP_PY.parent.glob('backup.py.antes-*'))
     if not saved:
@@ -362,7 +486,8 @@ def undo_backup_v2():
 
 
 COMMANDS = {'status': status, 'backup-v2': backup_v2, 'arquivo-cifrado': archive, 'parar-texto-puro': stop_plaintext,
-            'desfazer-parar-texto-puro': undo_stop, 'desfazer-backup-v2': undo_backup_v2}
+            'desfazer-parar-texto-puro': undo_stop, 'desfazer-backup-v2': undo_backup_v2,
+            'testar-restauracao': restore_test}
 
 if __name__ == '__main__':
     command = sys.argv[1] if len(sys.argv) > 1 else 'status'

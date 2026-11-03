@@ -29,6 +29,8 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
     python ops/noturno.py legado-backups               # BIomie antigo (03/11/2026): backup do v2 sem o legado,
                                                        # arquivo final CIFRADO do banco antigo e só então
                                                        # desliga o dump sem cifra das 03:00 (nada é apagado)
+    python ops/noturno.py legado-restauracao           # teste de restauração do arquivo cifrado do legado num
+                                                       # MariaDB descartável, tabela a tabela (nada é apagado)
 
 Uma tarefa por vez e NA ORDEM em que começaram a esperar (fila de senhas em ops/logs/noturno/fila;
 trava em ops/logs/noturno/.trava, solta sozinha quando o processo acaba, mesmo se cair). As tarefas que
@@ -869,6 +871,35 @@ def legado_backups():
     return done(None if (stop or {}).get('ok') else 'a linha do dump sem cifra não foi desligada')
 
 
+def legado_restauracao():
+    """Preparação da desativação do BIomie antigo: arquivo cifrado novo restaurado num MariaDB descartável e contado
+    tabela a tabela (54_legado.py testar-restauracao). Começa nos minutos :05–:12 ou :35–:42, depois do
+    materialize do legado (:00/:30), para o banco mudar o mínimo durante o dump. Nada é apagado."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-legado-restauracao'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'started': dt.datetime.now().isoformat(timespec='seconds')}
+    deadline = time.time() + 6 * 3600
+    while True:
+        busy = night_slot()
+        if not (5 <= dt.datetime.now().minute % 30 <= 12):
+            busy.append('fora dos minutos :05–:12 / :35–:42')
+        if not busy:
+            break
+        if time.time() > deadline:
+            summary['stopped'] = 'sem horário livre em 6 h: ' + '; '.join(busy)
+            break
+        time.sleep(60)
+    if 'stopped' not in summary:
+        rc, test, err = remote(['ops/54_legado.py', 'testar-restauracao'], '01-teste-de-restauracao', out,
+                               timeout=3 * 3600)
+        summary['restoreTest'] = ({k: v for k, v in test.items() if k != 'archive'} if test else {'rc': rc, 'error': err})
+        if test:
+            summary['archive'] = {k: test['archive'].get(k) for k in ('file', 'bytes', 'sha256', 'tables', 'offsite')}
+    summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+    (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+
 def banco(release):
     """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-banco-{release}'
@@ -892,9 +923,11 @@ if __name__ == '__main__':
     task = sys.argv[1] if len(sys.argv) > 1 else ''
     lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
                                     'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups',
-                                    'matriz-teste') else None
+                                    'matriz-teste', 'legado-restauracao') else None
     if task == 'legado-backups':
         legado_backups()
+    elif task == 'legado-restauracao':
+        legado_restauracao()
     elif task == 'matriz-teste':
         if len(sys.argv) < 3:
             raise SystemExit('uso: matriz-teste <release com rastreio> [rodadas]')
