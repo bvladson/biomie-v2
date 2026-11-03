@@ -125,8 +125,9 @@ def set_enabled(value):
 
 
 def wait_cron(target, before_at):
-    """Espera a rotina disparada pelo cron gravar a situação (até 6 min depois do horário marcado)."""
-    limit = target + dt.timedelta(minutes=6)
+    """Espera a rotina disparada pelo cron gravar a situação (até 12 min depois do horário marcado: na 1ª vez a
+    cópia constrói a imagem do motor do zero, porque a limpeza diária do Docker apaga até a imagem base)."""
+    limit = target + dt.timedelta(minutes=12)
     while dt.datetime.now() < limit:
         try:
             s = json.loads(STATUS.read_text(encoding='utf-8'))
