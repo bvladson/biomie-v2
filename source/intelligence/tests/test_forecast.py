@@ -49,6 +49,28 @@ def test_weekly_series_uses_calendar_weeks_and_leaves_the_current_week_out():
     assert len(y) == 0 and first is None
 
 
+def test_at_most_51_weeks_inside_the_365_days_of_the_extract_on_every_day():
+    """Com mais de um ano de vendas no BIOMIE, o retrato traz só 365 dias: a série tem as 51 semanas que
+    cabem nele em qualquer dia da semana (nunca uma semana fora do retrato contada como zero) e a semana
+    mais antiga sai na mesma segunda-feira em que a nova entra."""
+    sales_from = date(2026, 1, 1)
+    sales = [(sales_from + timedelta(days=d), 1.0) for d in range(0, 500, 3)]
+    monday = date(2027, 3, 8)
+    week = []
+    for k in range(7):
+        as_of = monday + timedelta(days=k)
+        lo = as_of - timedelta(days=364)  # o que o retrato de as_of traz
+        y, first = weekly_series([(d, q) for d, q in sales if lo <= d < as_of], as_of, sales_from)
+        assert first >= lo and first.weekday() == 0 and len(y) == 51 and (y > 0).all()
+        week.append((list(y), first))
+    assert all(w == week[0] for w in week[1:])
+    y, first = weekly_series([(d, q) for d, q in sales if d < monday + timedelta(days=7)],
+                             monday + timedelta(days=7), sales_from)
+    assert len(y) == 51 and first == week[0][1] + timedelta(days=7)
+    # antes de completar um ano, nada muda: começa na 1ª segunda-feira das vendas
+    assert weekly_series(sales, date(2026, 11, 4), sales_from)[1] == date(2026, 1, 5)
+
+
 def test_same_series_model_and_status_on_every_day_of_the_week():
     rng = np.random.default_rng(11)
     sales_from = date(2026, 1, 1)

@@ -12,6 +12,10 @@ o outro e a previsão oscilava sem venda nova).
     ficaram de fora).
   - A primeira semana começa na primeira segunda-feira a partir do início das vendas no BIOMIE. Semana
     parcial no início e semanas anteriores são desconhecidas e ficam de fora (nunca viram zero).
+  - No máximo 51 semanas: o retrato traz 365 dias de vendas e 51 semanas completas cabem nele em qualquer
+    dia da semana (52 só cabem na segunda-feira). Assim, quando o histórico passar de um ano (a partir de
+    04/01/2027), a semana mais antiga sai na mesma segunda-feira em que a nova entra — sem semana fora do
+    retrato contada como zero e sem uma segunda mudança na terça.
 
 Modelos (todos determinísticos, do mais simples ao mais elaborado):
   media_13s   média das últimas 13 semanas (≈ 90 dias) — a base de comparação;
@@ -60,6 +64,8 @@ MIN_WEEKS, MIN_NONZERO, MIN_ORIGINS, MIN_TRAIN, INTERVAL_ORIGINS, IDLE_WEEKS = 1
 ALPHA, BETA, SES_ALPHAS = 0.1, 0.1, (0.1, 0.2, 0.3)
 INSUFFICIENT = "Histórico insuficiente para previsão confiável."
 SERIES_WEEKS = 26
+SALES_WINDOW_DAYS = 365  # o retrato (stock_intel_extract) traz as vendas dos 365 dias até o dia da análise
+MAX_WEEKS = (SALES_WINDOW_DAYS - 7) // 7  # 51: semanas completas dentro do retrato em qualquer dia da semana
 
 
 def last_week_end(as_of: date) -> date:
@@ -74,7 +80,8 @@ def weekly_series(sales: list[tuple[date, float]], as_of: date, sales_from: date
     if sales_from is None or sales_from > as_of:
         return np.zeros(0), None
     end = last_week_end(as_of)
-    first = sales_from + timedelta(days=(7 - sales_from.weekday()) % 7)  # 1ª segunda-feira com vendas no BIOMIE
+    first = max(sales_from + timedelta(days=(7 - sales_from.weekday()) % 7),  # 1ª segunda com vendas no BIOMIE
+                end - timedelta(days=7 * MAX_WEEKS - 1))  # e no máximo MAX_WEEKS semanas até end
     weeks = max(0, ((end - first).days + 1) // 7)
     y = np.zeros(weeks)
     for day, qty in sales:
