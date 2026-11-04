@@ -149,7 +149,7 @@ describe("OmieClient", () => {
     expect(waits).toEqual([12_000]);
   });
 
-  it("also waits 12 s after an empty period answered as an empty list (no fault)", async () => {
+  it("also waits after an empty period answered as an empty list (no fault): 12 s, 60 s for ListarMovimentos", async () => {
     let t = 0;
     const waits: number[] = [];
     const limiter = new OmieRateLimiter(
@@ -166,13 +166,18 @@ describe("OmieClient", () => {
       [
         () => json({ pagina: 0, total_de_paginas: 0, total_de_registros: 0, lista: [] }),
         () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 1 }] }),
+        () => json({ pagina: 0, total_de_paginas: 0, total_de_registros: 0, lista: [] }),
+        () => json({ total_de_paginas: 1, registros: 1, lista: [{ a: 1 }] }),
       ],
       limiter,
     );
     const empty = await client.listPage("x/", "ListarMovimentos", { pagina: 1, mes: 1 }, ["lista"]);
     expect(empty.totalPages).toBe(0);
     await client.listPage("x/", "ListarMovimentos", { pagina: 1, mes: 2 }, ["lista"]);
-    expect(waits).toEqual([12_000]);
+    expect(waits).toEqual([60_000]);
+    await client.listPage("x/", "ListarContasReceber", { pagina: 1, mes: 1 }, ["lista"]);
+    await client.listPage("x/", "ListarContasReceber", { pagina: 1, mes: 2 }, ["lista"]);
+    expect(waits).toEqual([60_000, 12_000]);
   });
 
   it("after a busy answer the next calls of that method are spaced 20 s", async () => {
@@ -307,6 +312,74 @@ describe("OmieRateLimiter", () => {
     expect(waits).toEqual([]);
     await l.run("k", "ListarContasReceber", async () => 1);
     expect(waits).toEqual([12_000]);
+  });
+
+  it("waits 60 s after an empty page of ListarMovimentos and keeps 12 s for the other methods", async () => {
+    // Teste controlado de 03/11/2026 (MAG Matriz): movimentos ainda ocupado 12 s e 20 s depois de período vazio.
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      {},
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarMovimentos", async () => 1);
+    l.noteEmptyPage("k", "ListarMovimentos");
+    await l.run("k", "ListarMovimentos", async () => 1);
+    expect(waits).toEqual([60_000]);
+    await l.run("k", "ListarContasReceber", async () => 1);
+    l.noteEmptyPage("k", "ListarContasReceber");
+    await l.run("k", "ListarContasReceber", async () => 1);
+    expect(waits).toEqual([60_000, 12_000]);
+    // Outra chave não espera nada por causa desta.
+    await l.run("other", "ListarMovimentos", async () => 1);
+    expect(waits).toEqual([60_000, 12_000]);
+  });
+
+  it("the general 0 also turns off the longer wait of ListarMovimentos (rollback without a release)", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      { emptyPageGapMs: 0 },
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarMovimentos", async () => 1);
+    l.noteEmptyPage("k", "ListarMovimentos");
+    await l.run("k", "ListarMovimentos", async () => 1);
+    expect(waits).toEqual([2_000]);
+  });
+
+  it("a method override can only lengthen the wait, never shorten it", async () => {
+    let t = 0;
+    const waits: number[] = [];
+    const l = new OmieRateLimiter(
+      { emptyPageGapByMethodMs: { ListarMovimentos: 5_000 } },
+      {
+        now: () => t,
+        sleep: async (ms) => {
+          waits.push(ms);
+          t += ms;
+        },
+      },
+    );
+    await l.run("k", "ListarMovimentos", async () => 1);
+    l.noteEmptyPage("k", "ListarMovimentos");
+    await l.run("k", "ListarMovimentos", async () => 1);
+    expect(waits).toEqual([12_000]);
+    expect(
+      () => new OmieRateLimiter({ emptyPageGapByMethodMs: { ListarMovimentos: -1 } }),
+    ).toThrow();
   });
 
   it("spaces a method 20 s for 10 minutes after a busy answer, then back to 2 s", async () => {

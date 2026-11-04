@@ -38,6 +38,12 @@ export interface RateLimitConfig {
    * comes back "já existe uma requisição desse método" (MAG Matriz, 23/10/2026: 3 per cycle). 0 = off.
    */
   emptyPageGapMs: number;
+  /**
+   * Longer pause after an empty page for specific methods (the larger of the two wins). ListarMovimentos
+   * still answered "já existe uma requisição" 12 s and 20 s after an empty page in the controlled test of
+   * 03/11/2026 (MAG Matriz), while ListarContasReceber had none at 12 s. emptyPageGapMs = 0 turns all off.
+   */
+  emptyPageGapByMethodMs: Record<string, number>;
   /** After a "já existe uma requisição" answer, calls of that method and key are spaced by this. 0 = off. */
   busyGapMs: number;
   /** How long the wider spacing lasts after the last "já existe uma requisição" answer. */
@@ -56,6 +62,7 @@ export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   redundantSpacingMs: 61_000,
   minMethodGapMs: 2_000,
   emptyPageGapMs: 12_000,
+  emptyPageGapByMethodMs: { ListarMovimentos: 60_000 },
   busyGapMs: 20_000,
   busyGapWindowMs: 10 * 60_000,
   keyErrorBudget: 5,
@@ -118,6 +125,7 @@ export class OmieRateLimiter {
       this.cfg.emptyPageGapMs,
       this.cfg.busyGapMs,
       this.cfg.busyGapWindowMs,
+      ...Object.values(this.cfg.emptyPageGapByMethodMs),
     ])
       if (!Number.isFinite(value) || value < 0)
         throw new Error("Configuração inválida dos limites Omie.");
@@ -160,10 +168,8 @@ export class OmieRateLimiter {
   noteEmptyPage(appKey: string, method: string) {
     if (this.cfg.emptyPageGapMs <= 0) return;
     const k = OmieRateLimiter.key(appKey, method);
-    this.notBefore.set(
-      k,
-      Math.max(this.notBefore.get(k) ?? 0, this.now() + this.cfg.emptyPageGapMs),
-    );
+    const gap = Math.max(this.cfg.emptyPageGapMs, this.cfg.emptyPageGapByMethodMs[method] ?? 0);
+    this.notBefore.set(k, Math.max(this.notBefore.get(k) ?? 0, this.now() + gap));
   }
 
   /** Omie answered "já existe uma requisição desse método": space this method for a while. */
@@ -337,6 +343,15 @@ export function getSharedOmieLimiter(): OmieRateLimiter {
       minMethodGapMs: envNumber(env, "OMIE_MIN_METHOD_GAP_MS", DEFAULT_RATE_LIMIT.minMethodGapMs),
       // 0 desliga a espera adaptativa (retorno sem nova release: variável + reinício do worker).
       emptyPageGapMs: envNumber(env, "OMIE_EMPTY_PAGE_GAP_MS", DEFAULT_RATE_LIMIT.emptyPageGapMs),
+      // ListarMovimentos espera mais depois de período vazio (teste de 03/11/2026); ajuste sem nova release.
+      emptyPageGapByMethodMs: {
+        ...DEFAULT_RATE_LIMIT.emptyPageGapByMethodMs,
+        ListarMovimentos: envNumber(
+          env,
+          "OMIE_EMPTY_PAGE_GAP_MOVIMENTOS_MS",
+          DEFAULT_RATE_LIMIT.emptyPageGapByMethodMs["ListarMovimentos"] ?? 0,
+        ),
+      },
       busyGapMs: envNumber(env, "OMIE_BUSY_GAP_MS", DEFAULT_RATE_LIMIT.busyGapMs),
       busyGapWindowMs: envNumber(
         env,
