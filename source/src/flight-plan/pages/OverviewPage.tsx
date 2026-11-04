@@ -47,7 +47,9 @@ export function OverviewPage() {
   if (plan.isError) return <ErrorState error={plan.error} retry={() => plan.refetch()} />;
   const p = plan.data,
     m = p.summary;
-  const canEditTargets = !!me.data && (isManager(me.data) || me.data.roles.includes("GESTOR"));
+  // Gestor só edita metas dos vendedores da equipe: sem nenhum vendedor no escopo, o Destino é só leitura.
+  const canEditTargets =
+    !!me.data && (isManager(me.data) || (me.data.roles.includes("GESTOR") && p.sellers.length > 0));
   const currentWeek = p.weeks.find((w) => w.current);
   const openAlerts = (alerts.data ?? []).filter(
     (a) => a.state === "OPEN" || a.state === "ACKNOWLEDGED",

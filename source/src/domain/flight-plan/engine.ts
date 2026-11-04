@@ -569,6 +569,22 @@ const brl = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const pct = (v: number) => (v * 100).toLocaleString("pt-BR", { maximumFractionDigits: 0 }) + "%";
 
+/**
+ * Evidence of "month without target" for what the person sees: the whole company, a channel, their own
+ * scope (team or own seller) or one filtered seller. The aggregate key comes from the server
+ * ("empresa", "empresa-<canal>", "escopo-<uid>[-<canal>]", "filtro-<seller>", plus "~<hash>" for extra filters).
+ */
+export function noTargetEvidence(aggregateSubject: string, sellersInScope: number): string {
+  if (aggregateSubject.startsWith("filtro-")) return "Este vendedor não tem meta no mês";
+  if (aggregateSubject.startsWith("escopo-"))
+    return sellersInScope > 0
+      ? "Nenhum vendedor do seu escopo tem meta no mês"
+      : "Nenhum vendedor no seu escopo: peça ao administrador para ligar seu usuário a um vendedor ou equipe";
+  if (aggregateSubject.startsWith("empresa-"))
+    return "Meta do canal e dos vendedores do canal vazias";
+  return "Meta da empresa e dos vendedores vazias";
+}
+
 export function computeAlerts(
   ctx: {
     companyId: string;
@@ -609,7 +625,7 @@ export function computeAlerts(
       null,
       1,
       "Mês sem meta: nenhum pilar tem referência.",
-      "Meta da empresa e dos vendedores vazias",
+      noTargetEvidence(agg, subjects.filter((s) => s.sellerId).length),
     );
   if (ctx.calendarMissingYear !== null)
     push(

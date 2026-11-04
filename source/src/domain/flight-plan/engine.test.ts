@@ -5,9 +5,11 @@ import {
   buildTimeline,
   buildYearRows,
   companyTargetSet,
+  computeAlerts,
   computeMetrics,
   conversionStatus,
   deriveActions,
+  noTargetEvidence,
   partialPeriod,
   remainingWorkdays,
   statusFromRatio,
@@ -278,5 +280,37 @@ describe("legacy shape (Vendedores, Vendedor 360)", () => {
     expect(t.map((p) => p.working)).toEqual([true, true, false, true]);
     expect(t[3]!.projection).toBe(60);
     expect(t[1]!.isToday).toBe(true);
+  });
+});
+
+describe("alert NO_TARGET (month without target) by scope", () => {
+  it("says what is missing for the company, a channel, a team, a person without sellers and one seller", () => {
+    expect(noTargetEvidence("empresa", 4)).toBe("Meta da empresa e dos vendedores vazias");
+    expect(noTargetEvidence("empresa~1abc", 4)).toBe("Meta da empresa e dos vendedores vazias");
+    expect(noTargetEvidence("empresa-varejo", 3)).toBe(
+      "Meta do canal e dos vendedores do canal vazias",
+    );
+    expect(noTargetEvidence("escopo-u1", 2)).toBe("Nenhum vendedor do seu escopo tem meta no mês");
+    expect(noTargetEvidence("escopo-u1-varejo", 0)).toMatch(/^Nenhum vendedor no seu escopo: peça/);
+    expect(noTargetEvidence("filtro-s1", 1)).toBe("Este vendedor não tem meta no mês");
+  });
+
+  it("computeAlerts uses the scope of the reading (key and text)", () => {
+    const [a] = computeAlerts(
+      {
+        companyId: "c",
+        month: "2026-11",
+        noTarget: true,
+        calendarMissingYear: null,
+        aggregateSubject: "escopo-u1",
+      },
+      [],
+    );
+    expect(a).toMatchObject({
+      type: "NO_TARGET",
+      key: "NO_TARGET:c:escopo-u1:2026-11",
+      sellerId: null,
+    });
+    expect(a!.evidence).toMatch(/^Nenhum vendedor no seu escopo/);
   });
 });

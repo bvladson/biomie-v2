@@ -292,8 +292,11 @@ describe("Plano de Voo: leitura real × servidor", () => {
       expect(p.months).toHaveLength(12);
       const alerts = await listAlerts(db, userId, Q);
       assertClean(alerts);
-      // O alerta é do escopo da pessoa, nunca o da empresa inteira.
+      // O alerta é do escopo da pessoa, nunca o da empresa inteira, e diz o que falta para ela.
       expect(alerts.every((a) => !a.key.includes(":empresa:"))).toBe(true);
+      expect(alerts.find((a) => a.type === "NO_TARGET")?.evidence).toMatch(
+        /^Nenhum vendedor no seu escopo: peça ao administrador/,
+      );
       const t = await getTargets(db, C, "2026-11");
       assertClean(t);
       expect(t.sellers).toEqual([]);
