@@ -21,7 +21,8 @@
 - Roles are in `user_roles`; `ensure_app_profile()` provisions new users atomically as VIEWER. Administrators are provisioned explicitly during deployment (no automatic first-user promotion or triggers on auth schema).
 - Demo data is flagged via `companies.is_demo` / `source='demo'` and always surfaced with the demo badge.
 - Revenue valid statuses are configurable in `metric_config` (key `revenue`), read by `revenue_valid_statuses()`.
-- Flight Plan actions are derived deterministically on read; only their workflow status is persisted (`flight_plan_actions`), keyed by company/seller/period/type.
+- Flight Plan (v2, migration 0050): one read per month (`flight_plan_v2_dataset`, SECURITY INVOKER) returns raw facts; formulas live in `src/domain/flight-plan/engine.ts`; comparison windows come from `src/domain/comparison.ts` and are passed to SQL. Writes (targets, commits, initiatives, alert states, decisions) go only through `flight_plan_internal` (SECURITY DEFINER, not exposed) via SECURITY INVOKER `flight_plan_*` wrappers, each audited in `audit_log`. Alerts are derived on read; only their state is persisted (`flight_plan_alert_states`). Legacy Vendor 360 actions keep their workflow status in `flight_plan_actions`.
+- Seller channel follows the official rule (seller "Licitação" = licitacao, others = varejo) through the `zz_sellers_official_channel` trigger; never set `sellers.channel_id` by hand for real companies.
 - Fonts are self-hosted via @fontsource (no external render-blocking stylesheets; keeps SSR/tests deterministic).
 - `public.data_as_of(company)` is the only source of "today" for analytics (demo = last demo invoice date); SQL read models and the UI default period use it, never `new Date()` in screens.
 - Open orders are item-level (`sales_order_items` via `fact_orders`) so every global filter, including category, applies to Carteira.

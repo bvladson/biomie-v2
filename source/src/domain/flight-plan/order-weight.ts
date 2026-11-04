@@ -1,31 +1,38 @@
 /**
  * OrderWeightModel — the ONLY place an open order's forecast weight is decided.
  *
- * PROVISIONAL RULE (demo mode): weight depends only on the order age
- * (0–15 days → 90%, 16–45 → 60%, >45 → 30%; cut-offs and weights come from
- * metric_config.flight_plan). When the real Omie integration lands, the extra
- * fields below (status, stage, expected billing date…) will feed this model
- * without changing callers.
+ * Rules (cut-offs and weights come from metric_config.flight_plan):
+ * - expected billing date already passed → LATE, weight = lateOrderWeight (D3, 30%), alert;
+ * - expected billing date after the period end → outside the period, weight 0;
+ * - otherwise by age: 0–15 days fresh (90%), 16–45 recent (60%), older aged (30%).
+ * Quotes (Omie stage 10) are not orders: they are listed apart and never weighted (D4).
+ * The weights were decided, not calibrated: keep the flag until a calibration exists.
  */
 import type { FlightPlanConfig } from "./config";
-import type { PortfolioBuckets } from "./engine";
 
-export type AgeBucket = keyof PortfolioBuckets; // "fresh" | "recent" | "aged"
+export type AgeBucket = "fresh" | "recent" | "aged";
 
 export interface OrderWeightInput {
   ageDays: number;
   total: number;
-  /** Future inputs (ignored by the provisional rule). */
   status?: string | null;
   stage?: string | null;
   expectedDate?: string | null;
+}
+
+/** Reference dates: `today` enables the late rule, `periodEnd` the outside-the-period rule. */
+export interface OrderWeightContext {
+  today?: string;
+  periodEnd?: string;
 }
 
 export interface OrderWeight {
   bucket: AgeBucket;
   /** Probability applied in Forecast Provável and weighted portfolio. */
   weight: number;
-  /** Counts in Forecast Base (only fresh orders). */
+  late: boolean;
+  outOfPeriod: boolean;
+  /** Counts in Forecast Base (fresh, on time, inside the period). */
   inForecastBase: boolean;
   /** Every open order counts in Carteira. */
   inPortfolio: true;
@@ -40,24 +47,23 @@ export function ageBucket(ageDays: number, cfg: FlightPlanConfig): AgeBucket {
   return "aged";
 }
 
-export function weighOrder(o: OrderWeightInput, cfg: FlightPlanConfig): OrderWeight {
+export function weighOrder(
+  o: OrderWeightInput,
+  cfg: FlightPlanConfig,
+  ctx: OrderWeightContext = {},
+): OrderWeight {
   const bucket = ageBucket(o.ageDays, cfg);
-  const weight = cfg.probableWeights[bucket];
+  const late = !!(ctx.today && o.expectedDate && o.expectedDate < ctx.today);
+  const outOfPeriod =
+    !late && !!(ctx.periodEnd && o.expectedDate && o.expectedDate > ctx.periodEnd);
+  const weight = late ? cfg.lateOrderWeight : outOfPeriod ? 0 : cfg.probableWeights[bucket];
   return {
     bucket,
     weight,
-    inForecastBase: bucket === "fresh",
+    late,
+    outOfPeriod,
+    inForecastBase: bucket === "fresh" && !late && !outOfPeriod,
     inPortfolio: true,
     weighted: o.total * weight,
   };
-}
-
-/** Aggregate open orders into the buckets consumed by computeFlightPlan. */
-export function bucketOrders(
-  orders: OrderWeightInput[],
-  cfg: FlightPlanConfig,
-): PortfolioBuckets & { orders: number } {
-  const out = { fresh: 0, recent: 0, aged: 0, orders: orders.length };
-  for (const o of orders) out[ageBucket(o.ageDays, cfg)] += o.total;
-  return out;
 }

@@ -262,3 +262,44 @@ os dados de exemplo (`src/estoque/dev/mock-api.ts`) ficam só para os testes.
      `29_smoke.py --stock --stock-mode on` (gestor com menu, vendedor sem custo nem simulação).
 - **Retorno:** `40_stock.py mode off` (o menu some; dados, curvas e cenários ficam) e, se preciso,
   `reading off`. A release anterior funciona com a `0041` aplicada, porque ela só acrescenta objetos.
+
+## 13. Plano de Voo (cinco pilares: Destino, Rota, Velocidade, Painel, Correção de rota)
+
+Branch `feature/plano-de-voo-v2` (sobre a release do gráfico `2154e45`), migração `0050_flight_plan_v2`
+(somente acréscimos). Telas do pacote do Lovable (v3) em `src/flight-plan`, ligadas ao servidor por
+`src/flight-plan/api/server-client.ts`; o simulador (`src/flight-plan/api/mock.ts`) fica só para os testes.
+
+- **Onde ficam as regras:** contas só no motor `src/domain/flight-plan/engine.ts` (peso do pedido em
+  `order-weight.ts`, janelas de comparação em `src/domain/comparison.ts`). Leitura numa chamada só por mês
+  (`flight_plan_v2_dataset`, SECURITY INVOKER: a RLS decide o que cada um vê). Escrita só pelo esquema
+  `flight_plan_internal` (SECURITY DEFINER, fora da API) com wrappers `flight_plan_*` SECURITY INVOKER e
+  registro no `audit_log` (o histórico das telas).
+- **Decisões aplicadas (04/11/2026):** meta da empresa por canal + distribuição por vendedor (D1); sábado
+  0,33 na MAG Filial e na Uni Design, 0 nas demais (`metric_config.flight_plan.saturdayWeights`, D2);
+  pedido com previsão vencida pesa 30% e gera alerta (D3); orçamentos (etapa 10) à parte, fora da previsão
+  (D4); meta da empresa só Admin e Diretoria, Gestor só os vendedores da equipe dele (D5); compromisso do
+  mês: Admin, Diretoria, Gestor do vendedor ou o próprio vendedor; responsável de iniciativa: pessoa com
+  acesso ou vendedor (com ou sem login).
+- **Mudança em dado existente (a única):** o canal do cadastro dos vendedores das empresas reais passa a
+  seguir a regra oficial (vendedor "Licitação" = licitação, demais = varejo; gatilho
+  `zz_sellers_official_channel`). Antes estava vazio e todo filtro de canal que olhava o vendedor
+  (Plano de Voo, meta do Cockpit, listas) devolvia zero vendedores.
+- **Alertas:** calculados na leitura; o estado (Ciente, Ação criada, Resolvido) fica em
+  `flight_plan_alert_states`. Ciente cai quando o alerta piora; Resolvido volta quando o alerta some e
+  reaparece. A foto diária (`flight-plan-snapshots`) registra a presença dos alertas da empresa.
+- **Conversão de orçamentos:** histórico de etapa a partir da migração (`private.sales_order_stage_events`,
+  gatilho em `sales_orders`); fica "em formação" até 60 dias e 20 orçamentos resolvidos.
+- **Testes:** `verify_flight_plan_v2.sql` (Admin, Diretoria, Gestor, Vendedor, Financeiro e Admin de outra
+  empresa), contrato SQL × TypeScript (`flight-plan-v2.repository.test.ts` com respostas reais em
+  `__fixtures__`), motor e telas (`src/domain/flight-plan`, `src/flight-plan/mock`).
+- **Homologação:** `python ops/noturno.py plano <release>` (fila noturna): suítes, cópia nova, foto dos
+  números antes × depois das migrações (tem de ser igual), conferência antigo × novo e tempos
+  (`ops/56_plano_voo_check.py`), navegador com gravação na cópia (`29_smoke.py --plano --plano-write --hml`),
+  regressão e retorno (a release da produção sobe sobre o banco já migrado).
+- **Ativação (com o autorizo do responsável):** `python ops/noturno.py ativar-plano <release>` — exige a
+  homologação do dia inteira; horário livre, interface preservada, worker pausado, foto igual antes e
+  depois, conferência na produção e navegador só leitura (`29_smoke.py --plano`).
+- **Retorno:** `python ops/remote.py ops/21_activate_release.py <release anterior> --start-worker`. A release
+  anterior funciona com a `0050` aplicada (ela só acrescenta; o canal dos vendedores preenchido só corrige
+  filtros). `deploy/db/rollback/0050_flight_plan_v2.down.sql` remove os objetos novos se for preciso (apaga
+  iniciativas, estados de alerta, decisões e o histórico de etapa).

@@ -337,6 +337,13 @@
       "when": 1792501700000,
       "tag": "0049_stock_intel_commercial",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792501800000,
+      "tag": "0050_flight_plan_v2",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,2788 @@
+{
+ "ids": {
+  "adm": "00000000-0000-4000-8000-0000000000a1",
+  "ges": "00000000-0000-4000-8000-0000000000a2",
+  "ven": "00000000-0000-4000-8000-0000000000a3",
+  "c": "00000000-0000-4000-8000-0000000000c1",
+  "ges2": "00000000-0000-4000-8000-0000000000a4",
+  "ven2": "00000000-0000-4000-8000-0000000000a5",
+  "s1": "00000000-0000-4000-8000-0000000000b1",
+  "s2": "00000000-0000-4000-8000-0000000000b2",
+  "s3": "00000000-0000-4000-8000-0000000000b3",
+  "sl": "00000000-0000-4000-8000-0000000000b4"
+ },
+ "today": "2026-11-18",
+ "admin": {
+  "me": {
+   "name": "Admin FP",
+   "roles": [
+    "ADMIN"
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "userId": "00000000-0000-4000-8000-0000000000a1",
+   "companies": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000c1",
+     "asOf": "2026-11-18",
+     "name": "Mag Filial (exemplo)",
+     "slug": "mag-filial",
+     "isDemo": false,
+     "channels": {
+      "outros": "e12a2251-616d-4beb-8337-d9650438171c",
+      "varejo": "92ed7ef9-7abb-4f5d-8868-2b262dfe4546",
+      "licitacao": "3638b11a-b3c4-46eb-a5ea-64558b351ba4"
+     }
+    }
+   ],
+   "sellerIds": [],
+   "managedSellerIds": []
+  },
+  "dataset": {
+   "daily": [
+    {
+     "date": "2026-11-03",
+     "amount": 50
+    },
+    {
+     "date": "2026-11-10",
+     "amount": 300
+    },
+    {
+     "date": "2026-11-16",
+     "amount": 100
+    },
+    {
+     "date": "2026-11-17",
+     "amount": 200
+    }
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [
+    {
+     "month": 10,
+     "amount": 400
+    },
+    {
+     "month": 11,
+     "amount": 650
+    }
+   ],
+   "orders": [
+    {
+     "id": "0113a454-2e88-401c-a93c-326613715da4",
+     "amount": 1000,
+     "number": "P1",
+     "openedAt": "2026-10-29",
+     "sellerId": "00000000-0000-4000-8000-0000000000b1",
+     "expectedDate": "2026-11-12"
+    }
+   ],
+   "period": {
+    "end": "2026-11-30",
+    "start": "2026-11-01",
+    "state": "current",
+    "today": "2026-11-18",
+    "yearEnd": "2026-12-31",
+    "lastMonday": "2026-11-16"
+   },
+   "quotes": [
+    {
+     "id": "3ba31717-0a77-4dcb-8df3-a8a095c9a7d3",
+     "amount": 500,
+     "number": "Q1",
+     "openedAt": "2026-10-19",
+     "sellerId": "00000000-0000-4000-8000-0000000000b2"
+    }
+   ],
+   "totals": {
+    "invoices": 4,
+    "customers": 3,
+    "unassigned": 50,
+    "newCustomers": 2,
+    "last3MonthsAvg": 133.33,
+    "previousYearSameCut": 0,
+    "previousMonthSameCut": 400
+   },
+   "channel": null,
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial",
+    "isDemo": false
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b1",
+     "name": "Ana FP",
+     "active": true,
+     "commit": {
+      "note": "Fecha até o dia 25",
+      "amount": 120,
+      "updatedAt": "2026-11-04T14:51:32.791-03:00"
+     },
+     "channel": "varejo",
+     "revenue": 100,
+     "targets": {
+      "ACTIVE": 300
+     },
+     "hasLogin": false,
+     "invoices": 1,
+     "customers": 1,
+     "openOrders": 1,
+     "openQuotes": 0,
+     "lastInvoice": "2026-11-16",
+     "last3MonthsAvg": 133.33,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 400
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b2",
+     "name": "Bruno FP",
+     "active": true,
+     "commit": null,
+     "channel": "varejo",
+     "revenue": 200,
+     "targets": {},
+     "hasLogin": false,
+     "invoices": 1,
+     "customers": 1,
+     "openOrders": 0,
+     "openQuotes": 1,
+     "lastInvoice": "2026-11-17",
+     "last3MonthsAvg": 0,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 0
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b3",
+     "name": "Carla FP",
+     "active": true,
+     "commit": null,
+     "channel": "varejo",
+     "revenue": 0,
+     "targets": {
+      "ACTIVE": 250
+     },
+     "hasLogin": true,
+     "invoices": 0,
+     "customers": 0,
+     "openOrders": 0,
+     "openQuotes": 0,
+     "lastInvoice": null,
+     "last3MonthsAvg": 0,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 0
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b4",
+     "name": "Licitação",
+     "active": true,
+     "commit": null,
+     "channel": "licitacao",
+     "revenue": 300,
+     "targets": {},
+     "hasLogin": false,
+     "invoices": 1,
+     "customers": 1,
+     "openOrders": 0,
+     "openQuotes": 0,
+     "lastInvoice": "2026-11-10",
+     "last3MonthsAvg": 0,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 0
+    }
+   ],
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "conversion": {
+    "lost": 0,
+    "tracked": 1,
+    "converted": 0,
+    "lostAmount": 0,
+    "trackedAmount": 500,
+    "convertedAmount": 0
+   },
+   "lastMonday": {
+    "date": null,
+    "companyStatus": null
+   },
+   "restricted": false,
+   "holidayYears": {
+    "2026": 13,
+    "2027": 0
+   },
+   "previousDaily": [
+    {
+     "date": "2026-10-05",
+     "amount": 400
+    }
+   ],
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 10,
+     "amount": 280
+    },
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 550
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "datasetVarejo": {
+   "daily": [
+    {
+     "date": "2026-11-03",
+     "amount": 50
+    },
+    {
+     "date": "2026-11-16",
+     "amount": 100
+    },
+    {
+     "date": "2026-11-17",
+     "amount": 200
+    }
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [
+    {
+     "month": 10,
+     "amount": 400
+    },
+    {
+     "month": 11,
+     "amount": 350
+    }
+   ],
+   "orders": [
+    {
+     "id": "0113a454-2e88-401c-a93c-326613715da4",
+     "amount": 1000,
+     "number": "P1",
+     "openedAt": "2026-10-29",
+     "sellerId": "00000000-0000-4000-8000-0000000000b1",
+     "expectedDate": "2026-11-12"
+    }
+   ],
+   "period": {
+    "end": "2026-11-30",
+    "start": "2026-11-01",
+    "state": "current",
+    "today": "2026-11-18",
+    "yearEnd": "2026-12-31",
+    "lastMonday": "2026-11-16"
+   },
+   "quotes": [
+    {
+     "id": "3ba31717-0a77-4dcb-8df3-a8a095c9a7d3",
+     "amount": 500,
+     "number": "Q1",
+     "openedAt": "2026-10-19",
+     "sellerId": "00000000-0000-4000-8000-0000000000b2"
+    }
+   ],
+   "totals": {
+    "invoices": 3,
+    "customers": 2,
+    "unassigned": 50,
+    "newCustomers": 1,
+    "last3MonthsAvg": 133.33,
+    "previousYearSameCut": 0,
+    "previousMonthSameCut": 400
+   },
+   "channel": "varejo",
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial",
+    "isDemo": false
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b1",
+     "name": "Ana FP",
+     "active": true,
+     "commit": {
+      "note": "Fecha até o dia 25",
+      "amount": 120,
+      "updatedAt": "2026-11-04T14:51:32.791-03:00"
+     },
+     "channel": "varejo",
+     "revenue": 100,
+     "targets": {
+      "ACTIVE": 300
+     },
+     "hasLogin": false,
+     "invoices": 1,
+     "customers": 1,
+     "openOrders": 1,
+     "openQuotes": 0,
+     "lastInvoice": "2026-11-16",
+     "last3MonthsAvg": 133.33,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 400
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b2",
+     "name": "Bruno FP",
+     "active": true,
+     "commit": null,
+     "channel": "varejo",
+     "revenue": 200,
+     "targets": {},
+     "hasLogin": false,
+     "invoices": 1,
+     "customers": 1,
+     "openOrders": 0,
+     "openQuotes": 1,
+     "lastInvoice": "2026-11-17",
+     "last3MonthsAvg": 0,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 0
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b3",
+     "name": "Carla FP",
+     "active": true,
+     "commit": null,
+     "channel": "varejo",
+     "revenue": 0,
+     "targets": {
+      "ACTIVE": 250
+     },
+     "hasLogin": true,
+     "invoices": 0,
+     "customers": 0,
+     "openOrders": 0,
+     "openQuotes": 0,
+     "lastInvoice": null,
+     "last3MonthsAvg": 0,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 0
+    }
+   ],
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "conversion": {
+    "lost": 0,
+    "tracked": 1,
+    "converted": 0,
+    "lostAmount": 0,
+    "trackedAmount": 500,
+    "convertedAmount": 0
+   },
+   "lastMonday": {
+    "date": null,
+    "companyStatus": null
+   },
+   "restricted": false,
+   "holidayYears": {
+    "2026": 13,
+    "2027": 0
+   },
+   "previousDaily": [
+    {
+     "date": "2026-10-05",
+     "amount": 400
+    }
+   ],
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 10,
+     "amount": 280
+    },
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 550
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "datasetAna": {
+   "daily": [
+    {
+     "date": "2026-11-16",
+     "amount": 100
+    }
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [
+    {
+     "month": 10,
+     "amount": 400
+    },
+    {
+     "month": 11,
+     "amount": 100
+    }
+   ],
+   "orders": [
+    {
+     "id": "0113a454-2e88-401c-a93c-326613715da4",
+     "amount": 1000,
+     "number": "P1",
+     "openedAt": "2026-10-29",
+     "sellerId": "00000000-0000-4000-8000-0000000000b1",
+     "expectedDate": "2026-11-12"
+    }
+   ],
+   "period": {
+    "end": "2026-11-30",
+    "start": "2026-11-01",
+    "state": "current",
+    "today": "2026-11-18",
+    "yearEnd": "2026-12-31",
+    "lastMonday": "2026-11-16"
+   },
+   "quotes": [],
+   "totals": {
+    "invoices": 1,
+    "customers": 1,
+    "unassigned": 0,
+    "newCustomers": 0,
+    "last3MonthsAvg": 133.33,
+    "previousYearSameCut": 0,
+    "previousMonthSameCut": 400
+   },
+   "channel": null,
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial",
+    "isDemo": false
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b1",
+     "name": "Ana FP",
+     "active": true,
+     "commit": {
+      "note": "Fecha até o dia 25",
+      "amount": 120,
+      "updatedAt": "2026-11-04T14:51:32.791-03:00"
+     },
+     "channel": "varejo",
+     "revenue": 100,
+     "targets": {
+      "ACTIVE": 300
+     },
+     "hasLogin": false,
+     "invoices": 1,
+     "customers": 1,
+     "openOrders": 1,
+     "openQuotes": 0,
+     "lastInvoice": "2026-11-16",
+     "last3MonthsAvg": 133.33,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 400
+    }
+   ],
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "conversion": {
+    "lost": 0,
+    "tracked": 0,
+    "converted": 0,
+    "lostAmount": 0,
+    "trackedAmount": 0,
+    "convertedAmount": 0
+   },
+   "lastMonday": {
+    "date": null,
+    "companyStatus": null
+   },
+   "restricted": false,
+   "holidayYears": {
+    "2026": 13,
+    "2027": 0
+   },
+   "previousDaily": [
+    {
+     "date": "2026-10-05",
+     "amount": 400
+    }
+   ],
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 10,
+     "amount": 280
+    },
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 300
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "year": {
+   "today": "2026-11-18",
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [
+    {
+     "month": 10,
+     "amount": 400
+    },
+    {
+     "month": 11,
+     "amount": 650
+    }
+   ],
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial"
+   },
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "restricted": false,
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 10,
+     "amount": 280
+    },
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 550
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "lists": {
+   "limit": 200,
+   "today": "2026-11-18",
+   "quotes": {
+    "count": 1,
+    "items": [
+     {
+      "id": "3ba31717-0a77-4dcb-8df3-a8a095c9a7d3",
+      "amount": 500,
+      "number": "Q1",
+      "seller": "Bruno FP",
+      "customer": "Cliente novo",
+      "openedAt": "2026-10-19",
+      "sellerId": "00000000-0000-4000-8000-0000000000b2"
+     }
+    ],
+    "amount": 500
+   },
+   "lateOrders": {
+    "count": 1,
+    "items": [
+     {
+      "id": "0113a454-2e88-401c-a93c-326613715da4",
+      "amount": 1000,
+      "number": "P1",
+      "seller": "Ana FP",
+      "customer": "Cliente antigo",
+      "sellerId": "00000000-0000-4000-8000-0000000000b1",
+      "expectedDate": "2026-11-12"
+     }
+    ],
+    "amount": 1000
+   },
+   "inactiveDays": 90,
+   "lookbackDays": 365,
+   "inactiveCustomers": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   }
+  },
+  "targets": {
+   "month": "2026-11",
+   "company": {
+    "all": {},
+    "varejo": {
+     "ACTIVE": 1000
+    },
+    "licitacao": {}
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b1",
+     "name": "Ana FP",
+     "last3": [
+      {
+       "month": "2026-10",
+       "amount": 400
+      }
+     ],
+     "active": true,
+     "channel": "varejo",
+     "targets": {
+      "ACTIVE": 300
+     },
+     "editable": true,
+     "previous": {
+      "ACTIVE": 280
+     }
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b2",
+     "name": "Bruno FP",
+     "last3": [],
+     "active": true,
+     "channel": "varejo",
+     "targets": {},
+     "editable": true,
+     "previous": {}
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b3",
+     "name": "Carla FP",
+     "last3": [],
+     "active": true,
+     "channel": "varejo",
+     "targets": {
+      "ACTIVE": 250
+     },
+     "editable": true,
+     "previous": {}
+    },
+    {
+     "id": "00000000-0000-4000-8000-0000000000b4",
+     "name": "Licitação",
+     "last3": [],
+     "active": true,
+     "channel": "licitacao",
+     "targets": {},
+     "editable": true,
+     "previous": {}
+    }
+   ],
+   "companyId": "00000000-0000-4000-8000-0000000000c1",
+   "allSellers": {
+    "ACTIVE": 550
+   },
+   "activeLevel": "ACTIVE",
+   "canEditCompany": true
+  },
+  "history": [
+   {
+    "at": "2026-11-04T14:51:33.063-03:00",
+    "id": "9",
+    "area": "visao",
+    "after": 130,
+    "label": "Ana FP",
+    "level": null,
+    "month": "2026-11",
+    "action": "flight_plan.commit.saved",
+    "author": "Admin FP",
+    "before": 120
+   },
+   {
+    "at": "2026-11-04T14:51:33.058-03:00",
+    "id": "8",
+    "area": "destino",
+    "after": 200,
+    "label": "Ana FP",
+    "level": "BASE",
+    "month": "2026-11",
+    "action": "flight_plan.target.created",
+    "author": "Admin FP",
+    "before": null
+   }
+  ],
+  "alertsSync": [
+   {
+    "key": "LATE_ORDERS:00000000-0000-4000-8000-0000000000c1:empresa:2026-11",
+    "note": null,
+    "state": "OPEN",
+    "reopened": false,
+    "firstSeen": "2026-11-18",
+    "updatedAt": null,
+    "initiativeId": null
+   }
+  ]
+ },
+ "gestor": {
+  "me": {
+   "name": "Gestor FP",
+   "roles": [
+    "GESTOR"
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "userId": "00000000-0000-4000-8000-0000000000a2",
+   "companies": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000c1",
+     "asOf": "2026-11-18",
+     "name": "Mag Filial (exemplo)",
+     "slug": "mag-filial",
+     "isDemo": false,
+     "channels": {
+      "outros": "e12a2251-616d-4beb-8337-d9650438171c",
+      "varejo": "92ed7ef9-7abb-4f5d-8868-2b262dfe4546",
+      "licitacao": "3638b11a-b3c4-46eb-a5ea-64558b351ba4"
+     }
+    }
+   ],
+   "sellerIds": [],
+   "managedSellerIds": [
+    "00000000-0000-4000-8000-0000000000b1"
+   ]
+  },
+  "dataset": {
+   "daily": [
+    {
+     "date": "2026-11-16",
+     "amount": 100
+    }
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [
+    {
+     "month": 10,
+     "amount": 400
+    },
+    {
+     "month": 11,
+     "amount": 100
+    }
+   ],
+   "orders": [
+    {
+     "id": "0113a454-2e88-401c-a93c-326613715da4",
+     "amount": 1000,
+     "number": "P1",
+     "openedAt": "2026-10-29",
+     "sellerId": "00000000-0000-4000-8000-0000000000b1",
+     "expectedDate": "2026-11-12"
+    }
+   ],
+   "period": {
+    "end": "2026-11-30",
+    "start": "2026-11-01",
+    "state": "current",
+    "today": "2026-11-18",
+    "yearEnd": "2026-12-31",
+    "lastMonday": "2026-11-16"
+   },
+   "quotes": [],
+   "totals": {
+    "invoices": 1,
+    "customers": 1,
+    "unassigned": 0,
+    "newCustomers": 0,
+    "last3MonthsAvg": 133.33,
+    "previousYearSameCut": 0,
+    "previousMonthSameCut": 400
+   },
+   "channel": null,
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial",
+    "isDemo": false
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b1",
+     "name": "Ana FP",
+     "active": true,
+     "commit": {
+      "note": "Fecha até o dia 25",
+      "amount": 120,
+      "updatedAt": "2026-11-04T14:51:32.791-03:00"
+     },
+     "channel": "varejo",
+     "revenue": 100,
+     "targets": {
+      "ACTIVE": 300
+     },
+     "hasLogin": false,
+     "invoices": 1,
+     "customers": 1,
+     "openOrders": 1,
+     "openQuotes": 0,
+     "lastInvoice": "2026-11-16",
+     "last3MonthsAvg": 133.33,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 400
+    }
+   ],
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "conversion": {
+    "lost": 0,
+    "tracked": 0,
+    "converted": 0,
+    "lostAmount": 0,
+    "trackedAmount": 0,
+    "convertedAmount": 0
+   },
+   "lastMonday": {
+    "date": null,
+    "companyStatus": null
+   },
+   "restricted": true,
+   "holidayYears": {
+    "2026": 13,
+    "2027": 0
+   },
+   "previousDaily": [
+    {
+     "date": "2026-10-05",
+     "amount": 400
+    }
+   ],
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 10,
+     "amount": 280
+    },
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 300
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "targets": {
+   "month": "2026-11",
+   "company": {
+    "all": {},
+    "varejo": {
+     "ACTIVE": 1000
+    },
+    "licitacao": {}
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b1",
+     "name": "Ana FP",
+     "last3": [
+      {
+       "month": "2026-10",
+       "amount": 400
+      }
+     ],
+     "active": true,
+     "channel": "varejo",
+     "targets": {
+      "ACTIVE": 300
+     },
+     "editable": true,
+     "previous": {
+      "ACTIVE": 280
+     }
+    }
+   ],
+   "companyId": "00000000-0000-4000-8000-0000000000c1",
+   "allSellers": {
+    "ACTIVE": 550
+   },
+   "activeLevel": "ACTIVE",
+   "canEditCompany": false
+  },
+  "year": {
+   "today": "2026-11-18",
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [
+    {
+     "month": 10,
+     "amount": 400
+    },
+    {
+     "month": 11,
+     "amount": 100
+    }
+   ],
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial"
+   },
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "restricted": true,
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 10,
+     "amount": 280
+    },
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 300
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "lists": {
+   "limit": 200,
+   "today": "2026-11-18",
+   "quotes": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   },
+   "lateOrders": {
+    "count": 1,
+    "items": [
+     {
+      "id": "0113a454-2e88-401c-a93c-326613715da4",
+      "amount": 1000,
+      "number": "P1",
+      "seller": "Ana FP",
+      "customer": "Cliente antigo",
+      "sellerId": "00000000-0000-4000-8000-0000000000b1",
+      "expectedDate": "2026-11-12"
+     }
+    ],
+    "amount": 1000
+   },
+   "inactiveDays": 90,
+   "lookbackDays": 365,
+   "inactiveCustomers": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   }
+  },
+  "history": []
+ },
+ "vendedor": {
+  "me": {
+   "name": "Vendedora FP",
+   "roles": [
+    "VENDEDOR"
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "userId": "00000000-0000-4000-8000-0000000000a3",
+   "companies": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000c1",
+     "asOf": "2026-11-18",
+     "name": "Mag Filial (exemplo)",
+     "slug": "mag-filial",
+     "isDemo": false,
+     "channels": {
+      "outros": "e12a2251-616d-4beb-8337-d9650438171c",
+      "varejo": "92ed7ef9-7abb-4f5d-8868-2b262dfe4546",
+      "licitacao": "3638b11a-b3c4-46eb-a5ea-64558b351ba4"
+     }
+    }
+   ],
+   "sellerIds": [
+    "00000000-0000-4000-8000-0000000000b3"
+   ],
+   "managedSellerIds": []
+  },
+  "dataset": {
+   "daily": [],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [],
+   "orders": [],
+   "period": {
+    "end": "2026-11-30",
+    "start": "2026-11-01",
+    "state": "current",
+    "today": "2026-11-18",
+    "yearEnd": "2026-12-31",
+    "lastMonday": "2026-11-16"
+   },
+   "quotes": [],
+   "totals": {
+    "invoices": 0,
+    "customers": 0,
+    "unassigned": 0,
+    "newCustomers": 0,
+    "last3MonthsAvg": 0,
+    "previousYearSameCut": 0,
+    "previousMonthSameCut": 0
+   },
+   "channel": null,
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial",
+    "isDemo": false
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b3",
+     "name": "Carla FP",
+     "active": true,
+     "commit": null,
+     "channel": "varejo",
+     "revenue": 0,
+     "targets": {
+      "ACTIVE": 250
+     },
+     "hasLogin": true,
+     "invoices": 0,
+     "customers": 0,
+     "openOrders": 0,
+     "openQuotes": 0,
+     "lastInvoice": null,
+     "last3MonthsAvg": 0,
+     "statusLastMonday": null,
+     "previousYearSameCut": 0,
+     "previousMonthSameCut": 0
+    }
+   ],
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "conversion": {
+    "lost": 0,
+    "tracked": 0,
+    "converted": 0,
+    "lostAmount": 0,
+    "trackedAmount": 0,
+    "convertedAmount": 0
+   },
+   "lastMonday": {
+    "date": null,
+    "companyStatus": null
+   },
+   "restricted": true,
+   "holidayYears": {
+    "2026": 13,
+    "2027": 0
+   },
+   "previousDaily": [],
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 250
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "targets": {
+   "month": "2026-11",
+   "company": {
+    "all": {},
+    "varejo": {
+     "ACTIVE": 1000
+    },
+    "licitacao": {}
+   },
+   "sellers": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000b3",
+     "name": "Carla FP",
+     "last3": [],
+     "active": true,
+     "channel": "varejo",
+     "targets": {
+      "ACTIVE": 250
+     },
+     "editable": false,
+     "previous": {}
+    }
+   ],
+   "companyId": "00000000-0000-4000-8000-0000000000c1",
+   "allSellers": {
+    "ACTIVE": 550
+   },
+   "activeLevel": "ACTIVE",
+   "canEditCompany": false
+  },
+  "year": {
+   "today": "2026-11-18",
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [],
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial"
+   },
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "restricted": true,
+   "sellerTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 250
+    }
+   ],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "lists": {
+   "limit": 200,
+   "today": "2026-11-18",
+   "quotes": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   },
+   "lateOrders": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   },
+   "inactiveDays": 90,
+   "lookbackDays": 365,
+   "inactiveCustomers": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   }
+  },
+  "history": []
+ },
+ "gestorSemEquipe": {
+  "me": {
+   "name": "Gestor sem equipe",
+   "roles": [
+    "GESTOR"
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "userId": "00000000-0000-4000-8000-0000000000a4",
+   "companies": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000c1",
+     "asOf": "2026-11-18",
+     "name": "Mag Filial (exemplo)",
+     "slug": "mag-filial",
+     "isDemo": false,
+     "channels": {
+      "outros": "e12a2251-616d-4beb-8337-d9650438171c",
+      "varejo": "92ed7ef9-7abb-4f5d-8868-2b262dfe4546",
+      "licitacao": "3638b11a-b3c4-46eb-a5ea-64558b351ba4"
+     }
+    }
+   ],
+   "sellerIds": [],
+   "managedSellerIds": []
+  },
+  "dataset": {
+   "daily": [],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [],
+   "orders": [],
+   "period": {
+    "end": "2026-11-30",
+    "start": "2026-11-01",
+    "state": "current",
+    "today": "2026-11-18",
+    "yearEnd": "2026-12-31",
+    "lastMonday": "2026-11-16"
+   },
+   "quotes": [],
+   "totals": {
+    "invoices": 0,
+    "customers": 0,
+    "unassigned": 0,
+    "newCustomers": 0,
+    "last3MonthsAvg": 0,
+    "previousYearSameCut": 0,
+    "previousMonthSameCut": 0
+   },
+   "channel": null,
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial",
+    "isDemo": false
+   },
+   "sellers": [],
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "conversion": {
+    "lost": 0,
+    "tracked": 0,
+    "converted": 0,
+    "lostAmount": 0,
+    "trackedAmount": 0,
+    "convertedAmount": 0
+   },
+   "lastMonday": {
+    "date": null,
+    "companyStatus": null
+   },
+   "restricted": true,
+   "holidayYears": {
+    "2026": 13,
+    "2027": 0
+   },
+   "previousDaily": [],
+   "sellerTargets": [],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "targets": {
+   "month": "2026-11",
+   "company": {
+    "all": {},
+    "varejo": {
+     "ACTIVE": 1000
+    },
+    "licitacao": {}
+   },
+   "sellers": [],
+   "companyId": "00000000-0000-4000-8000-0000000000c1",
+   "allSellers": {
+    "ACTIVE": 550
+   },
+   "activeLevel": "ACTIVE",
+   "canEditCompany": false
+  },
+  "year": {
+   "today": "2026-11-18",
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [],
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial"
+   },
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "restricted": true,
+   "sellerTargets": [],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "lists": {
+   "limit": 200,
+   "today": "2026-11-18",
+   "quotes": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   },
+   "lateOrders": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   },
+   "inactiveDays": 90,
+   "lookbackDays": 365,
+   "inactiveCustomers": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   }
+  },
+  "history": []
+ },
+ "vendedorSemVinculo": {
+  "me": {
+   "name": "Vendedor sem vínculo",
+   "roles": [
+    "VENDEDOR"
+   ],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "userId": "00000000-0000-4000-8000-0000000000a5",
+   "companies": [
+    {
+     "id": "00000000-0000-4000-8000-0000000000c1",
+     "asOf": "2026-11-18",
+     "name": "Mag Filial (exemplo)",
+     "slug": "mag-filial",
+     "isDemo": false,
+     "channels": {
+      "outros": "e12a2251-616d-4beb-8337-d9650438171c",
+      "varejo": "92ed7ef9-7abb-4f5d-8868-2b262dfe4546",
+      "licitacao": "3638b11a-b3c4-46eb-a5ea-64558b351ba4"
+     }
+    }
+   ],
+   "sellerIds": [],
+   "managedSellerIds": []
+  },
+  "dataset": {
+   "daily": [],
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [],
+   "orders": [],
+   "period": {
+    "end": "2026-11-30",
+    "start": "2026-11-01",
+    "state": "current",
+    "today": "2026-11-18",
+    "yearEnd": "2026-12-31",
+    "lastMonday": "2026-11-16"
+   },
+   "quotes": [],
+   "totals": {
+    "invoices": 0,
+    "customers": 0,
+    "unassigned": 0,
+    "newCustomers": 0,
+    "last3MonthsAvg": 0,
+    "previousYearSameCut": 0,
+    "previousMonthSameCut": 0
+   },
+   "channel": null,
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial",
+    "isDemo": false
+   },
+   "sellers": [],
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "conversion": {
+    "lost": 0,
+    "tracked": 0,
+    "converted": 0,
+    "lostAmount": 0,
+    "trackedAmount": 0,
+    "convertedAmount": 0
+   },
+   "lastMonday": {
+    "date": null,
+    "companyStatus": null
+   },
+   "restricted": true,
+   "holidayYears": {
+    "2026": 13,
+    "2027": 0
+   },
+   "previousDaily": [],
+   "sellerTargets": [],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "targets": {
+   "month": "2026-11",
+   "company": {
+    "all": {},
+    "varejo": {
+     "ACTIVE": 1000
+    },
+    "licitacao": {}
+   },
+   "sellers": [],
+   "companyId": "00000000-0000-4000-8000-0000000000c1",
+   "allSellers": {
+    "ACTIVE": 550
+   },
+   "activeLevel": "ACTIVE",
+   "canEditCompany": false
+  },
+  "year": {
+   "today": "2026-11-18",
+   "config": {
+    "alerts": {
+     "lowCoverage": 0.5,
+     "staleQuoteDays": 15,
+     "paceAcceleration": 0.2,
+     "idleSellerWorkdays": 5
+    },
+    "status": {
+     "risk": 0.75,
+     "onTrack": 0.97,
+     "attention": 0.9
+    },
+    "ageBuckets": {
+     "freshMaxDays": 15,
+     "recentMaxDays": 45
+    },
+    "conversion": {
+     "since": "2026-11-04",
+     "minDays": 60,
+     "minResolved": 20
+    },
+    "activeLevel": "ACTIVE",
+    "targetLists": {
+     "maxItems": 200,
+     "inactiveDays": 90,
+     "lookbackDays": 365
+    },
+    "lateOrderWeight": 0.3,
+    "probableWeights": {
+     "aged": 0.3,
+     "fresh": 0.9,
+     "recent": 0.6
+    },
+    "saturdayWeights": {
+     "mag-filial": 0.33,
+     "uni-design": 0.33
+    },
+    "accelerationAlert": 0.2,
+    "saturdayWeightDefault": 0
+   },
+   "months": [],
+   "company": {
+    "id": "00000000-0000-4000-8000-0000000000c1",
+    "name": "Mag Filial (exemplo)",
+    "slug": "mag-filial"
+   },
+   "holidays": [
+    {
+     "date": "2026-01-01",
+     "name": "Confraternização Universal"
+    },
+    {
+     "date": "2026-02-16",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-02-17",
+     "name": "Carnaval"
+    },
+    {
+     "date": "2026-04-03",
+     "name": "Sexta-feira Santa"
+    },
+    {
+     "date": "2026-04-21",
+     "name": "Tiradentes"
+    },
+    {
+     "date": "2026-05-01",
+     "name": "Dia do Trabalho"
+    },
+    {
+     "date": "2026-06-04",
+     "name": "Corpus Christi"
+    },
+    {
+     "date": "2026-09-07",
+     "name": "Independência"
+    },
+    {
+     "date": "2026-10-12",
+     "name": "Nossa Senhora Aparecida"
+    },
+    {
+     "date": "2026-11-02",
+     "name": "Finados"
+    },
+    {
+     "date": "2026-11-15",
+     "name": "Proclamação da República"
+    },
+    {
+     "date": "2026-11-20",
+     "name": "Consciência Negra"
+    },
+    {
+     "date": "2026-12-25",
+     "name": "Natal"
+    }
+   ],
+   "restricted": true,
+   "sellerTargets": [],
+   "companyTargets": [
+    {
+     "level": "ACTIVE",
+     "month": 11,
+     "amount": 1000,
+     "channel": "varejo"
+    }
+   ]
+  },
+  "lists": {
+   "limit": 200,
+   "today": "2026-11-18",
+   "quotes": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   },
+   "lateOrders": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   },
+   "inactiveDays": 90,
+   "lookbackDays": 365,
+   "inactiveCustomers": {
+    "count": 0,
+    "items": [],
+    "amount": 0
+   }
+  },
+  "history": []
+ }
+}
