@@ -243,6 +243,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Números do Plano de Voo: fonte mono com algarismos alinhados. */
+@utility fp-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 @utility eyebrow {
   font-size: 0.6875rem;
   font-weight: 500;

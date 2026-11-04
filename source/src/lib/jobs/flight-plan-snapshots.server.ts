@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { buildFlightPlan, snapshotRows } from "@/lib/repositories/flight-plan.repository.server";
+import { syncCompanyAlerts } from "@/lib/repositories/flight-plan-v2.repository.server";
 import { acquireWorkerLease } from "./worker-lease.server";
 
 type Client = SupabaseClient<Database>;
@@ -100,6 +101,12 @@ async function runSnapshotJobUnlocked(
       });
       if (replaceError) throw new Error("Falha ao substituir o snapshot atomicamente.");
       results.push({ id: c.id, date, rows: rows.length });
+      // Presença diária dos alertas da empresa (um Resolvido que some e volta reabre). Não derruba a foto.
+      try {
+        await syncCompanyAlerts(admin, c.id, period, date);
+      } catch {
+        console.error(`[${SNAPSHOT_JOB}] company ${c.id}: presença dos alertas não registrada`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : ((e as { message?: string })?.message ?? "erro");
       console.error(`[${SNAPSHOT_JOB}] company ${c.id} failed`);

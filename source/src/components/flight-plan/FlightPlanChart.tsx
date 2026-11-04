@@ -1,7 +1,7 @@
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
 import { formatValue, shortDate } from "@/domain/format";
-import type { TimelinePoint } from "@/domain/flight-plan/engine";
+import type { LegacyTimelinePoint as TimelinePoint } from "@/domain/flight-plan/engine";
 
 const config = {
   realizedCumulative: { label: "Realizado acumulado", color: "var(--chart-1)" },

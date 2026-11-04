@@ -37,6 +37,12 @@ import { Route as AuthenticatedShellEstoqueFornecedoresRouteImport } from './rou
 import { Route as AuthenticatedShellEstoqueInteligenciaRouteImport } from './routes/_authenticated/_shell/estoque.inteligencia'
 import { Route as AuthenticatedShellEstoquePosicoesRouteImport } from './routes/_authenticated/_shell/estoque.posicoes'
 import { Route as AuthenticatedShellEstoqueSimulacaoRouteImport } from './routes/_authenticated/_shell/estoque.simulacao'
+import { Route as AuthenticatedShellPlanoDeVooIndexRouteImport } from './routes/_authenticated/_shell/plano-de-voo.index'
+import { Route as AuthenticatedShellPlanoDeVooCorrecaoRouteImport } from './routes/_authenticated/_shell/plano-de-voo.correcao'
+import { Route as AuthenticatedShellPlanoDeVooDestinoRouteImport } from './routes/_authenticated/_shell/plano-de-voo.destino'
+import { Route as AuthenticatedShellPlanoDeVooPainelRouteImport } from './routes/_authenticated/_shell/plano-de-voo.painel'
+import { Route as AuthenticatedShellPlanoDeVooRotaRouteImport } from './routes/_authenticated/_shell/plano-de-voo.rota'
+import { Route as AuthenticatedShellPlanoDeVooVelocidadeRouteImport } from './routes/_authenticated/_shell/plano-de-voo.velocidade'
 import { Route as AuthenticatedShellProdutosIndexRouteImport } from './routes/_authenticated/_shell/produtos.index'
 import { Route as AuthenticatedShellProdutosProductIdRouteImport } from './routes/_authenticated/_shell/produtos.$productId'
 import { Route as AuthenticatedShellVendedoresIndexRouteImport } from './routes/_authenticated/_shell/vendedores.index'
@@ -206,6 +212,42 @@ const AuthenticatedShellEstoqueSimulacaoRoute =
     path: '/simulacao',
     getParentRoute: () => AuthenticatedShellEstoqueRoute,
   } as any)
+const AuthenticatedShellPlanoDeVooIndexRoute =
+  AuthenticatedShellPlanoDeVooIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedShellPlanoDeVooRoute,
+  } as any)
+const AuthenticatedShellPlanoDeVooCorrecaoRoute =
+  AuthenticatedShellPlanoDeVooCorrecaoRouteImport.update({
+    id: '/correcao',
+    path: '/correcao',
+    getParentRoute: () => AuthenticatedShellPlanoDeVooRoute,
+  } as any)
+const AuthenticatedShellPlanoDeVooDestinoRoute =
+  AuthenticatedShellPlanoDeVooDestinoRouteImport.update({
+    id: '/destino',
+    path: '/destino',
+    getParentRoute: () => AuthenticatedShellPlanoDeVooRoute,
+  } as any)
+const AuthenticatedShellPlanoDeVooPainelRoute =
+  AuthenticatedShellPlanoDeVooPainelRouteImport.update({
+    id: '/painel',
+    path: '/painel',
+    getParentRoute: () => AuthenticatedShellPlanoDeVooRoute,
+  } as any)
+const AuthenticatedShellPlanoDeVooRotaRoute =
+  AuthenticatedShellPlanoDeVooRotaRouteImport.update({
+    id: '/rota',
+    path: '/rota',
+    getParentRoute: () => AuthenticatedShellPlanoDeVooRoute,
+  } as any)
+const AuthenticatedShellPlanoDeVooVelocidadeRoute =
+  AuthenticatedShellPlanoDeVooVelocidadeRouteImport.update({
+    id: '/velocidade',
+    path: '/velocidade',
+    getParentRoute: () => AuthenticatedShellPlanoDeVooRoute,
+  } as any)
 const AuthenticatedShellProdutosIndexRoute =
   AuthenticatedShellProdutosIndexRouteImport.update({
     id: '/produtos/',
@@ -275,7 +317,7 @@ export interface FileRoutesByFullPath {
   '/geografia': typeof AuthenticatedShellGeografiaRoute
   '/integracoes': typeof AuthenticatedShellIntegracoesRoute
   '/minha-conta': typeof AuthenticatedShellMinhaContaRoute
-  '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
+  '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRouteWithChildren
   '/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
   '/vendas': typeof AuthenticatedShellVendasRoute
@@ -286,12 +328,18 @@ export interface FileRoutesByFullPath {
   '/estoque/inteligencia': typeof AuthenticatedShellEstoqueInteligenciaRoute
   '/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
   '/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
+  '/plano-de-voo/correcao': typeof AuthenticatedShellPlanoDeVooCorrecaoRoute
+  '/plano-de-voo/destino': typeof AuthenticatedShellPlanoDeVooDestinoRoute
+  '/plano-de-voo/painel': typeof AuthenticatedShellPlanoDeVooPainelRoute
+  '/plano-de-voo/rota': typeof AuthenticatedShellPlanoDeVooRotaRoute
+  '/plano-de-voo/velocidade': typeof AuthenticatedShellPlanoDeVooVelocidadeRoute
   '/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
   '/api/public/jobs/flight-plan-snapshots': typeof ApiPublicJobsFlightPlanSnapshotsRoute
   '/api/public/jobs/omie-backfill': typeof ApiPublicJobsOmieBackfillRoute
   '/clientes/': typeof AuthenticatedShellClientesIndexRoute
   '/estoque/': typeof AuthenticatedShellEstoqueIndexRoute
+  '/plano-de-voo/': typeof AuthenticatedShellPlanoDeVooIndexRoute
   '/produtos/': typeof AuthenticatedShellProdutosIndexRoute
   '/vendedores/': typeof AuthenticatedShellVendedoresIndexRoute
   '/admin/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
@@ -311,7 +359,6 @@ export interface FileRoutesByTo {
   '/geografia': typeof AuthenticatedShellGeografiaRoute
   '/integracoes': typeof AuthenticatedShellIntegracoesRoute
   '/minha-conta': typeof AuthenticatedShellMinhaContaRoute
-  '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
   '/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
   '/vendas': typeof AuthenticatedShellVendasRoute
@@ -322,12 +369,18 @@ export interface FileRoutesByTo {
   '/estoque/inteligencia': typeof AuthenticatedShellEstoqueInteligenciaRoute
   '/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
   '/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
+  '/plano-de-voo/correcao': typeof AuthenticatedShellPlanoDeVooCorrecaoRoute
+  '/plano-de-voo/destino': typeof AuthenticatedShellPlanoDeVooDestinoRoute
+  '/plano-de-voo/painel': typeof AuthenticatedShellPlanoDeVooPainelRoute
+  '/plano-de-voo/rota': typeof AuthenticatedShellPlanoDeVooRotaRoute
+  '/plano-de-voo/velocidade': typeof AuthenticatedShellPlanoDeVooVelocidadeRoute
   '/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
   '/api/public/jobs/flight-plan-snapshots': typeof ApiPublicJobsFlightPlanSnapshotsRoute
   '/api/public/jobs/omie-backfill': typeof ApiPublicJobsOmieBackfillRoute
   '/clientes': typeof AuthenticatedShellClientesIndexRoute
   '/estoque': typeof AuthenticatedShellEstoqueIndexRoute
+  '/plano-de-voo': typeof AuthenticatedShellPlanoDeVooIndexRoute
   '/produtos': typeof AuthenticatedShellProdutosIndexRoute
   '/vendedores': typeof AuthenticatedShellVendedoresIndexRoute
   '/admin/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
@@ -351,7 +404,7 @@ export interface FileRoutesById {
   '/_authenticated/_shell/geografia': typeof AuthenticatedShellGeografiaRoute
   '/_authenticated/_shell/integracoes': typeof AuthenticatedShellIntegracoesRoute
   '/_authenticated/_shell/minha-conta': typeof AuthenticatedShellMinhaContaRoute
-  '/_authenticated/_shell/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRoute
+  '/_authenticated/_shell/plano-de-voo': typeof AuthenticatedShellPlanoDeVooRouteWithChildren
   '/_authenticated/_shell/qualidade': typeof AuthenticatedShellQualidadeRoute
   '/_authenticated/_shell/qualidade-dos-dados': typeof AuthenticatedShellQualidadeDosDadosRoute
   '/_authenticated/_shell/vendas': typeof AuthenticatedShellVendasRoute
@@ -362,12 +415,18 @@ export interface FileRoutesById {
   '/_authenticated/_shell/estoque/inteligencia': typeof AuthenticatedShellEstoqueInteligenciaRoute
   '/_authenticated/_shell/estoque/posicoes': typeof AuthenticatedShellEstoquePosicoesRoute
   '/_authenticated/_shell/estoque/simulacao': typeof AuthenticatedShellEstoqueSimulacaoRoute
+  '/_authenticated/_shell/plano-de-voo/correcao': typeof AuthenticatedShellPlanoDeVooCorrecaoRoute
+  '/_authenticated/_shell/plano-de-voo/destino': typeof AuthenticatedShellPlanoDeVooDestinoRoute
+  '/_authenticated/_shell/plano-de-voo/painel': typeof AuthenticatedShellPlanoDeVooPainelRoute
+  '/_authenticated/_shell/plano-de-voo/rota': typeof AuthenticatedShellPlanoDeVooRotaRoute
+  '/_authenticated/_shell/plano-de-voo/velocidade': typeof AuthenticatedShellPlanoDeVooVelocidadeRoute
   '/_authenticated/_shell/produtos/$productId': typeof AuthenticatedShellProdutosProductIdRoute
   '/_authenticated/_shell/vendedores/$sellerId': typeof AuthenticatedShellVendedoresSellerIdRoute
   '/api/public/jobs/flight-plan-snapshots': typeof ApiPublicJobsFlightPlanSnapshotsRoute
   '/api/public/jobs/omie-backfill': typeof ApiPublicJobsOmieBackfillRoute
   '/_authenticated/_shell/clientes/': typeof AuthenticatedShellClientesIndexRoute
   '/_authenticated/_shell/estoque/': typeof AuthenticatedShellEstoqueIndexRoute
+  '/_authenticated/_shell/plano-de-voo/': typeof AuthenticatedShellPlanoDeVooIndexRoute
   '/_authenticated/_shell/produtos/': typeof AuthenticatedShellProdutosIndexRoute
   '/_authenticated/_shell/vendedores/': typeof AuthenticatedShellVendedoresIndexRoute
   '/_authenticated/_shell/admin_/usuarios/$id': typeof AuthenticatedShellAdminUsuariosIdRoute
@@ -401,12 +460,18 @@ export interface FileRouteTypes {
     | '/estoque/inteligencia'
     | '/estoque/posicoes'
     | '/estoque/simulacao'
+    | '/plano-de-voo/correcao'
+    | '/plano-de-voo/destino'
+    | '/plano-de-voo/painel'
+    | '/plano-de-voo/rota'
+    | '/plano-de-voo/velocidade'
     | '/produtos/$productId'
     | '/vendedores/$sellerId'
     | '/api/public/jobs/flight-plan-snapshots'
     | '/api/public/jobs/omie-backfill'
     | '/clientes/'
     | '/estoque/'
+    | '/plano-de-voo/'
     | '/produtos/'
     | '/vendedores/'
     | '/admin/usuarios/$id'
@@ -426,7 +491,6 @@ export interface FileRouteTypes {
     | '/geografia'
     | '/integracoes'
     | '/minha-conta'
-    | '/plano-de-voo'
     | '/qualidade'
     | '/qualidade-dos-dados'
     | '/vendas'
@@ -437,12 +501,18 @@ export interface FileRouteTypes {
     | '/estoque/inteligencia'
     | '/estoque/posicoes'
     | '/estoque/simulacao'
+    | '/plano-de-voo/correcao'
+    | '/plano-de-voo/destino'
+    | '/plano-de-voo/painel'
+    | '/plano-de-voo/rota'
+    | '/plano-de-voo/velocidade'
     | '/produtos/$productId'
     | '/vendedores/$sellerId'
     | '/api/public/jobs/flight-plan-snapshots'
     | '/api/public/jobs/omie-backfill'
     | '/clientes'
     | '/estoque'
+    | '/plano-de-voo'
     | '/produtos'
     | '/vendedores'
     | '/admin/usuarios/$id'
@@ -476,12 +546,18 @@ export interface FileRouteTypes {
     | '/_authenticated/_shell/estoque/inteligencia'
     | '/_authenticated/_shell/estoque/posicoes'
     | '/_authenticated/_shell/estoque/simulacao'
+    | '/_authenticated/_shell/plano-de-voo/correcao'
+    | '/_authenticated/_shell/plano-de-voo/destino'
+    | '/_authenticated/_shell/plano-de-voo/painel'
+    | '/_authenticated/_shell/plano-de-voo/rota'
+    | '/_authenticated/_shell/plano-de-voo/velocidade'
     | '/_authenticated/_shell/produtos/$productId'
     | '/_authenticated/_shell/vendedores/$sellerId'
     | '/api/public/jobs/flight-plan-snapshots'
     | '/api/public/jobs/omie-backfill'
     | '/_authenticated/_shell/clientes/'
     | '/_authenticated/_shell/estoque/'
+    | '/_authenticated/_shell/plano-de-voo/'
     | '/_authenticated/_shell/produtos/'
     | '/_authenticated/_shell/vendedores/'
     | '/_authenticated/_shell/admin_/usuarios/$id'
@@ -697,6 +773,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedShellEstoqueSimulacaoRouteImport
       parentRoute: typeof AuthenticatedShellEstoqueRoute
     }
+    '/_authenticated/_shell/plano-de-voo/': {
+      id: '/_authenticated/_shell/plano-de-voo/'
+      path: '/'
+      fullPath: '/plano-de-voo/'
+      preLoaderRoute: typeof AuthenticatedShellPlanoDeVooIndexRouteImport
+      parentRoute: typeof AuthenticatedShellPlanoDeVooRoute
+    }
+    '/_authenticated/_shell/plano-de-voo/correcao': {
+      id: '/_authenticated/_shell/plano-de-voo/correcao'
+      path: '/correcao'
+      fullPath: '/plano-de-voo/correcao'
+      preLoaderRoute: typeof AuthenticatedShellPlanoDeVooCorrecaoRouteImport
+      parentRoute: typeof AuthenticatedShellPlanoDeVooRoute
+    }
+    '/_authenticated/_shell/plano-de-voo/destino': {
+      id: '/_authenticated/_shell/plano-de-voo/destino'
+      path: '/destino'
+      fullPath: '/plano-de-voo/destino'
+      preLoaderRoute: typeof AuthenticatedShellPlanoDeVooDestinoRouteImport
+      parentRoute: typeof AuthenticatedShellPlanoDeVooRoute
+    }
+    '/_authenticated/_shell/plano-de-voo/painel': {
+      id: '/_authenticated/_shell/plano-de-voo/painel'
+      path: '/painel'
+      fullPath: '/plano-de-voo/painel'
+      preLoaderRoute: typeof AuthenticatedShellPlanoDeVooPainelRouteImport
+      parentRoute: typeof AuthenticatedShellPlanoDeVooRoute
+    }
+    '/_authenticated/_shell/plano-de-voo/rota': {
+      id: '/_authenticated/_shell/plano-de-voo/rota'
+      path: '/rota'
+      fullPath: '/plano-de-voo/rota'
+      preLoaderRoute: typeof AuthenticatedShellPlanoDeVooRotaRouteImport
+      parentRoute: typeof AuthenticatedShellPlanoDeVooRoute
+    }
+    '/_authenticated/_shell/plano-de-voo/velocidade': {
+      id: '/_authenticated/_shell/plano-de-voo/velocidade'
+      path: '/velocidade'
+      fullPath: '/plano-de-voo/velocidade'
+      preLoaderRoute: typeof AuthenticatedShellPlanoDeVooVelocidadeRouteImport
+      parentRoute: typeof AuthenticatedShellPlanoDeVooRoute
+    }
     '/_authenticated/_shell/produtos/': {
       id: '/_authenticated/_shell/produtos/'
       path: '/produtos'
@@ -789,6 +907,36 @@ const AuthenticatedShellEstoqueRouteWithChildren =
     AuthenticatedShellEstoqueRouteChildren,
   )
 
+interface AuthenticatedShellPlanoDeVooRouteChildren {
+  AuthenticatedShellPlanoDeVooCorrecaoRoute: typeof AuthenticatedShellPlanoDeVooCorrecaoRoute
+  AuthenticatedShellPlanoDeVooDestinoRoute: typeof AuthenticatedShellPlanoDeVooDestinoRoute
+  AuthenticatedShellPlanoDeVooPainelRoute: typeof AuthenticatedShellPlanoDeVooPainelRoute
+  AuthenticatedShellPlanoDeVooRotaRoute: typeof AuthenticatedShellPlanoDeVooRotaRoute
+  AuthenticatedShellPlanoDeVooVelocidadeRoute: typeof AuthenticatedShellPlanoDeVooVelocidadeRoute
+  AuthenticatedShellPlanoDeVooIndexRoute: typeof AuthenticatedShellPlanoDeVooIndexRoute
+}
+
+const AuthenticatedShellPlanoDeVooRouteChildren: AuthenticatedShellPlanoDeVooRouteChildren =
+  {
+    AuthenticatedShellPlanoDeVooCorrecaoRoute:
+      AuthenticatedShellPlanoDeVooCorrecaoRoute,
+    AuthenticatedShellPlanoDeVooDestinoRoute:
+      AuthenticatedShellPlanoDeVooDestinoRoute,
+    AuthenticatedShellPlanoDeVooPainelRoute:
+      AuthenticatedShellPlanoDeVooPainelRoute,
+    AuthenticatedShellPlanoDeVooRotaRoute:
+      AuthenticatedShellPlanoDeVooRotaRoute,
+    AuthenticatedShellPlanoDeVooVelocidadeRoute:
+      AuthenticatedShellPlanoDeVooVelocidadeRoute,
+    AuthenticatedShellPlanoDeVooIndexRoute:
+      AuthenticatedShellPlanoDeVooIndexRoute,
+  }
+
+const AuthenticatedShellPlanoDeVooRouteWithChildren =
+  AuthenticatedShellPlanoDeVooRoute._addFileChildren(
+    AuthenticatedShellPlanoDeVooRouteChildren,
+  )
+
 interface AuthenticatedShellRouteChildren {
   AuthenticatedShellAdminRoute: typeof AuthenticatedShellAdminRoute
   AuthenticatedShellCockpitRoute: typeof AuthenticatedShellCockpitRoute
@@ -799,7 +947,7 @@ interface AuthenticatedShellRouteChildren {
   AuthenticatedShellGeografiaRoute: typeof AuthenticatedShellGeografiaRoute
   AuthenticatedShellIntegracoesRoute: typeof AuthenticatedShellIntegracoesRoute
   AuthenticatedShellMinhaContaRoute: typeof AuthenticatedShellMinhaContaRoute
-  AuthenticatedShellPlanoDeVooRoute: typeof AuthenticatedShellPlanoDeVooRoute
+  AuthenticatedShellPlanoDeVooRoute: typeof AuthenticatedShellPlanoDeVooRouteWithChildren
   AuthenticatedShellQualidadeRoute: typeof AuthenticatedShellQualidadeRoute
   AuthenticatedShellQualidadeDosDadosRoute: typeof AuthenticatedShellQualidadeDosDadosRoute
   AuthenticatedShellVendasRoute: typeof AuthenticatedShellVendasRoute
@@ -826,7 +974,8 @@ const AuthenticatedShellRouteChildren: AuthenticatedShellRouteChildren = {
   AuthenticatedShellGeografiaRoute: AuthenticatedShellGeografiaRoute,
   AuthenticatedShellIntegracoesRoute: AuthenticatedShellIntegracoesRoute,
   AuthenticatedShellMinhaContaRoute: AuthenticatedShellMinhaContaRoute,
-  AuthenticatedShellPlanoDeVooRoute: AuthenticatedShellPlanoDeVooRoute,
+  AuthenticatedShellPlanoDeVooRoute:
+    AuthenticatedShellPlanoDeVooRouteWithChildren,
   AuthenticatedShellQualidadeRoute: AuthenticatedShellQualidadeRoute,
   AuthenticatedShellQualidadeDosDadosRoute:
     AuthenticatedShellQualidadeDosDadosRoute,
