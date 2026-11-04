@@ -162,11 +162,36 @@ try:
         with socket.socket() as s:
             if s.connect_ex(('127.0.0.1', 3150)) == 0:
                 raise SystemExit('porta local 3150 ocupada: feche o outro túnel da homologação')
-        tunnel = subprocess.Popen(SSH[:-1] + ['-N', '-o', 'ExitOnForwardFailure=yes',
-                                              '-L', '3150:127.0.0.1:3150', SSH[-1]])
-        time.sleep(4)
-        if tunnel.poll() is not None:
-            raise SystemExit(f'túnel para a homologação falhou (exit {tunnel.returncode})')
+        # O túnel só vale quando a cópia RESPONDE por ele (03/11: o ssh seguia de pé, mas o navegador levou
+        # "conexão recusada" por ~10 min). Até 3 tentativas, cada uma esperando a tela de login por até 60 s.
+        ready, tries = False, []
+        for attempt in range(3):
+            tunnel = subprocess.Popen(SSH[:-1] + ['-N', '-o', 'ExitOnForwardFailure=yes',
+                                                  '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4',
+                                                  '-L', '3150:127.0.0.1:3150', SSH[-1]])
+            limit = time.time() + 60
+            while time.time() < limit and tunnel.poll() is None:
+                try:
+                    with urllib.request.urlopen('http://127.0.0.1:3150/auth', timeout=10) as r:
+                        ready = r.status == 200
+                except OSError:
+                    ready = False
+                if ready:
+                    break
+                time.sleep(3)
+            tries.append({'try': attempt + 1, 'ready': ready, 'sshExit': tunnel.poll()})
+            if ready:
+                break
+            tunnel.terminate()
+            try:
+                tunnel.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                tunnel.kill()
+            tunnel = None
+            time.sleep(10)
+        report['tunnel'] = tries
+        if not ready:
+            raise SystemExit(f'a homologação não respondeu pelo túnel em 3 tentativas: {tries}')
         env['BIOMIE_TEST_URL'] = 'http://127.0.0.1:3150'
     elif '--pre-cutover' in sys.argv:
         # Free local port + ExitOnForwardFailure: never ride on a stale tunnel to another web.
