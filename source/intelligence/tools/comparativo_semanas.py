@@ -177,6 +177,23 @@ def accuracy(results: dict[str, Any], data: dict[str, Any], days: list[str], hor
     return out
 
 
+def same_day(results: dict[str, Any], days: list[str]) -> list[dict[str, Any]]:
+    """Antigo × novo no MESMO dia: o que mudaria de uma vez se o novo fosse ativado naquele dia."""
+    out = []
+    for iso in days:
+        old, new = (results[n]["days"][iso] for n in ("antigo", "novo"))
+        po, pn = old["products"], new["products"]
+        keys = [k for k in po if k in pn]
+        oo = {o["key"]: o["qty"] for o in old["opportunities"]}
+        on = {o["key"]: o["qty"] for o in new["opportunities"]}
+        out.append({"dia": iso, "produtos": len(keys),
+                    "statusPrevisao": sum(1 for k in keys if po[k]["f"] != pn[k]["f"]),
+                    "entrouOuSaiuDeOk": sum(1 for k in keys if po[k]["f"].startswith("ok") != pn[k]["f"].startswith("ok")),
+                    "oportunidades": len(set(oo) ^ set(on)) + sum(1 for k in set(oo) & set(on) if oo[k] != on[k]),
+                    "compraSimulada": sum(1 for k in keys if po[k]["buy"] != pn[k]["buy"])})
+    return out
+
+
 def follow(res: dict[str, Any], key: str, sku: str) -> list[dict[str, Any]]:
     out = []
     for iso in sorted(res["days"]):
@@ -232,6 +249,13 @@ def markdown(report: dict[str, Any]) -> str:
     lines += ["", "## Oportunidades por dia (antigo / novo)", "",
               " · ".join(f"{d[8:]}/{d[5:7]}: {old['porDia'][d]['oportunidades']} / {new['porDia'][d]['oportunidades']}"
                          for d in report["dias"])]
+    if report.get("mesmoDia"):
+        lines += ["", "## Antigo × novo no mesmo dia (mudança única no dia da ativação)", "",
+                  "| Dia | Status da previsão diferente | Entrou/saiu de 'ok' | Oportunidades diferentes | "
+                  "Compra simulada diferente |", "|---|---:|---:|---:|---:|"]
+        for r in report["mesmoDia"]:
+            lines.append(f"| {r['dia'][8:]}/{r['dia'][5:7]} | {r['statusPrevisao']} de {r['produtos']} | "
+                         f"{r['entrouOuSaiuDeOk']} | {r['oportunidades']} | {r['compraSimulada']} |")
     if report.get("acerto28d"):
         lines += ["", "## Acerto da previsão de 28 dias (produtos 'ok' nas duas versões; erro = WAPE)", "",
                   "| Dia | Produtos | Vendido | Antigo: previsto · erro | Novo: previsto · erro |",
@@ -298,6 +322,7 @@ def main() -> None:
         "ambiente": {"python": platform.python_version(), "plataforma": platform.platform()},
         "antigo": compare(results["antigo"]), "novo": compare(results["novo"]),
         "acerto28d": accuracy(results, data, days),
+        "mesmoDia": same_day(results, days),
     }
     real_key = "uni-design|8764749571"
     if all(real_key in results[n]["days"][days[0]]["products"] for n in results):
