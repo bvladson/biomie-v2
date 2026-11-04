@@ -2,30 +2,87 @@ from datetime import date, timedelta
 
 import numpy as np
 
-from biomie_intel.forecast import (INSUFFICIENT, MODELS, demand_class, forecast, origin_rates, weekly_series)
+from biomie_intel.forecast import (INSUFFICIENT, MODELS, demand_class, forecast, last_week_end, origin_rates,
+                                   weekly_series)
 
-AS_OF = date(2026, 10, 23)
+AS_OF = date(2026, 10, 23)  # sexta-feira: a última semana completa é a de 12 a 18/10
+END = date(2026, 10, 18)
+DAY = timedelta(days=1)
 
 
-def sales_from_weeks(weekly, as_of=AS_OF):
-    """Uma venda no último dia de cada semana (a última semana termina em as_of)."""
+def sales_from_weeks(weekly, end=END):
+    """Uma venda no domingo de cada semana (a última semana termina em end)."""
     n = len(weekly)
-    return [(as_of - timedelta(days=7 * (n - 1 - i)), q) for i, q in enumerate(weekly) if q]
+    return [(end - timedelta(days=7 * (n - 1 - i)), q) for i, q in enumerate(weekly) if q]
 
 
 def run(weekly, available=5, is_new=False, weeks_of_history=None):
     weeks = weeks_of_history or len(weekly)
-    sales_from = AS_OF - timedelta(days=7 * weeks - 1)
+    sales_from = END - timedelta(days=7 * weeks - 1)  # uma segunda-feira
     m = {"stock": {"available": available}, "isNew": is_new}
     return forecast(m, sales_from_weeks(weekly), AS_OF, sales_from)
 
 
-def test_weekly_series_uses_only_complete_observed_weeks():
-    sales = [(AS_OF, 2), (AS_OF - timedelta(days=6), 1), (AS_OF - timedelta(days=7), 4), (date(2026, 1, 1), 9)]
-    y, first = weekly_series(sales, AS_OF, date(2026, 10, 1))  # 23 dias = 3 semanas completas
-    assert list(y) == [0.0, 4.0, 3.0] and first == AS_OF - timedelta(days=20)
+def without_day(f):
+    """A previsão sem o que muda por definição com o dia da análise."""
+    return {k: v for k, v in f.items() if k not in ("computedFor", "openWeek")}
+
+
+def test_last_week_end_is_the_sunday_before_the_analysis_day():
+    assert AS_OF.weekday() == 4 and last_week_end(AS_OF) == END
+    assert last_week_end(date(2026, 10, 19)) == END  # segunda: a semana de ontem já está completa
+    assert last_week_end(date(2026, 10, 25)) == END  # domingo: o próprio dia ainda não terminou às 06:33
+    assert last_week_end(date(2026, 10, 26)) == date(2026, 10, 25)
+
+
+def test_weekly_series_uses_calendar_weeks_and_leaves_the_current_week_out():
+    sales = [(AS_OF, 7), (date(2026, 10, 19), 5),          # semana em curso (19 a 23/10): fora
+             (END, 2), (date(2026, 10, 12), 1),              # domingo e segunda da última semana
+             (date(2026, 10, 11), 4),                        # domingo da semana anterior
+             (date(2026, 10, 1), 8), (date(2026, 1, 1), 9)]  # antes do início observado: fora
+    y, first = weekly_series(sales, AS_OF, date(2026, 10, 1))  # quinta: 1º a 4/10 é semana parcial
+    assert first == date(2026, 10, 5) and first.weekday() == 0
+    assert list(y) == [4.0, 3.0]  # 5–11/10 e 12–18/10; a semana em curso fica de fora
     y, first = weekly_series(sales, AS_OF, None)
     assert len(y) == 0 and first is None
+    y, first = weekly_series(sales, AS_OF, date(2026, 10, 13))  # ainda sem semana completa observada
+    assert len(y) == 0 and first is None
+
+
+def test_same_series_model_and_status_on_every_day_of_the_week():
+    rng = np.random.default_rng(11)
+    sales_from = date(2026, 1, 1)
+    days = [sales_from + timedelta(days=int(d)) for d in rng.choice(320, size=40, replace=False)]
+    sales = sorted((d, float(rng.integers(1, 6))) for d in days)
+    m = {"stock": {"available": 3}, "isNew": False}
+    monday = date(2026, 10, 26)
+    results = []
+    for k in range(7):  # segunda 26/10 a domingo 01/11, com vendas novas também na semana em curso
+        as_of = monday + timedelta(days=k)
+        known = [(d, q) for d, q in sales if d < as_of]  # às 06:33 o próprio dia ainda não tem venda
+        new = [(monday + timedelta(days=j), 9.0) for j in range(k)]  # uma venda grande por dia da semana
+        results.append(forecast(m, known + new, as_of, sales_from))
+    assert results[0]["status"] == "ok"
+    assert all(without_day(r) == without_day(results[0]) for r in results[1:])
+    assert [r["openWeek"]["from"] for r in results] == ["2026-10-26"] * 7
+    assert results[0]["trainTo"] == results[0]["series"]["weekEnd"] == "2026-10-25"
+    # na segunda seguinte entra a semana que acabou de se completar
+    nxt = forecast(m, [(d, q) for d, q in sales if d < monday + timedelta(days=7)], monday + timedelta(days=7),
+                   sales_from)
+    assert nxt["weeks"] == results[0]["weeks"] + 1 and nxt["trainTo"] == "2026-11-01"
+    assert nxt["series"]["actual"][:-1] == results[0]["series"]["actual"][1:]
+
+
+def test_two_close_sales_keep_the_status_from_one_day_to_the_next():
+    """Caso real (Uni Design, cadeira 00121, 03 → 04/11): 3 vendas em 10 meses, duas com um dia de
+    diferença. Com semanas que terminavam no dia da análise, as duas caíram juntas numa semana em 04/11
+    e o status passou de 'ok' para 'insuficiente' sem venda nova; com semanas fixas, não muda."""
+    m = {"stock": {"available": -3}, "isNew": False}
+    for first_sale, expected in ((date(2026, 6, 16), "insuficiente"),  # terça e quarta: mesma semana
+                                 (date(2026, 6, 14), "ok")):           # domingo e quarta: semanas diferentes
+        sales = [(first_sale, 1.0), (date(2026, 6, 17), 1.0), (date(2026, 8, 14), 1.0)]
+        statuses = {forecast(m, sales, date(2026, 11, d), date(2026, 1, 1))["status"] for d in range(2, 9)}
+        assert statuses == {expected}, (first_sale, statuses)
 
 
 def test_no_temporal_leakage_in_any_model():

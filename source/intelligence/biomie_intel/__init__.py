@@ -5,4 +5,4 @@ indicadores de cada produto por empresa e grava tudo numa execução que só pas
 termina inteira. Consultivo: não altera saldos, curvas oficiais, preços nem documentos.
 """
 
-VERSION = "intel-1.4.0"
+VERSION = "intel-1.5.0"

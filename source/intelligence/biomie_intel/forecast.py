@@ -1,8 +1,17 @@
 """Previsão de demanda por produto e empresa (fase 4): 30, 60 e 90 dias.
 
-Base: vendas diárias do BIOMIE (fact_sales, a mesma base da página Produtos), somadas em semanas
-completas que terminam na data de referência. Semanas anteriores ao início das vendas no BIOMIE são
-desconhecidas e ficam de fora (nunca viram zero).
+Base: vendas diárias do BIOMIE (fact_sales, a mesma base da página Produtos), somadas em semanas de
+calendário completas, de segunda a domingo (versão 1.1, 04/11/2026; até a 1.0 as semanas terminavam no
+dia da análise e mudavam de fronteira todo dia, então as mesmas vendas trocavam de semana de um dia para
+o outro e a previsão oscilava sem venda nova).
+  - A última semana é a que terminou no domingo anterior ao dia da análise. A semana em curso (da
+    segunda-feira até o dia da análise) fica de fora — inclusive num domingo, porque o motor roda às
+    06:33 e o dia ainda não terminou; ela entra na segunda-feira seguinte, já completa. Assim a série,
+    o modelo e o status ficam iguais de segunda a domingo e só mudam quando uma semana nova se completa;
+    o custo é até 6 dias de atraso para uma venda nova pesar na previsão (o campo openWeek diz quais dias
+    ficaram de fora).
+  - A primeira semana começa na primeira segunda-feira a partir do início das vendas no BIOMIE. Semana
+    parcial no início e semanas anteriores são desconhecidas e ficam de fora (nunca viram zero).
 
 Modelos (todos determinísticos, do mais simples ao mais elaborado):
   media_13s   média das últimas 13 semanas (≈ 90 dias) — a base de comparação;
@@ -40,7 +49,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-VERSION = "forecast-1.0.0"
+VERSION = "forecast-1.1.0"
 HORIZON_DAYS = (30, 60, 90)
 HORIZON_WEEKS = {30: 4, 60: 9, 90: 13}
 MODELS = ("media_13s", "media_total", "ses", "croston", "sba", "tsb")
@@ -53,18 +62,26 @@ INSUFFICIENT = "Histórico insuficiente para previsão confiável."
 SERIES_WEEKS = 26
 
 
+def last_week_end(as_of: date) -> date:
+    """Domingo em que terminou a última semana completa: o anterior ao dia da análise, mesmo num domingo."""
+    return as_of - timedelta(days=as_of.weekday() + 1)
+
+
 def weekly_series(sales: list[tuple[date, float]], as_of: date, sales_from: date | None) -> tuple[np.ndarray, date | None]:
-    """Semanas completas observadas, da mais antiga para a mais recente (a última termina em as_of)."""
+    """Semanas de calendário (segunda a domingo) completas e observadas, da mais antiga para a mais recente.
+
+    A última termina em last_week_end(as_of); devolve também a segunda-feira em que começa a primeira."""
     if sales_from is None or sales_from > as_of:
         return np.zeros(0), None
-    weeks = ((as_of - sales_from).days + 1) // 7
+    end = last_week_end(as_of)
+    first = sales_from + timedelta(days=(7 - sales_from.weekday()) % 7)  # 1ª segunda-feira com vendas no BIOMIE
+    weeks = max(0, ((end - first).days + 1) // 7)
     y = np.zeros(weeks)
     for day, qty in sales:
-        k = (as_of - day).days // 7
+        k = (end - day).days // 7  # depois de end (semana em curso) dá negativo e fica de fora
         if 0 <= k < weeks and qty:
             y[weeks - 1 - k] += float(qty)
-    first = as_of - timedelta(days=7 * weeks - 1) if weeks else None
-    return y, first
+    return y, first if weeks else None
 
 
 def _mean_rates(y: np.ndarray, window: int | None) -> np.ndarray:
@@ -198,6 +215,7 @@ def _metrics(bt: dict[str, Any]) -> dict[str, Any]:
 
 def forecast(m: dict[str, Any], sales: list[tuple[date, float]], as_of: date, sales_from: date | None) -> dict[str, Any]:
     y, first = weekly_series(sales, as_of, sales_from)
+    end = last_week_end(as_of)
     nonzero = int((y > 0).sum())
     label, adi, cv2 = demand_class(y)
     limitations = ["Não há histórico diário de saldo por produto: semanas sem venda podem ter sido falta de estoque."]
@@ -205,11 +223,13 @@ def forecast(m: dict[str, Any], sales: list[tuple[date, float]], as_of: date, sa
         limitations.append("Produto sem saldo disponível hoje: a demanda recente pode estar reprimida.")
     base: dict[str, Any] = {
         "version": VERSION, "computedFor": as_of.isoformat(), "weeks": len(y), "nonzeroWeeks": nonzero,
-        "trainFrom": first.isoformat() if first else None, "trainTo": as_of.isoformat() if len(y) else None,
+        "trainFrom": first.isoformat() if first else None, "trainTo": end.isoformat() if len(y) else None,
+        # semana em curso: estes dias ainda não contam (entram na segunda-feira seguinte)
+        "openWeek": {"from": (end + timedelta(days=1)).isoformat(), "to": as_of.isoformat()},
         "demandClass": label, "adi": adi, "cv2": cv2,
         "seasonality": "nao_avaliavel" if len(y) < 104 else "nao_calculada",
         "limitations": limitations,
-        "series": {"weekEnd": as_of.isoformat(), "actual": [round(float(v), 3) for v in y[-SERIES_WEEKS:]]},
+        "series": {"weekEnd": end.isoformat(), "actual": [round(float(v), 3) for v in y[-SERIES_WEEKS:]]},
     }
 
     def stop(status: str, message: str) -> dict[str, Any]:
