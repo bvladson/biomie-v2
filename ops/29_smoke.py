@@ -14,6 +14,12 @@
                                         # --intel-empty = a tela avisa que ainda não há análise
     ... --hml                           # na HOMOLOGAÇÃO (41_homolog.py): túnel local 3150, contas
                                         # criadas e apagadas só lá; a produção não é tocada
+    python ops/29_smoke.py --plano [--hml [--plano-write]]
+                                        # Plano de Voo (0050): seis abas com Super admin, Diretoria,
+                                        # Gestor e Vendedor, tempo de cada aba, celular; na homologação o
+                                        # Gestor ganha equipe e o Vendedor um vendedor (desfeito no fim);
+                                        # --plano-write (só homologação) grava meta, iniciativa, alerta e
+                                        # decisão e confere o histórico
 
 Passwords are generated in memory, sent to the VPS over the SSH stdin and to the
 browser through the environment; they are never printed or written. The accounts
@@ -68,6 +74,19 @@ if req['action'] == 'create':
         q += f"insert into public.user_roles(user_id,role) values({lit(uid)},{lit(a['role'])}) on conflict do nothing;"
         for slug in a.get('companies', []):
             q += f"insert into public.user_company_access(user_id,company_id) select {lit(uid)},id from public.companies where slug={lit(slug)} on conflict do nothing;"
+        if HML and a.get('manages'):
+            # Equipes dos 2 vendedores de varejo que mais faturaram no mês na MAG Filial (só na cópia).
+            q += (f"insert into public.sales_team_managers(team_id,user_id,valid_from) select m.team_id,{lit(uid)},current_date-90 "
+                  "from public.sales_team_members m join public.sellers s on s.id=m.seller_id join public.companies c on c.id=s.company_id "
+                  "join public.channels ch on ch.id=s.channel_id and ch.name='varejo' where c.slug='mag-filial' and s.active and m.valid_to is null "
+                  "order by (select coalesce(sum(i.total),0) from public.invoices i where i.seller_id=s.id "
+                  "and i.competence_date>=date_trunc('month',current_date)) desc, s.id limit 2;")
+        if HML and a.get('linkSeller'):
+            # O 3º vendedor de varejo da MAG Filial passa a ser desta conta (só na cópia; desfeito no fim).
+            q += (f"update public.sellers set user_id={lit(uid)} where id=(select s.id from public.sellers s join public.companies c on c.id=s.company_id "
+                  "join public.channels ch on ch.id=s.channel_id and ch.name='varejo' where c.slug='mag-filial' and s.active and s.user_id is null "
+                  "order by (select coalesce(sum(i.total),0) from public.invoices i where i.seller_id=s.id "
+                  "and i.competence_date>=date_trunc('month',current_date)) desc, s.id offset 2 limit 1);")
         for slug, channels in a.get('legacy', {}).items():
             q += f"insert into private.legacy_company_access(user_id,company_id,allowed_channels,legacy_role) select {lit(uid)},id,array[{','.join(lit(c) for c in channels)}]::text[],'smoke' from public.companies where slug={lit(slug)} on conflict do nothing;"
         sql(q)
@@ -81,6 +100,9 @@ else:
     # find it by the profile e-mail and remove it for good.
     for uid in [x for x in sql("select id from public.profiles where email like 'smoke-%@biomie.invalid';").split() if x]:
         out.append({'deleted_tombstone': http('DELETE', '/admin/users/' + uid)[0]})
+    if HML:
+        sql("update public.sellers s set user_id=null where s.user_id is not null and not exists(select 1 from auth.users u where u.id=s.user_id);"
+            "delete from public.sales_team_managers g where not exists(select 1 from auth.users u where u.id=g.user_id);")
     sql("delete from public.user_company_access a where not exists(select 1 from auth.users u where u.id=a.user_id);"
         "delete from public.user_roles r where not exists(select 1 from auth.users u where u.id=r.user_id);"
         "delete from public.profiles p where not exists(select 1 from auth.users u where u.id=p.id);")
@@ -113,9 +135,23 @@ ADMIN_MODE = '--admin' in sys.argv  # Admin 2.0 end-to-end (ops/browser/admin-sm
 # --stock [--stock-mode off|pilot|on]: Estoque (0041) com Super admin, Gestor e Vendedor da MAG Filial.
 STOCK_MODE = '--stock' in sys.argv
 STOCK_EXPECTED = sys.argv[sys.argv.index('--stock-mode') + 1] if '--stock-mode' in sys.argv else 'off'
+# --plano: Plano de Voo (0050). --plano-write grava (meta, iniciativa, alerta, decisão): só na homologação.
+PLANO_MODE = '--plano' in sys.argv
+PLANO_WRITE = '--plano-write' in sys.argv
+if PLANO_WRITE and not HML_MODE:
+    raise SystemExit('--plano-write só na homologação (--hml): a cópia é descartável, a produção não')
 if STOCK_EXPECTED not in ('off', 'pilot', 'on'):
     raise SystemExit('invalid --stock-mode')
 accounts = [
+    {'label': 'super', 'email': f'smoke-super-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'SUPER_ADMIN', 'fullName': 'Smoke Super'},
+    {'label': 'diretoria', 'email': f'smoke-diretoria-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'DIRETORIA', 'fullName': 'Smoke Diretoria', 'companies': ['mag-filial']},
+    {'label': 'gestor', 'email': f'smoke-gestor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'GESTOR', 'fullName': 'Smoke Gestor', 'companies': ['mag-filial'], 'manages': True},
+    {'label': 'vendor', 'email': f'smoke-vendor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'VENDEDOR', 'fullName': 'Smoke Vendor', 'companies': ['mag-filial'], 'linkSeller': True},
+] if PLANO_MODE else [
     {'label': 'super', 'email': f'smoke-super-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'SUPER_ADMIN', 'fullName': 'Smoke Super'},
     {'label': 'gestor', 'email': f'smoke-gestor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
@@ -150,7 +186,8 @@ try:
            'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0',
            'BIOMIE_STOCK_INTEL': '1' if '--intel' in sys.argv else 'empty' if '--intel-empty' in sys.argv else '0',
            # Fornecedores e prazos (0048/0049): página, ficha do fornecedor e filtro por fornecedor; só leitura.
-           'BIOMIE_STOCK_SUPPLIERS': '1' if '--suppliers' in sys.argv else '0'}
+           'BIOMIE_STOCK_SUPPLIERS': '1' if '--suppliers' in sys.argv else '0',
+           'BIOMIE_FP_WRITE': '1' if PLANO_WRITE else '0'}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
@@ -211,11 +248,12 @@ try:
     report['mode'] = ('homologação (127.0.0.1:3150 via túnel)' if HML_MODE else
                       f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site')
     (BASE / 'ops' / 'logs').mkdir(exist_ok=True)
-    script = 'stock-smoke.cjs' if STOCK_MODE else 'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs'
+    script = ('fp-smoke.cjs' if PLANO_MODE else 'stock-smoke.cjs' if STOCK_MODE else
+              'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs')
     p = subprocess.run(['node', str(BASE / 'ops/browser' / script)], cwd=BASE / 'ops/browser', env=env,
                        capture_output=True, text=True, timeout=900)
     try:
-        start = p.stdout.index('{' if ADMIN_MODE or STOCK_MODE else '[')
+        start = p.stdout.index('{' if ADMIN_MODE or STOCK_MODE or PLANO_MODE else '[')
         report['browser'] = json.loads(redact(p.stdout[start:]))
     except ValueError:
         report['browser_error'] = redact((p.stderr or p.stdout)[-1500:])

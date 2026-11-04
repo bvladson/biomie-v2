@@ -35,6 +35,16 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
                                                        # exclusão das cópias SEM cifra, só com todos os portões
     python ops/noturno.py legado-passo1                # (autorização de 04/11/2026) desativação, passo 1: tarefas
                                                        # restantes do legado comentadas (nada é apagado)
+    python ops/noturno.py plano <release>              # PLANO DE VOO (0050) na homologação: suítes, cópia nova,
+                                                       # foto antes/depois das migrações, conferência antigo ×
+                                                       # novo e tempos (56), navegador com gravação na cópia,
+                                                       # regressão e RETORNO (a release da produção sobre o
+                                                       # banco já migrado)
+    python ops/noturno.py ativar-plano <release>       # ATIVAÇÃO do Plano de Voo na produção (só com
+                                                       # autorização do usuário): exige a homologação do dia
+                                                       # inteira; horário livre, interface preservada, worker
+                                                       # pausado, foto igual antes/depois, navegador; retorno
+                                                       # automático se falhar
 
 Uma tarefa por vez e NA ORDEM em que começaram a esperar (fila de senhas em ops/logs/noturno/fila;
 trava em ops/logs/noturno/.trava, solta sozinha quando o processo acaba, mesmo se cair). As tarefas que
@@ -974,6 +984,159 @@ def legado_passo1():
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
+def plano(release):
+    """Plano de Voo (0050) na homologação: cada passo pesado espera a janela; a produção não é tocada."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-plano-de-voo'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
+    summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
+                          'migrations': (tests or {}).get('migrations_applied'),
+                          'failures': {k: v.get('error') for k, v in (tests or {}).get('suites', {}).items()
+                                       if not v.get('ok')}}
+    if not (tests or {}).get('all_ok'):
+        return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
+    remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
+    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
+    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+    if not refresh:
+        return done('a cópia nova da produção falhou')
+    photo_before = photo(out, '02c-foto-da-copia-antes', copy=True)
+    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
+    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
+    if not up:
+        return done('a homologação não subiu')
+    # A 0050 só acrescenta: os números de antes (faturamento, sales_kpis, estoque, curvas) não podem mudar.
+    summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
+    rc, check, err = remote(['ops/56_plano_voo_check.py'] + WAIT, '03-conferencia-e-tempos', out)
+    summary['check'] = check or {'rc': rc, 'error': err}
+    summary['browser'] = smoke(['--plano', '--plano-write', '--hml', '--shots', f'plano-{dt.date.today():%Y%m%d}'],
+                               '04-navegador-plano-de-voo', out)
+    summary['regression'] = smoke(['--hml'], '05-navegador-regressao', out)
+    prod = production_release(out)
+    summary['rollbackRelease'] = prod
+    rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '06-retorno-subida', out)
+    summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
+                             if back else {'rc': rc, 'error': err})
+    if back:
+        summary['rollbackRegression'] = smoke(['--hml'], '07-retorno-navegador-regressao', out)
+    rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
+    summary['down'] = {'rc': rc}
+    return done()
+
+
+def plano_validation_ok(release):
+    """A homologação do Plano de Voo de hoje (ou de ontem) para esta release passou inteira?"""
+    s = None
+    for day in (dt.date.today(), dt.date.today() - dt.timedelta(days=1)):
+        try:
+            s = json.loads((LOGS / 'noturno' / f'{day:%Y%m%d}-plano-de-voo' / 'resumo.json').read_text(encoding='utf-8'))
+            break
+        except (OSError, ValueError):
+            continue
+    if s is None:
+        return False, ['sem resumo da homologação de hoje ou de ontem (ops/logs/noturno/<data>-plano-de-voo)']
+    why = []
+    if s.get('release') != release:
+        why.append(f"a homologação foi da release {s.get('release')}")
+    if s.get('stopped'):
+        why.append('a homologação parou: ' + s['stopped'])
+    if not (s.get('dbTests') or {}).get('allOk'):
+        why.append('suítes do banco')
+    photo_copy = s.get('photoCopy') or {}
+    if not photo_copy.get('compared') or not photo_copy.get('equal'):
+        why.append('foto da cópia antes × depois das migrações: ' + json.dumps(photo_copy.get('different') or
+                                                                            photo_copy.get('error'), ensure_ascii=False)[:200])
+    if not (s.get('check') or {}).get('ok'):
+        why.append('conferência 56: ' + '; '.join((s.get('check') or {}).get('problems') or ['sem resultado']))
+    for key in ('browser', 'regression', 'rollbackRegression'):
+        if not (s.get(key) or {}).get('ok'):
+            why.append('navegador: ' + key)
+    return not why, why
+
+
+def ativar_plano(release):
+    """Ativação do Plano de Voo na produção, só depois da homologação do dia inteira (mesmos portões da
+    ativação de 23/10 e 30/10). Se falhar, volta sozinha para a release anterior e testa no navegador."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-ativacao-plano-{release}'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
+
+    def done(reason=None):
+        if reason:
+            summary['stopped'] = reason
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        summary['rollback'] = ('python ops/remote.py ops/21_activate_release.py '
+                               f"{summary.get('previous') or PRODUCTION_RELEASE} --start-worker")
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+    ok, why = plano_validation_ok(release)
+    summary['validation'] = {'ok': ok, 'problems': why}
+    if not ok:
+        return done('a homologação não passou inteira: ' + '; '.join(why))
+    summary['previous'] = production_release(out)
+    if summary['previous'] == release:
+        return done('esta release já está ativa na produção: nada a fazer')
+    deadline = time.time() + 4 * 3600
+    while (busy := activation_slot()):
+        if time.time() > deadline:
+            return done('sem horário livre para a ativação em 4 h: ' + '; '.join(busy))
+        time.sleep(30)
+    summary['slotAt'] = dt.datetime.now().isoformat(timespec='seconds')
+    summary['previous'] = production_release(out)
+    rc, ui, err = remote(['ops/51_ui_release_guard.py', release], '00a-preservacao-da-interface', out)
+    summary['uiPreservation'] = ui if isinstance(ui, dict) else {'rc': rc, 'error': err}
+    if rc != 0 or not isinstance(ui, dict) or ui.get('preserves_ui') is not True:
+        return done('a preservação da interface não foi confirmada: nada mudou na produção')
+    if ui.get('active') != summary['previous'] or summary['previous'] == release:
+        return done('a release da produção mudou durante a conferência: repita a ativação; nada mudou na produção')
+    reason = f'ativacao {release}'
+    remote(['ops/25_load.py', 'pause', reason], '00c-worker-pausa', out)
+    limit = time.time() + 20 * 60
+    while True:
+        state = worker_state(out, '00d-worker-pausado')
+        if state.get('state') == 'PAUSED' and state.get('reason') == reason:
+            break
+        if time.time() > limit:
+            summary['workerResumed'] = resume_worker(out, '00e-worker-retomado')
+            return done('o worker não pausou em 20 minutos: ativação cancelada e worker retomado')
+        time.sleep(20)
+    summary['workerPaused'] = {k: state.get(k) for k in ('state', 'reason', 'at')}
+    photo_before = photo(out, '00f-foto-antes')
+    rc, act, err = remote(['ops/21_activate_release.py', release, '--start-worker'], '01-ativacao', out,
+                          timeout=3 * 3600)
+    summary['activation'] = act or {'rc': rc, 'error': err}
+    if rc != 0:
+        rc2, back, err2 = remote(['ops/21_activate_release.py', summary['previous'], '--start-worker'],
+                                 '01r-retorno', out, timeout=3 * 3600)
+        summary['rollbackRun'] = back or {'rc': rc2, 'error': err2}
+        if rc2 != 0:
+            return done('ATENÇÃO: a ativação falhou e o retorno automático também; o worker continua pausado')
+        summary['workerResumed'] = resume_worker(out, '01s-worker-retomado')
+        summary['rollbackBrowser'] = smoke([], '01t-retorno-navegador', out)
+        return done(f"a ativação falhou; a produção voltou sozinha para a {summary['previous']}")
+    summary['active'] = production_release(out)
+    summary['photo'] = compare_photos(photo_before, photo(out, '01a-foto-depois'))
+    summary['workerResumed'] = resume_worker(out, '01b-worker-retomado')
+    rc, check, err = remote(['ops/56_plano_voo_check.py', '--db=biomie_v2'] + WAIT, '02-conferencia-producao', out)
+    summary['check'] = check or {'rc': rc, 'error': err}
+    summary['browser'] = smoke(['--plano', '--shots', f'producao-plano-{dt.date.today():%Y%m%d}'],
+                               '03-navegador-plano-producao', out)
+    summary['regression'] = smoke([], '04-navegador-regressao-producao', out)
+    summary['workerAfter'] = {k: v for k, v in worker_state(out, '05-worker-depois').items()
+                              if k in ('state', 'reason', 'at', 'commit')}
+    return done()
+
+
 def banco(release):
     """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-banco-{release}'
@@ -998,8 +1161,12 @@ if __name__ == '__main__':
     lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
                                     'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups',
                                     'matriz-teste', 'legado-restauracao', 'legado-exclusao',
-                                    'legado-passo1') else None
-    if task == 'legado-exclusao':
+                                    'legado-passo1', 'plano', 'ativar-plano') else None
+    if task in ('plano', 'ativar-plano'):
+        if len(sys.argv) < 3 or not sys.argv[2].isalnum():
+            raise SystemExit(f'uso: {task} <release>')
+        (plano if task == 'plano' else ativar_plano)(sys.argv[2])
+    elif task == 'legado-exclusao':
         if len(sys.argv) < 4 or not (sys.argv[2].isdigit() and sys.argv[3].isdigit()):
             raise SystemExit('uso: legado-exclusao <quantidade no servidor> <quantidade na Hostinger>')
         legado_exclusao(int(sys.argv[2]), int(sys.argv[3]))
