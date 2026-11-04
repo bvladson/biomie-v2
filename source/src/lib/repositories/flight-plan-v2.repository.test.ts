@@ -39,7 +39,11 @@ function fakeDb(persona: Persona) {
     data_as_of: () => fx.today,
     flight_plan_v2_me: () => p["me"],
     flight_plan_v2_dataset: (a) =>
-      a["p_channel"] === "varejo" ? fx.admin["datasetVarejo"] : p["dataset"],
+      a["p_seller"] === fx.ids["s1"]
+        ? fx.admin["datasetAna"]
+        : a["p_channel"] === "varejo"
+          ? fx.admin["datasetVarejo"]
+          : p["dataset"],
     flight_plan_v2_year: () => p["year"] ?? fx.admin["year"],
     flight_plan_v2_target_lists: () => p["lists"] ?? fx.admin["lists"],
     flight_plan_targets_month: () => p["targets"],
@@ -138,6 +142,19 @@ describe("Plano de Voo: leitura real × servidor", () => {
     expect(p.summary.realized).toBe(350);
     expect(p.sellers).toHaveLength(3);
     expect(p.summary.target).toBe(1000);
+  });
+
+  it("Filtro de vendedor: só as notas, os pedidos e a meta da Ana", async () => {
+    invalidateCompany(C);
+    const { db, calls } = fakeDb("admin");
+    const p = await getPlan(db, fx.ids["adm"]!, { ...Q, sellerId: fx.ids["s1"]! });
+    assertClean(p);
+    const args = calls.find((c) => c.name === "flight_plan_v2_dataset")!.args;
+    expect(args["p_seller"]).toBe(fx.ids["s1"]);
+    expect(p.summary.realized).toBe(100);
+    expect(p.sellers.map((s) => s.seller.name)).toEqual(["Ana FP"]);
+    expect(p.summary.target).toBe(300);
+    expect(p.summary.lateOrdersAmount).toBe(1000);
   });
 
   it("Gestor: só a equipe, meta = soma dos vendedores dele", async () => {

@@ -95,6 +95,7 @@ const dump = {
     me: await as(ID.adm, 'select public.flight_plan_v2_me()'),
     dataset: await as(ID.adm, `select public.flight_plan_v2_dataset(${C}, 2026, 11, '${WINDOWS}'::jsonb)`),
     datasetVarejo: await as(ID.adm, `select public.flight_plan_v2_dataset(${C}, 2026, 11, '${WINDOWS}'::jsonb, 'varejo')`),
+    datasetAna: await as(ID.adm, `select public.flight_plan_v2_dataset(${C}, 2026, 11, '${WINDOWS}'::jsonb, null, '${ID.s1}')`),
     year: await as(ID.adm, `select public.flight_plan_v2_year(${C}, 2026)`),
     lists: await as(ID.adm, `select public.flight_plan_v2_target_lists(${C})`),
     targets: await as(ID.adm, `select public.flight_plan_targets_month(${C}, 2026, 11)`),
