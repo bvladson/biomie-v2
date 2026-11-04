@@ -11,6 +11,8 @@ const accounts = JSON.parse(process.env.BIOMIE_SMOKE_ACCOUNTS || '[]');
 const shots = process.env.BIOMIE_SMOKE_SHOTS || path.resolve(__dirname, '../../ops/logs');
 const stamp = process.env.BIOMIE_SMOKE_STAMP || String(Date.now());
 const WRITE = process.env.BIOMIE_FP_WRITE === '1';
+// Empresas reais (29_smoke.py): o Super admin abre as seis abas em cada uma (dados e formatos diferentes).
+const COMPANIES = JSON.parse(process.env.BIOMIE_FP_COMPANIES || '[]');
 // Ensaio local (harness com o simulador): sem login, a pessoa vem do endereço (?as=).
 const HARNESS = process.env.BIOMIE_FP_HARNESS === '1';
 const url = (account, p) => {
@@ -140,6 +142,30 @@ async function toast(page) {
         w.history = clean(await page.locator('[data-state="open"]').filter({ hasText: /Meta|Nenhuma/ }).first().innerText().catch(() => '')).slice(0, 240);
         out.writes = w;
       }
+      if (account.label === 'super' && COMPANIES.length) {
+        out.companies = {};
+        for (const c of COMPANIES) {
+          const r = { tabs: {} };
+          try {
+            let t1 = Date.now();
+            await page.goto(url(account, '/plano-de-voo?company=' + encodeURIComponent(c.id)));
+            await page.getByRole('heading', { name: 'Plano de Voo Comercial' }).waitFor({ timeout: 60000 });
+            r.tabs.visao = await ready(page, t1);
+            r.header = clean(await page.locator('header').filter({ hasText: 'Plano de Voo Comercial' }).first().innerText()).slice(0, 120);
+            for (const [key, name] of TABS.slice(1)) {
+              t1 = Date.now();
+              await page.getByRole('navigation', { name: 'Pilares do Plano de Voo' }).getByRole('link', { name, exact: true }).click();
+              r.tabs[key] = await ready(page, t1);
+            }
+            await shot(page, account, 'empresa-' + c.slug);
+          } catch (e) {
+            r.fatal = redact(e.message).slice(0, 300);
+            await shot(page, account, 'empresa-' + c.slug + '-falha');
+          }
+          r.ok = !r.fatal && Object.values(r.tabs).every((x) => !x.timeout && !x.error);
+          out.companies[c.slug] = r;
+        }
+      }
       if (account.label === 'super') {
         const mob = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'pt-BR', isMobile: true, hasTouch: true, storageState: await ctx.storageState() });
         const mp = await mob.newPage();
@@ -156,7 +182,8 @@ async function toast(page) {
       await shot(page, account, 'falha');
     }
     out.ok = !out.fatal && !out.pageErrors.length && !out.consoleErrors.length &&
-      Object.values(out.tabs).every((t) => !t.timeout && !t.error);
+      Object.values(out.tabs).every((t) => !t.timeout && !t.error) &&
+      Object.values(out.companies || {}).every((c) => c.ok);
     await ctx.close();
     results.push(out);
   }
@@ -168,6 +195,8 @@ async function toast(page) {
     ...r.pageErrors.map((e) => `${r.label}: erro na página: ${e}`),
     ...r.consoleErrors.map((e) => `${r.label}: console: ${e}`),
     ...Object.entries(r.tabs).filter(([, x]) => x.timeout || x.error).map(([k]) => `${r.label}: aba ${k} com erro ou sem carregar`),
+    ...Object.entries(r.companies || {}).filter(([, c]) => !c.ok).map(([slug, c]) =>
+      `${r.label}: empresa ${slug}: ${c.fatal || Object.entries(c.tabs).filter(([, x]) => x.timeout || x.error).map(([k]) => k).join(', ') + ' com erro ou sem carregar'}`),
     ...Object.entries(r.mobile || {}).filter(([, w]) => w > 390).map(([k, w]) => `${r.label}: aba ${k} vaza no celular (${w}px)`),
   ]);
   console.log(JSON.stringify({ ok, write: WRITE, steps, problems, results }, null, 1));

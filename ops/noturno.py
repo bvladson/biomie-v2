@@ -40,11 +40,14 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
                                                        # novo e tempos (56), navegador com gravação na cópia,
                                                        # regressão e RETORNO (a release da produção sobre o
                                                        # banco já migrado)
-    python ops/noturno.py ativar-plano <release>       # ATIVAÇÃO do Plano de Voo na produção (só com
+    python ops/noturno.py ativar-plano <release> [--anterior=<release>]
+                                                       # ATIVAÇÃO do Plano de Voo na produção (só com
                                                        # autorização do usuário): exige a homologação do dia
-                                                       # inteira; horário livre, interface preservada, worker
-                                                       # pausado, foto igual antes/depois, navegador; retorno
-                                                       # automático se falhar
+                                                       # inteira; só se a produção estiver na --anterior; só
+                                                       # de madrugada (18:30–05:30); horário livre, interface
+                                                       # preservada, worker pausado, foto igual antes/depois,
+                                                       # navegador; retorno automático se a ativação ou o
+                                                       # navegador na produção falharem
 
 Uma tarefa por vez e NA ORDEM em que começaram a esperar (fila de senhas em ops/logs/noturno/fila;
 trava em ops/logs/noturno/.trava, solta sozinha quando o processo acaba, mesmo se cair). As tarefas que
@@ -984,6 +987,24 @@ def legado_passo1():
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
+def smoke_retry(args, name, out):
+    """Teste de navegador com UMA nova tentativa um minuto depois (túnel, rede); a 1ª fica registrada."""
+    first = smoke(args, name, out)
+    if first.get('ok'):
+        return first
+    time.sleep(60)
+    second = smoke(args, name + '-2', out)
+    second['firstAttempt'] = {k: first.get(k) for k in ('ok', 'failed', 'problems', 'error')}
+    return second
+
+
+def plano_night_ok(now=None):
+    """Ativação do Plano de Voo só de madrugada, das 18:30 às 05:30: a análise diária do estoque roda às
+    06:33, 07:03 e 07:35 e o expediente começa às 07:30."""
+    t = (now or dt.datetime.now()).time()
+    return t >= dt.time(18, 30) or t < dt.time(5, 30)
+
+
 def plano(release):
     """Plano de Voo (0050) na homologação: cada passo pesado espera a janela; a produção não é tocada."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-plano-de-voo'
@@ -997,6 +1018,9 @@ def plano(release):
         (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
         print(json.dumps(summary, indent=1, ensure_ascii=False))
 
+    now = dt.datetime.now()
+    if now.weekday() < 5 and dt.time(5, 0) <= now.time() < dt.time(18, 0):
+        return done('a fila chegou fora da noite: a homologação fica para a próxima noite (nada foi feito)')
     rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
     summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
                           'migrations': (tests or {}).get('migrations_applied'),
@@ -1018,16 +1042,20 @@ def plano(release):
     summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
     rc, check, err = remote(['ops/56_plano_voo_check.py'] + WAIT, '03-conferencia-e-tempos', out)
     summary['check'] = check or {'rc': rc, 'error': err}
-    summary['browser'] = smoke(['--plano', '--plano-write', '--hml', '--shots', f'plano-{dt.date.today():%Y%m%d}'],
-                               '04-navegador-plano-de-voo', out)
-    summary['regression'] = smoke(['--hml'], '05-navegador-regressao', out)
+    # Plano de Voo com gravação (cópia descartável), as cinco empresas, Gestor/Vendedor com e sem vínculo.
+    summary['browser'] = smoke_retry(['--plano', '--plano-write', '--hml', '--shots', f'plano-{dt.date.today():%Y%m%d}'],
+                                     '04-navegador-plano-de-voo', out)
+    summary['regression'] = smoke_retry(['--hml'], '05-navegador-regressao', out)
+    # Estoque (o gráfico da 2154e45 vem junto nesta release): mesmo teste do retorno das validações do estoque.
+    summary['stock'] = smoke_retry(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
+                                   '05b-navegador-estoque', out)
     prod = production_release(out)
     summary['rollbackRelease'] = prod
     rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '06-retorno-subida', out)
     summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
                              if back else {'rc': rc, 'error': err})
     if back:
-        summary['rollbackRegression'] = smoke(['--hml'], '07-retorno-navegador-regressao', out)
+        summary['rollbackRegression'] = smoke_retry(['--hml'], '07-retorno-navegador-regressao', out)
     rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
     summary['down'] = {'rc': rc}
     return done()
@@ -1057,18 +1085,50 @@ def plano_validation_ok(release):
                                                                             photo_copy.get('error'), ensure_ascii=False)[:200])
     if not (s.get('check') or {}).get('ok'):
         why.append('conferência 56: ' + '; '.join((s.get('check') or {}).get('problems') or ['sem resultado']))
-    for key in ('browser', 'regression', 'rollbackRegression'):
+    for key in ('browser', 'regression', 'stock', 'rollbackRegression'):
         if not (s.get(key) or {}).get('ok'):
             why.append('navegador: ' + key)
     return not why, why
 
 
-def ativar_plano(release):
+def rollback_after_activation(out, previous, reason):
+    """Retorno depois de uma ativação que terminou mas falhou no navegador: worker pausado, release anterior
+    (ela funciona com a 0050 aplicada: o 21 só aplica as migrações que conhece), worker retomado, navegador."""
+    r = {'previous': previous}
+    why = reason + ' retorno'
+    remote(['ops/25_load.py', 'pause', why], '06a-retorno-worker-pausa', out)
+    limit = time.time() + 20 * 60
+    while True:
+        state = worker_state(out, '06b-retorno-worker-pausado')
+        if state.get('state') == 'PAUSED' and state.get('reason') == why:
+            break
+        if time.time() > limit:
+            r['workerResumed'] = resume_worker(out, '06c-retorno-worker-retomado')
+            r['ok'] = False
+            r['error'] = 'o worker não pausou em 20 minutos: o retorno NÃO foi feito'
+            return r
+        time.sleep(20)
+    rc, back, err = remote(['ops/21_activate_release.py', previous, '--start-worker'], '06d-retorno', out,
+                           timeout=3 * 3600)
+    r['run'] = back or {'rc': rc, 'error': err}
+    r['workerResumed'] = resume_worker(out, '06e-retorno-worker-retomado')
+    r['active'] = production_release(out)
+    r['browser'] = smoke([], '06f-retorno-navegador', out)
+    r['ok'] = rc == 0 and r['active'] == previous
+    return r
+
+
+def ativar_plano(release, expected_previous=None, now_reason=None):
     """Ativação do Plano de Voo na produção, só depois da homologação do dia inteira (mesmos portões da
-    ativação de 23/10 e 30/10). Se falhar, volta sozinha para a release anterior e testa no navegador."""
+    ativação de 23/10 e 30/10). --anterior=<release>: só ativa se a produção estiver nessa release (a
+    combinada com a outra fila). Só de madrugada (18:30–05:30), salvo --agora="motivo". Se a ativação
+    falhar, ou terminar mas o navegador falhar na produção, volta sozinha para a release anterior."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-ativacao-plano-{release}'
     out.mkdir(parents=True, exist_ok=True)
-    summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
+    summary = {'release': release, 'expectedPrevious': expected_previous,
+               'started': dt.datetime.now().isoformat(timespec='seconds')}
+    if now_reason:
+        summary['mode'] = {'agora': now_reason}
 
     def done(reason=None):
         if reason:
@@ -1079,6 +1139,9 @@ def ativar_plano(release):
         (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
         print(json.dumps(summary, indent=1, ensure_ascii=False))
 
+    def unexpected():
+        return bool(expected_previous) and summary['previous'] != expected_previous
+
     ok, why = plano_validation_ok(release)
     summary['validation'] = {'ok': ok, 'problems': why}
     if not ok:
@@ -1086,18 +1149,29 @@ def ativar_plano(release):
     summary['previous'] = production_release(out)
     if summary['previous'] == release:
         return done('esta release já está ativa na produção: nada a fazer')
+    if unexpected():
+        return done(f"a release ativa é a {summary['previous']}, não a {expected_previous} combinada: nada mudou na produção")
     deadline = time.time() + 4 * 3600
-    while (busy := activation_slot()):
+    while True:
+        if not now_reason and not plano_night_ok():
+            return done('fora da madrugada (18:30–05:30): a ativação fica para a próxima noite; nada mudou na produção')
+        busy = activation_slot()
+        if not busy:
+            break
         if time.time() > deadline:
             return done('sem horário livre para a ativação em 4 h: ' + '; '.join(busy))
         time.sleep(30)
     summary['slotAt'] = dt.datetime.now().isoformat(timespec='seconds')
     summary['previous'] = production_release(out)
+    if summary['previous'] == release:
+        return done('esta release já está ativa na produção: nada a fazer')
+    if unexpected():
+        return done(f"a release ativa é a {summary['previous']}, não a {expected_previous} combinada: nada mudou na produção")
     rc, ui, err = remote(['ops/51_ui_release_guard.py', release], '00a-preservacao-da-interface', out)
     summary['uiPreservation'] = ui if isinstance(ui, dict) else {'rc': rc, 'error': err}
     if rc != 0 or not isinstance(ui, dict) or ui.get('preserves_ui') is not True:
         return done('a preservação da interface não foi confirmada: nada mudou na produção')
-    if ui.get('active') != summary['previous'] or summary['previous'] == release:
+    if ui.get('active') != summary['previous']:
         return done('a release da produção mudou durante a conferência: repita a ativação; nada mudou na produção')
     reason = f'ativacao {release}'
     remote(['ops/25_load.py', 'pause', reason], '00c-worker-pausa', out)
@@ -1129,13 +1203,20 @@ def ativar_plano(release):
     summary['workerResumed'] = resume_worker(out, '01b-worker-retomado')
     rc, check, err = remote(['ops/56_plano_voo_check.py', '--db=biomie_v2'] + WAIT, '02-conferencia-producao', out)
     summary['check'] = check or {'rc': rc, 'error': err}
-    summary['browser'] = smoke(['--plano', '--shots', f'producao-plano-{dt.date.today():%Y%m%d}'],
-                               '03-navegador-plano-producao', out)
-    summary['regression'] = smoke([], '04-navegador-regressao-producao', out)
+    summary['browser'] = smoke_retry(['--plano', '--shots', f'producao-plano-{dt.date.today():%Y%m%d}'],
+                                     '03-navegador-plano-producao', out)
+    summary['regression'] = smoke_retry([], '04-navegador-regressao-producao', out)
+    failed = [k for k in ('browser', 'regression') if not (summary.get(k) or {}).get('ok')]
+    if failed:
+        summary['autoRollback'] = rollback_after_activation(out, summary['previous'], reason)
+        if summary['autoRollback'].get('ok'):
+            return done(f"o navegador falhou na produção ({', '.join(failed)}): a produção voltou sozinha "
+                        f"para a {summary['previous']}")
+        return done(f"ATENÇÃO: o navegador falhou na produção ({', '.join(failed)}) e o retorno automático "
+                    'não terminou: ver autoRollback')
     summary['workerAfter'] = {k: v for k, v in worker_state(out, '05-worker-depois').items()
                               if k in ('state', 'reason', 'at', 'commit')}
     return done()
-
 
 def banco(release):
     """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
@@ -1158,14 +1239,24 @@ if __name__ == '__main__':
     os.chdir(BASE)
     sys.argv = [a for a in sys.argv if a != '--teste']
     task = sys.argv[1] if len(sys.argv) > 1 else ''
-    lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
+    lock = night_lock(10 if task in ('plano', 'ativar-plano') else 6) if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
                                     'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups',
                                     'matriz-teste', 'legado-restauracao', 'legado-exclusao',
                                     'legado-passo1', 'plano', 'ativar-plano') else None
     if task in ('plano', 'ativar-plano'):
-        if len(sys.argv) < 3 or not sys.argv[2].isalnum():
-            raise SystemExit(f'uso: {task} <release>')
-        (plano if task == 'plano' else ativar_plano)(sys.argv[2])
+        args = [a for a in sys.argv[2:] if not a.startswith('--')]
+        if not args or not args[0].isalnum():
+            raise SystemExit(f'uso: {task} <release> [--anterior=<release>] [--agora="motivo"]')
+        if task == 'plano':
+            plano(args[0])
+        else:
+            previous = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--anterior=')), None)
+            if previous is not None and not (previous.isalnum() and len(previous) == 12):
+                raise SystemExit('--anterior precisa de uma release (12 caracteres)')
+            now_reason = next((a.split('=', 1)[1].strip() for a in sys.argv if a.startswith('--agora=')), None)
+            if now_reason is not None and len(now_reason) < 10:
+                raise SystemExit('--agora precisa de um motivo (10 caracteres ou mais).')
+            ativar_plano(args[0], expected_previous=previous, now_reason=now_reason)
     elif task == 'legado-exclusao':
         if len(sys.argv) < 4 or not (sys.argv[2].isdigit() and sys.argv[3].isdigit()):
             raise SystemExit('uso: legado-exclusao <quantidade no servidor> <quantidade na Hostinger>')

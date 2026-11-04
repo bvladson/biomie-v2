@@ -17,6 +17,7 @@ await setup(db, src);
 const ID = {
   adm: '00000000-0000-4000-8000-0000000000a1', ges: '00000000-0000-4000-8000-0000000000a2',
   ven: '00000000-0000-4000-8000-0000000000a3', c: '00000000-0000-4000-8000-0000000000c1',
+  ges2: '00000000-0000-4000-8000-0000000000a4', ven2: '00000000-0000-4000-8000-0000000000a5',
   s1: '00000000-0000-4000-8000-0000000000b1', s2: '00000000-0000-4000-8000-0000000000b2',
   s3: '00000000-0000-4000-8000-0000000000b3', sl: '00000000-0000-4000-8000-0000000000b4',
 };
@@ -30,12 +31,15 @@ declare c uuid := '${ID.c}'; p uuid := gen_random_uuid(); cu1 uuid := gen_random
   q1 uuid := gen_random_uuid();
 begin
   insert into auth.users(id, email) values ('${ID.adm}', 'adm@invalid.example'), ('${ID.ges}', 'ges@invalid.example'),
-    ('${ID.ven}', 'ven@invalid.example');
-  insert into public.profiles(id, full_name) values ('${ID.adm}', 'Admin FP'), ('${ID.ges}', 'Gestor FP'), ('${ID.ven}', 'Vendedora FP');
-  insert into public.user_roles(user_id, role) values ('${ID.adm}', 'ADMIN'), ('${ID.ges}', 'GESTOR'), ('${ID.ven}', 'VENDEDOR');
+    ('${ID.ven}', 'ven@invalid.example'), ('${ID.ges2}', 'ges2@invalid.example'), ('${ID.ven2}', 'ven2@invalid.example');
+  insert into public.profiles(id, full_name) values ('${ID.adm}', 'Admin FP'), ('${ID.ges}', 'Gestor FP'), ('${ID.ven}', 'Vendedora FP'),
+    ('${ID.ges2}', 'Gestor sem equipe'), ('${ID.ven2}', 'Vendedor sem vínculo');
+  insert into public.user_roles(user_id, role) values ('${ID.adm}', 'ADMIN'), ('${ID.ges}', 'GESTOR'), ('${ID.ven}', 'VENDEDOR'),
+    ('${ID.ges2}', 'GESTOR'), ('${ID.ven2}', 'VENDEDOR');
   insert into public.companies(id, name, slug, data_source, revenue_basis) values (c, 'Mag Filial (exemplo)', 'mag-filial', 'OMIE_SHADOW', 'commercial_base');
   insert into public.channels(company_id, name) values (c, 'varejo'), (c, 'licitacao'), (c, 'outros');
-  insert into public.user_company_access(user_id, company_id) values ('${ID.adm}', c), ('${ID.ges}', c), ('${ID.ven}', c);
+  insert into public.user_company_access(user_id, company_id) values ('${ID.adm}', c), ('${ID.ges}', c), ('${ID.ven}', c),
+    ('${ID.ges2}', c), ('${ID.ven2}', c);
   insert into public.sellers(id, company_id, name, external_id) values ('${ID.s1}', c, 'Ana FP', 'V1'), ('${ID.s2}', c, 'Bruno FP', 'V2'),
     ('${ID.s3}', c, 'Carla FP', 'V3'), ('${ID.sl}', c, 'Licitação', 'L1');
   update public.sellers set user_id = '${ID.ven}' where id = '${ID.s3}';
@@ -95,16 +99,23 @@ const dump = {
     lists: await as(ID.adm, `select public.flight_plan_v2_target_lists(${C})`),
     targets: await as(ID.adm, `select public.flight_plan_targets_month(${C}, 2026, 11)`),
   },
-  gestor: {
-    me: await as(ID.ges, 'select public.flight_plan_v2_me()'),
-    dataset: await as(ID.ges, `select public.flight_plan_v2_dataset(${C}, 2026, 11, '${WINDOWS}'::jsonb)`),
-    targets: await as(ID.ges, `select public.flight_plan_targets_month(${C}, 2026, 11)`),
-  },
-  vendedor: {
-    me: await as(ID.ven, 'select public.flight_plan_v2_me()'),
-    dataset: await as(ID.ven, `select public.flight_plan_v2_dataset(${C}, 2026, 11, '${WINDOWS}'::jsonb)`),
-  },
 };
+async function reads(user) {
+  return {
+    me: await as(user, 'select public.flight_plan_v2_me()'),
+    dataset: await as(user, `select public.flight_plan_v2_dataset(${C}, 2026, 11, '${WINDOWS}'::jsonb)`),
+    targets: await as(user, `select public.flight_plan_targets_month(${C}, 2026, 11)`),
+    year: await as(user, `select public.flight_plan_v2_year(${C}, 2026)`),
+    lists: await as(user, `select public.flight_plan_v2_target_lists(${C})`),
+    history: await as(user, `select public.flight_plan_history(${C}, null, 50)`),
+  };
+}
+// Gestor com equipe, Vendedora ligada a um vendedor e as duas pessoas SEM vínculo (como as contas do teste
+// de navegador na produção): Gestor sem equipe e Vendedor sem vendedor.
+dump.gestor = await reads(ID.ges);
+dump.vendedor = await reads(ID.ven);
+dump.gestorSemEquipe = await reads(ID.ges2);
+dump.vendedorSemVinculo = await reads(ID.ven2);
 // Uma gravação de cada tipo, para o histórico ter linhas reais.
 await as(ID.adm, `select public.flight_plan_save_targets(${C}, 2026, 11, '[{"scope":"seller","sellerId":"${ID.s1}","level":"BASE","amount":200}]'::jsonb)`);
 await as(ID.adm, `select public.flight_plan_set_commit(${C}, '${ID.s1}', 2026, 11, 130, null)`);

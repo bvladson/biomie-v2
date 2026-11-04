@@ -25,9 +25,11 @@ const fx = JSON.parse(datasetsRaw) as {
   admin: Record<string, unknown>;
   gestor: Record<string, unknown>;
   vendedor: Record<string, unknown>;
+  gestorSemEquipe: Record<string, unknown>;
+  vendedorSemVinculo: Record<string, unknown>;
 };
 const C = fx.ids["c"]!;
-type Persona = "admin" | "gestor" | "vendedor";
+type Persona = "admin" | "gestor" | "vendedor" | "gestorSemEquipe" | "vendedorSemVinculo";
 
 /** Banco falso: devolve as respostas reais gravadas e registra cada chamada. */
 function fakeDb(persona: Persona) {
@@ -38,10 +40,10 @@ function fakeDb(persona: Persona) {
     flight_plan_v2_me: () => p["me"],
     flight_plan_v2_dataset: (a) =>
       a["p_channel"] === "varejo" ? fx.admin["datasetVarejo"] : p["dataset"],
-    flight_plan_v2_year: () => fx.admin["year"],
-    flight_plan_v2_target_lists: () => fx.admin["lists"],
+    flight_plan_v2_year: () => p["year"] ?? fx.admin["year"],
+    flight_plan_v2_target_lists: () => p["lists"] ?? fx.admin["lists"],
     flight_plan_targets_month: () => p["targets"],
-    flight_plan_history: () => fx.admin["history"],
+    flight_plan_history: () => (persona === "admin" ? fx.admin["history"] : p["history"]),
     flight_plan_sync_alerts: (a) =>
       (a["p_alerts"] as { key: string }[]).map((x) => ({
         key: x.key,
@@ -251,6 +253,44 @@ describe("Plano de Voo: leitura real × servidor", () => {
     const v = await bootstrap(fakeDb("vendedor").db);
     expect(v.me.sellerId).toBe(fx.ids["s3"]);
   });
+
+  it.each([
+    ["gestorSemEquipe", "ges2"],
+    ["vendedorSemVinculo", "ven2"],
+  ] as const)(
+    "%s (como as contas do teste na produção): tudo vazio e sem erro, nada da empresa",
+    async (persona, id) => {
+      invalidateCompany(C);
+      const { db } = fakeDb(persona);
+      const userId = fx.ids[id]!;
+      const b = await bootstrap(db);
+      expect(b.me.sellerId ?? null).toBeNull();
+      const p = await getPlan(db, userId, Q);
+      assertClean(p);
+      expect(p.sellers).toEqual([]);
+      expect(p.summary.realized).toBe(0);
+      // Sem vendedor no escopo: "sem meta" (nunca a meta da empresa inteira).
+      expect(p.targetSource).toBe("none");
+      expect(p.summary.target ?? 0).toBe(0);
+      expect(p.months).toHaveLength(12);
+      const alerts = await listAlerts(db, userId, Q);
+      assertClean(alerts);
+      // O alerta é do escopo da pessoa, nunca o da empresa inteira.
+      expect(alerts.every((a) => !a.key.includes(":empresa:"))).toBe(true);
+      const t = await getTargets(db, C, "2026-11");
+      assertClean(t);
+      expect(t.sellers).toEqual([]);
+      expect(t.canEditCompany).toBe(false);
+      const y = await getYear(db, { companyId: C, year: 2026 });
+      assertClean(y);
+      expect(y).toHaveLength(12);
+      expect(y.every((m) => m.realized === 0)).toBe(true);
+      const lists = await getTargetLists(db, Q);
+      assertClean(lists);
+      expect(lists.filter((l) => l.kind !== "IDLE_STOCK").every((l) => l.count === 0)).toBe(true);
+      expect(await listHistory(db, C)).toEqual([]);
+    },
+  );
 
   it("telas legadas (Vendedores, Vendedor 360, Vendas) com os mesmos números", async () => {
     const { db } = fakeDb("admin");

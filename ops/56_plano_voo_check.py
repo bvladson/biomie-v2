@@ -8,7 +8,9 @@ de hoje:
   IGUAL; vendedores, pedidos e orçamentos lado a lado; tempo de 3 chamadas de cada (fria e quentes);
 - tempo das outras leituras novas: ano, listas de alvos e grade de metas;
 - canal oficial do cadastro dos vendedores (nenhum vendedor de empresa real sem canal; 1 "Licitação");
-- histórico de etapa dos pedidos (ponto de partida da conversão).
+- histórico de etapa dos pedidos (ponto de partida da conversão);
+- limites de tempo (só casos patológicos, a tela ficaria inutilizável): leitura do mês (mediana) até 8 s,
+  grade de metas até 8 s, ano e listas de alvos até 15 s.
 Uma transação read only (statement_timeout 10 min, sem paralelismo). Sem nomes de pessoas na saída.
 O padrão é a cópia da homologação (biomie_v2_hml); na produção, só depois da ativação e fora do expediente.
 """
@@ -108,5 +110,8 @@ for c in companies:
 problems = [f"{c['slug']}: faturamento do mês difere ({c['realizedOld']} × {c['realizedNew']})"
             for c in companies if not c['realizedEqual']]
 problems += [f"{x['slug']}: {x['n']} vendedor(es) sem canal" for x in channels if x['canal'] == '(vazio)']
+LIMITS = {'medianNewMs': 8000, 'msTargets': 8000, 'msYear': 15000, 'msLists': 15000}
+problems += [f"{c['slug']}: {k} = {c[k]} ms (limite {v} ms)" for c in companies for k, v in LIMITS.items()
+             if (c.get(k) or 0) > v]
 print(json.dumps({'database': DB, 'ok': not problems, 'problems': problems, 'companies': companies,
                   'sellerChannels': channels, 'stageEvents': events}, ensure_ascii=False, indent=1))

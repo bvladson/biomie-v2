@@ -91,6 +91,9 @@ if req['action'] == 'create':
             q += f"insert into private.legacy_company_access(user_id,company_id,allowed_channels,legacy_role) select {lit(uid)},id,array[{','.join(lit(c) for c in channels)}]::text[],'smoke' from public.companies where slug={lit(slug)} on conflict do nothing;"
         sql(q)
         out.append({'label': a['label'], 'created': True})
+    if req.get('companies'):
+        out.append({'companies': json.loads(sql("select coalesce(json_agg(json_build_object('id', id, 'slug', slug) "
+                                                "order by slug), '[]') from public.companies where not is_demo;"))})
 else:
     status, data = http('GET', '/admin/users?per_page=1000')
     for u in data.get('users', []):
@@ -151,7 +154,12 @@ accounts = [
      'role': 'GESTOR', 'fullName': 'Smoke Gestor', 'companies': ['mag-filial'], 'manages': True},
     {'label': 'vendor', 'email': f'smoke-vendor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'VENDEDOR', 'fullName': 'Smoke Vendor', 'companies': ['mag-filial'], 'linkSeller': True},
-] if PLANO_MODE else [
+] + ([
+    {'label': 'gestor-sem-equipe', 'email': f'smoke-gestor2-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'GESTOR', 'fullName': 'Smoke Gestor Sem Equipe', 'companies': ['mag-filial']},
+    {'label': 'vendor-sem-vinculo', 'email': f'smoke-vendor2-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
+     'role': 'VENDEDOR', 'fullName': 'Smoke Vendor Sem Vinculo', 'companies': ['mag-filial']},
+] if HML_MODE else []) if PLANO_MODE else [
     {'label': 'super', 'email': f'smoke-super-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'SUPER_ADMIN', 'fullName': 'Smoke Super'},
     {'label': 'gestor', 'email': f'smoke-gestor-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
@@ -179,7 +187,8 @@ if HML_MODE:
 report = {}
 tunnel = None
 try:
-    report['create'] = remote({'action': 'create', 'accounts': accounts, 'hml': HML_MODE})
+    report['create'] = remote({'action': 'create', 'accounts': accounts, 'hml': HML_MODE, 'companies': PLANO_MODE})
+    fp_companies = next((x['companies'] for x in report['create'] if 'companies' in x), [])
     env = {**os.environ, 'BIOMIE_SMOKE_ACCOUNTS': json.dumps(accounts),
            'BIOMIE_SMOKE_SHOTS': str(BASE / 'ops' / 'logs'), 'BIOMIE_SMOKE_STAMP': stamp,
            'BIOMIE_STOCK_MODE': STOCK_EXPECTED,
@@ -187,7 +196,8 @@ try:
            'BIOMIE_STOCK_INTEL': '1' if '--intel' in sys.argv else 'empty' if '--intel-empty' in sys.argv else '0',
            # Fornecedores e prazos (0048/0049): página, ficha do fornecedor e filtro por fornecedor; só leitura.
            'BIOMIE_STOCK_SUPPLIERS': '1' if '--suppliers' in sys.argv else '0',
-           'BIOMIE_FP_WRITE': '1' if PLANO_WRITE else '0'}
+           'BIOMIE_FP_WRITE': '1' if PLANO_WRITE else '0',
+           'BIOMIE_FP_COMPANIES': json.dumps(fp_companies)}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
@@ -251,7 +261,7 @@ try:
     script = ('fp-smoke.cjs' if PLANO_MODE else 'stock-smoke.cjs' if STOCK_MODE else
               'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs')
     p = subprocess.run(['node', str(BASE / 'ops/browser' / script)], cwd=BASE / 'ops/browser', env=env,
-                       capture_output=True, text=True, timeout=900)
+                       capture_output=True, text=True, timeout=1800 if PLANO_MODE else 900)
     try:
         start = p.stdout.index('{' if ADMIN_MODE or STOCK_MODE or PLANO_MODE else '[')
         report['browser'] = json.loads(redact(p.stdout[start:]))
