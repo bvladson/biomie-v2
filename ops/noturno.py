@@ -31,6 +31,10 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
                                                        # desliga o dump sem cifra das 03:00 (nada é apagado)
     python ops/noturno.py legado-restauracao           # teste de restauração do arquivo cifrado do legado num
                                                        # MariaDB descartável, tabela a tabela (nada é apagado)
+    python ops/noturno.py legado-exclusao <local> <fora>  # (autorização de 04/11/2026) cópia de 19/10 cifrada e
+                                                       # exclusão das cópias SEM cifra, só com todos os portões
+    python ops/noturno.py legado-passo1                # (autorização de 04/11/2026) desativação, passo 1: tarefas
+                                                       # restantes do legado comentadas (nada é apagado)
 
 Uma tarefa por vez e NA ORDEM em que começaram a esperar (fila de senhas em ops/logs/noturno/fila;
 trava em ops/logs/noturno/.trava, solta sozinha quando o processo acaba, mesmo se cair). As tarefas que
@@ -264,9 +268,12 @@ def intel(release, suppliers=False):
     rc, mode, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '03-estoque-liberado-na-copia', out)
     summary['stockMode'] = {'rc': rc, 'error': None if rc == 0 else err}
     if suppliers:
-        rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '30'] + WAIT, '03b-fornecedores-do-omie', out)
+        # Empresa por empresa, cada uma só na janela livre da sua chave (03/11: pular tudo por uma chave ocupada
+        # deixou a homologação sem leitura do Omie); prazo total de 90 min.
+        rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '90'] + WAIT, '03b-fornecedores-do-omie', out)
         summary['suppliersLoad'] = (
-            {k: load.get(k) for k in ('exit', 'skipped', 'conflicts', 'after')} if load else {'rc': rc, 'error': err})
+            {k: load.get(k) for k in ('complete', 'notLoaded', 'companies', 'after')} if load
+            else {'rc': rc, 'error': err})
     rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '04-prazo-hipotetico', out)
     summary['hypotheticalLeadTime'] = seed or {'rc': rc, 'error': err}
     rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '05-motor', out)
@@ -900,6 +907,73 @@ def legado_restauracao():
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
+def legado_exclusao(expected_local, expected_offsite):
+    """Exclusão das cópias SEM cifra do banco antigo (autorização do usuário de 04/11/2026, "depois das verificações
+    de segurança"): guarda cifrada a cópia de 19/10 (último dia do antigo como sistema oficial) e só então apaga, se
+    todos os portões do 54_legado.py passarem (arquivos cifrados conferidos local, fora e decifrados, restauração
+    testada, marco conferido, dump das 03:00 desligado, backup do v2 em dia, quantidades iguais às informadas).
+    Leve (sem janela): não usa a cópia de banco nem o Omie."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-legado-exclusao'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'started': dt.datetime.now().isoformat(timespec='seconds'),
+               'expected': {'local': expected_local, 'offsite': expected_offsite}}
+    rc, before, err = remote(['ops/54_legado.py', 'status'], '00-situacao-antes', out)
+    summary['before'] = ({k: before.get(k) for k in ('legacyCron', 'legacyPlaintextDumps', 'offsite')} if before
+                         else {'rc': rc, 'error': err})
+    rc, marco, err = remote(['ops/54_legado.py', 'cifrar-marco'], '01-marco-19-10-cifrado', out, timeout=2 * 3600)
+    summary['marco'] = ({k: marco.get(k) for k in ('file', 'bytes', 'sha256', 'source', 'roundTripSha256Ok',
+                                                    'createTableStatements', 'dumpCompleted', 'offsite', 'ok',
+                                                    'alreadyDone')}
+                        if marco else {'rc': rc, 'error': err})
+    if marco and marco.get('ok'):
+        rc, deleted, err = remote(['ops/54_legado.py', 'excluir-texto-puro', str(expected_local), str(expected_offsite)],
+                                  '02-exclusao-com-portoes', out, timeout=2 * 3600)
+        summary['deletion'] = ({k: v for k, v in deleted.items() if k != 'verify'} if deleted
+                               else {'rc': rc, 'error': err})
+        if deleted and not deleted.get('ok'):
+            summary['stopped'] = deleted.get('reason') or 'exclusão incompleta: ver 02-exclusao-com-portoes'
+    else:
+        summary['stopped'] = 'marco de 19/10 não conferido: nada foi apagado'
+    rc, after, err = remote(['ops/54_legado.py', 'status'], '03-situacao-depois', out)
+    summary['after'] = ({k: after.get(k) for k in ('legacyCron', 'legacyPlaintextDumps', 'encryptedArchives', 'offsite')}
+                        if after else {'rc': rc, 'error': err})
+    summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+    (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+
+def legado_passo1():
+    """Desativação controlada do BIomie antigo, passo 1 (autorização de 04/11/2026): comenta as tarefas restantes
+    do /etc/cron.d/biomie e do biomie-capacity (54_legado.py parar-tarefas; nada é apagado). Fora do expediente,
+    nos minutos :05–:12 ou :35–:42 (depois do materialize das :00/:30). Portão de saída no dia seguinte:
+    54_legado.py gravacoes <hora da parada>."""
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-legado-passo1'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'started': dt.datetime.now().isoformat(timespec='seconds')}
+    deadline = time.time() + 6 * 3600
+    while True:
+        busy = night_slot()
+        if not (5 <= dt.datetime.now().minute % 30 <= 12):
+            busy.append('fora dos minutos :05–:12 / :35–:42')
+        if not busy:
+            break
+        if time.time() > deadline:
+            summary['stopped'] = 'sem horário livre em 6 h: ' + '; '.join(busy)
+            break
+        time.sleep(60)
+    if 'stopped' not in summary:
+        rc, before, err = remote(['ops/54_legado.py', 'status'], '00-situacao-antes', out)
+        summary['before'] = (before or {}).get('legacyCron') or {'rc': rc, 'error': err}
+        rc, stop, err = remote(['ops/54_legado.py', 'parar-tarefas'], '01-parar-tarefas', out)
+        summary['stop'] = stop or {'rc': rc, 'error': err}
+        rc, after, err = remote(['ops/54_legado.py', 'status'], '02-situacao-depois', out)
+        summary['after'] = (after or {}).get('legacyCron') or {'rc': rc, 'error': err}
+    summary['rollback'] = 'python ops/remote.py ops/54_legado.py desfazer-parar-tarefas'
+    summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+    (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+
 def banco(release):
     """Suítes do banco de uma release (ex.: o trem de integração), na fila das tarefas noturnas."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-banco-{release}'
@@ -923,8 +997,15 @@ if __name__ == '__main__':
     task = sys.argv[1] if len(sys.argv) > 1 else ''
     lock = night_lock() if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
                                     'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups',
-                                    'matriz-teste', 'legado-restauracao') else None
-    if task == 'legado-backups':
+                                    'matriz-teste', 'legado-restauracao', 'legado-exclusao',
+                                    'legado-passo1') else None
+    if task == 'legado-exclusao':
+        if len(sys.argv) < 4 or not (sys.argv[2].isdigit() and sys.argv[3].isdigit()):
+            raise SystemExit('uso: legado-exclusao <quantidade no servidor> <quantidade na Hostinger>')
+        legado_exclusao(int(sys.argv[2]), int(sys.argv[3]))
+    elif task == 'legado-passo1':
+        legado_passo1()
+    elif task == 'legado-backups':
         legado_backups()
     elif task == 'legado-restauracao':
         legado_restauracao()

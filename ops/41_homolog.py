@@ -433,6 +433,83 @@ def key_conflicts(slug):
     return [part for part in row.split(' | ') if part.strip()]
 
 
+SUPPLIER_JOB = """select coalesce((select json_build_object('status', j.status, 'pages', j.pages_done,
+    'pagesTotal', j.pages_total, 'suppliers', j.suppliers_saved, 'links', j.links_saved, 'error', j.error)
+  from private.stock_supplier_jobs j where j.company_id = '{company}' order by j.created_at desc limit 1), '{{}}'::json);"""
+
+
+def close_supplier_jobs(company, others=False):
+    """Fecha na CÓPIA a importação aberta de uma empresa (ou de todas as outras): o passo do worker pega a mais
+    antiga de QUALQUER empresa, e cada chave só pode ser usada na janela conferida para ela."""
+    where = f"company_id <> '{company}'" if others else f"company_id = '{company}'"
+    return int(psql(f"""with closed as (update private.stock_supplier_jobs set status = 'failed',
+        finished_at = clock_timestamp(), error = 'fechada pela homologação: uma empresa por vez, só na janela da chave'
+      where status in ('queued', 'running') and {where} returning 1) select count(*) from closed;""") or 0)
+
+
+def suppliers_load(total_minutes):
+    """Fornecedores do Omie na cópia, EMPRESA POR EMPRESA (a chave de cada uma é a mesma da produção): cada
+    importação só começa nos minutos :10–:14 ou :40–:44, sem uso real da chave daquela empresa pela produção, e
+    termina 1 minuto antes das cargas :21/:51. Empresa sem janela livre no prazo total fica registrada (as outras
+    seguem); importação que não terminou na janela é fechada na cópia e recomeça na próxima."""
+    import re
+    rows = psql("""select string_agg(c.slug || ':' || c.id, ' ' order by c.slug) from public.companies c
+      join public.company_integrations ci on ci.company_id = c.id
+      where ci.provider = 'omie' and ci.status = 'CONNECTED' and not c.is_demo;""", db='biomie_v2').split()
+    pending = {}
+    for item in rows:
+        slug, _, company = item.partition(':')
+        if re.fullmatch(r'[a-z0-9-]{2,40}', slug) and re.fullmatch(r'[0-9a-f-]{36}', company):
+            pending[slug] = company
+    results = {slug: {'attempts': []} for slug in pending}
+    deadline = time.time() + total_minutes * 60
+    while pending and time.time() < deadline:
+        if not 10 <= datetime.datetime.now().minute % 30 <= 14:
+            time.sleep(20)
+            continue
+        for slug in sorted(pending):
+            now = datetime.datetime.now()
+            seconds_left = (20 - now.minute % 30) * 60 - now.second - 60
+            if seconds_left < 150 or time.time() > deadline:
+                break
+            attempt = {'at': now.isoformat(timespec='seconds')}
+            conflicts = key_conflicts(slug)
+            if conflicts:
+                results[slug]['attempts'].append({**attempt, 'conflicts': conflicts})
+                continue
+            company = pending[slug]
+            attempt['closedOthers'] = close_supplier_jobs(company, others=True)
+            minutes = max(2, seconds_left // 60)
+            started = time.time()
+            res = oneoff(['.output/stock-suppliers-load.mjs', f'--minutes={minutes}', f'--empresa={company}'],
+                         minutes * 60 + 180)
+            events = [json.loads(l) for l in res['stdout'].splitlines() if l.startswith('{"event":"load_')]
+            end = next((e for e in events if e.get('event') == 'load_end'), {})
+            job = json.loads(psql(SUPPLIER_JOB.format(company=company)) or '{}')
+            attempt.update({'seconds': round(time.time() - started), 'exit': res['exit'], 'tally': end.get('tally'),
+                            'timedOut': end.get('timedOut'), 'job': job,
+                            'stderr': res['stderr'][-300:] if res['exit'] else None})
+            if job.get('status') in ('complete', 'failed'):
+                results[slug]['final'] = job['status']
+                del pending[slug]
+            else:
+                attempt['closedAtWindowEnd'] = close_supplier_jobs(company)
+            results[slug]['attempts'].append(attempt)
+        while 10 <= datetime.datetime.now().minute % 30 <= 14:
+            time.sleep(20)
+    for slug in pending:
+        results[slug]['final'] = 'sem janela livre da chave no prazo'
+    after = psql("""select json_build_object('suppliers', (select count(*) from private.stock_suppliers),
+      'links', (select count(*) from private.stock_product_suppliers),
+      'jobs', (select json_agg(json_build_object('company', c.slug, 'status', j.status, 'pages', j.pages_done,
+         'suppliers', j.suppliers_saved, 'links', j.links_saved, 'removed', j.links_removed, 'error', j.error))
+         from (select distinct on (company_id) * from private.stock_supplier_jobs order by company_id, created_at desc) j
+         join public.companies c on c.id = j.company_id));""")
+    return {'companies': results, 'complete': sorted(s for s, r in results.items() if r.get('final') == 'complete'),
+            'notLoaded': sorted(s for s, r in results.items() if r.get('final') != 'complete'),
+            'after': json.loads(after) if after.startswith('{') else after}
+
+
 def container_log_lines(name):
     """Linhas do contêiner direto do arquivo json-file (docker logs não é confiável neste servidor)."""
     path = run(['docker', 'inspect', '--format', '{{.LogPath}}', name], check=False)
@@ -709,25 +786,10 @@ elif command == 'movements-load':
         raise SystemExit('minutos: número inteiro')
     out = oneoff(['.output/stock-movements-load.mjs', f'--minutes={minutes}'], int(minutes) * 60 + 600)
 elif command == 'suppliers-load':
-    minutes = sys.argv[2] if len(sys.argv) > 2 else '30'
-    if not minutes.isdigit():
-        raise SystemExit('minutos: número inteiro')
-    # A chave do Omie de cada empresa é a mesma da produção: não começa com a produção usando alguma delas.
-    slugs = psql("""select string_agg(c.slug, ' ' order by c.slug) from public.companies c
-      join public.company_integrations ci on ci.company_id = c.id
-      where ci.provider = 'omie' and ci.status = 'CONNECTED' and not c.is_demo;""", db='biomie_v2').split()
-    busy = {s: key_conflicts(s) for s in slugs}
-    busy = {s: c for s, c in busy.items() if c}
-    if busy:
-        out = {'skipped': 'chave do Omie em uso pela produção agora', 'conflicts': busy}
-    else:
-        out = oneoff(['.output/stock-suppliers-load.mjs', f'--minutes={minutes}'], int(minutes) * 60 + 600)
-        out['after'] = psql("""select json_build_object('suppliers', (select count(*) from private.stock_suppliers),
-          'links', (select count(*) from private.stock_product_suppliers),
-          'jobs', (select json_agg(json_build_object('company', c.slug, 'status', j.status, 'pages', j.pages_done,
-             'suppliers', j.suppliers_saved, 'links', j.links_saved, 'removed', j.links_removed, 'error', j.error))
-             from (select distinct on (company_id) * from private.stock_supplier_jobs order by company_id, created_at desc) j
-             join public.companies c on c.id = j.company_id));""")
+    minutes = sys.argv[2] if len(sys.argv) > 2 else '90'
+    if not minutes.isdigit() or not 5 <= int(minutes) <= 240:
+        raise SystemExit('minutos: prazo total, de 5 a 240')
+    out = suppliers_load(int(minutes))
 elif command == 'tx-probe':
     if len(sys.argv) < 5:
         raise SystemExit('uso: tx-probe <release-12> <empresa-slug> <entidades> [dias]')
