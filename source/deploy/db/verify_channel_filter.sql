@@ -2,6 +2,9 @@
 -- Company = authorization, channel = filter (migrations 0031-0033).
 -- Synthetic users/companies only; everything is rolled back. Run on the TEST database.
 begin;
+-- The fixture dates use current_date and the functions use data_as_of (São Paulo date). With the server in
+-- UTC the two differ from 21:00 to 24:00 (São Paulo) and the finance check saw 0 open titles at any release.
+set local time zone 'America/Sao_Paulo';
 do $$
 declare
   hist uuid:=gen_random_uuid(); sa uuid:=gen_random_uuid(); outsider uuid:=gen_random_uuid(); adm uuid:=gen_random_uuid();
