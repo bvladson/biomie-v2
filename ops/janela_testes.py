@@ -45,6 +45,8 @@ def is_heavy(script: pathlib.Path, args: list[str]) -> bool:
         return '--hml' in args
     if name == '50_foto_producao.py':  # a foto da produção é leve; a da cópia, não
         return '--copia' in args
+    if name == '58_desfazer_0051.py':  # só DDL de 3 funções e 1 índice; faz parte dos retornos, a qualquer hora
+        return False
     try:
         return 'biomie_v2_hml' in script.read_text(encoding='utf-8')
     except OSError:

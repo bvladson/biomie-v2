@@ -1055,6 +1055,11 @@ def plano(release):
                                    '05b-navegador-estoque', out)
     prod = production_release(out)
     summary['rollbackRelease'] = prod
+    # A 0051 troca funções que já existem e a release anterior não a desfaz: o teste de retorno também passa
+    # pelo 58 (devolve as funções de antes e apaga a linha da migração), como o retorno da produção faria.
+    rc, undo, err = remote(['ops/58_desfazer_0051.py', release, prod, '--db=biomie_v2_hml'],
+                           '05c-retorno-desfaz-0051', out)
+    summary['rollbackUndo0051'] = undo or {'rc': rc, 'error': err}
     rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '06-retorno-subida', out)
     summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
                              if back else {'rc': rc, 'error': err})
@@ -1093,15 +1098,31 @@ def plano_validation_ok(release):
     if fat is not None and not fat.get('skipped') and fat.get('ok') is not True:
         why.append('conferência 57 (faturamento nova × anterior): '
                    + ('; '.join(fat.get('problems') or []) or str(fat.get('error') or 'sem resultado'))[:300])
+    if fat is not None and not fat.get('skipped'):
+        # Release que troca o faturamento: a foto tem de ter comparado justamente as partes do faturamento.
+        missing = {'sales', 'kpis'} & set(photo_copy.get('notCompared') or [])
+        if missing:
+            why.append('foto da cópia sem as partes do faturamento: ' + ', '.join(sorted(missing)))
+    undo = s.get('rollbackUndo0051')
+    if undo is not None and undo.get('ok') is not True:
+        why.append('retorno da 0051 na cópia (58): ' + str(undo.get('error') or 'sem resultado')[:200])
     for key in ('browser', 'regression', 'stock', 'rollbackRegression'):
         if not (s.get(key) or {}).get('ok'):
             why.append('navegador: ' + key)
     return not why, why
 
 
-def rollback_after_activation(out, previous, reason):
-    """Retorno depois de uma ativação que terminou mas falhou no navegador: worker pausado, release anterior
-    (ela funciona com a 0050 aplicada: o 21 só aplica as migrações que conhece), worker retomado, navegador."""
+def undo_0051(out, release, previous, name):
+    """A 0051 troca funções que já existem; a release anterior não a desfaz. O 58 devolve as funções de antes
+    (ou responde skipped quando não há o que desfazer). Falha aqui não impede o retorno da release."""
+    rc, undo, err = remote(['ops/58_desfazer_0051.py', release, previous, '--db=biomie_v2'], name, out)
+    return undo or {'rc': rc, 'ok': False, 'error': err}
+
+
+def rollback_after_activation(out, previous, reason, release=None):
+    """Retorno depois de uma ativação que terminou mas falhou no navegador ou na foto: worker pausado, 0051
+    desfeita se for o caso (58), release anterior (ela funciona com a 0050 aplicada: o 21 só aplica as migrações
+    que conhece), worker retomado, navegador."""
     r = {'previous': previous}
     why = reason + ' retorno'
     remote(['ops/25_load.py', 'pause', why], '06a-retorno-worker-pausa', out)
@@ -1116,13 +1137,15 @@ def rollback_after_activation(out, previous, reason):
             r['error'] = 'o worker não pausou em 20 minutos: o retorno NÃO foi feito'
             return r
         time.sleep(20)
+    if release:
+        r['undo0051'] = undo_0051(out, release, previous, '06c2-retorno-desfaz-0051')
     rc, back, err = remote(['ops/21_activate_release.py', previous, '--start-worker'], '06d-retorno', out,
                            timeout=3 * 3600)
     r['run'] = back or {'rc': rc, 'error': err}
     r['workerResumed'] = resume_worker(out, '06e-retorno-worker-retomado')
     r['active'] = production_release(out)
     r['browser'] = smoke([], '06f-retorno-navegador', out)
-    r['ok'] = rc == 0 and r['active'] == previous
+    r['ok'] = rc == 0 and r['active'] == previous and (not release or r['undo0051'].get('ok') is True)
     return r
 
 
@@ -1198,6 +1221,8 @@ def ativar_plano(release, expected_previous=None, now_reason=None):
                           timeout=3 * 3600)
     summary['activation'] = act or {'rc': rc, 'error': err}
     if rc != 0:
+        # A falha pode ter vindo depois das migrações: a 0051, se entrou, sai antes da release anterior voltar.
+        summary['rollbackUndo0051'] = undo_0051(out, release, summary['previous'], '01q-retorno-desfaz-0051')
         rc2, back, err2 = remote(['ops/21_activate_release.py', summary['previous'], '--start-worker'],
                                  '01r-retorno', out, timeout=3 * 3600)
         summary['rollbackRun'] = back or {'rc': rc2, 'error': err2}
@@ -1208,6 +1233,14 @@ def ativar_plano(release, expected_previous=None, now_reason=None):
         return done(f"a ativação falhou; a produção voltou sozinha para a {summary['previous']}")
     summary['active'] = production_release(out)
     summary['photo'] = compare_photos(photo_before, photo(out, '01a-foto-depois'))
+    photo_s = summary['photo']
+    if not (photo_s.get('compared') and photo_s.get('equal')
+            and not ({'sales', 'kpis'} & set(photo_s.get('notCompared') or []))):
+        # Números de antes mudaram (ou não deu para provar que não mudaram): volta já, com o worker ainda pausado.
+        summary['autoRollback'] = rollback_after_activation(out, summary['previous'], reason, release)
+        if summary['autoRollback'].get('ok'):
+            return done(f"a foto antes × depois não saiu igual: a produção voltou sozinha para a {summary['previous']}")
+        return done('ATENÇÃO: a foto antes × depois não saiu igual e o retorno automático não terminou: ver autoRollback')
     summary['workerResumed'] = resume_worker(out, '01b-worker-retomado')
     rc, check, err = remote(['ops/56_plano_voo_check.py', '--db=biomie_v2'] + WAIT, '02-conferencia-producao', out)
     summary['check'] = check or {'rc': rc, 'error': err}
@@ -1216,7 +1249,7 @@ def ativar_plano(release, expected_previous=None, now_reason=None):
     summary['regression'] = smoke_retry([], '04-navegador-regressao-producao', out)
     failed = [k for k in ('browser', 'regression') if not (summary.get(k) or {}).get('ok')]
     if failed:
-        summary['autoRollback'] = rollback_after_activation(out, summary['previous'], reason)
+        summary['autoRollback'] = rollback_after_activation(out, summary['previous'], reason, release)
         if summary['autoRollback'].get('ok'):
             return done(f"o navegador falhou na produção ({', '.join(failed)}): a produção voltou sozinha "
                         f"para a {summary['previous']}")

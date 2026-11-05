@@ -11,3 +11,7 @@ Precisa de `npm i @electric-sql/pglite@0.5.8` nesta pasta (fica fora do `package
   atual × candidata da 0051 (`cand_fact_sales.sql`) × "clientes novos" por EXISTS com índice; exige resultado idêntico.
 - `node test57.mjs <source> ../../57_faturamento_check.py [sem0051]` — ensaio do SQL da conferência 57 (faturamento
   nova × anterior). `../gen_57.py <source> ../../57_faturamento_check.py` regera a 57 a partir do texto da 0021.
+- `node test58.mjs <source> ../../58_desfazer_0051.py` — ensaio do retorno da 0051: desfaz, confere que o banco
+  fica igual ao de antes da 0051, reaplica e roda a suíte de equivalência.
+- `python ../test_noturno_plano.py <worktree>` — fluxo de decisão de noturno.plano/ativar_plano com o servidor
+  simulado (homologação, 57, 58, foto, retornos).
