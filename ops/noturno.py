@@ -1042,6 +1042,10 @@ def plano(release):
     summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
     rc, check, err = remote(['ops/56_plano_voo_check.py'] + WAIT, '03-conferencia-e-tempos', out)
     summary['check'] = check or {'rc': rc, 'error': err}
+    # Faturamento (0051): definição nova × anterior na cópia, linha a linha, e o tempo de cada uma. Release sem a
+    # 0051 → skipped. Erro ou diferença → a validação recusa (plano_validation_ok).
+    rc, fat, err = remote(['ops/57_faturamento_check.py'] + WAIT, '03b-faturamento-nova-x-anterior', out)
+    summary['faturamento'] = fat or {'rc': rc, 'error': err}
     # Plano de Voo com gravação (cópia descartável), as cinco empresas, Gestor/Vendedor com e sem vínculo.
     summary['browser'] = smoke_retry(['--plano', '--plano-write', '--hml', '--shots', f'plano-{dt.date.today():%Y%m%d}'],
                                      '04-navegador-plano-de-voo', out)
@@ -1085,6 +1089,10 @@ def plano_validation_ok(release):
                                                                             photo_copy.get('error'), ensure_ascii=False)[:200])
     if not (s.get('check') or {}).get('ok'):
         why.append('conferência 56: ' + '; '.join((s.get('check') or {}).get('problems') or ['sem resultado']))
+    fat = s.get('faturamento')
+    if fat is not None and not fat.get('skipped') and fat.get('ok') is not True:
+        why.append('conferência 57 (faturamento nova × anterior): '
+                   + ('; '.join(fat.get('problems') or []) or str(fat.get('error') or 'sem resultado'))[:300])
     for key in ('browser', 'regression', 'stock', 'rollbackRegression'):
         if not (s.get(key) or {}).get('ok'):
             why.append('navegador: ' + key)

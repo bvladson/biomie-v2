@@ -15,10 +15,17 @@ const SUITES = ['deploy/db/verify_security.sql', 'deploy/db/verify_channel_filte
   'deploy/db/verify_pipeline_contract.sql', 'deploy/db/verify_rpc_grants.sql',
   'deploy/db/verify_order_scope.sql', 'deploy/db/verify_finance_adjustments.sql',
   'deploy/db/verify_admin_users.sql', 'deploy/db/verify_stock.sql', 'deploy/db/verify_stock_curves.sql', 'deploy/db/verify_stock_suppliers.sql',
-  'deploy/db/verify_stock_intel.sql', 'deploy/db/verify_stock_intel_insights.sql', 'deploy/db/verify_stock_intel_commercial.sql', 'deploy/db/verify_sales_kpis.sql', 'deploy/db/verify_flight_plan_v2.sql',
+  'deploy/db/verify_stock_intel.sql', 'deploy/db/verify_stock_intel_insights.sql', 'deploy/db/verify_stock_intel_commercial.sql', 'deploy/db/verify_sales_kpis.sql', 'deploy/db/verify_flight_plan_v2.sql', 'deploy/db/verify_fact_sales_equivalence.sql',
   'scripts/test-commercial-contract.sql', 'scripts/test-omie-matching.sql'];
 const SIG = "'public.sales_kpis(uuid,date,date,uuid,uuid,uuid,text,text,text)'::regprocedure";
 const strip = (t) => t.split(/\r?\n/).filter((l) => !l.startsWith('\\set ')).join('\n');
+// 0051: as três funções (definição + permissões) e o índice, para comparar o retorno com o banco sem a 0051.
+const DEFS51 = `select jsonb_build_object(
+  'fns', (select jsonb_object_agg(p.oid::regprocedure::text, jsonb_build_array(md5(pg_get_functiondef(p.oid)), p.proacl::text))
+          from pg_proc p where p.oid in ('public.fact_sales(uuid,date,date,uuid,uuid,uuid,text,text,text)'::regprocedure,
+            'public.invoice_item_amounts(uuid,date,date)'::regprocedure,
+            'public.flight_plan_v2_dataset(uuid,int,int,jsonb,text,uuid,date,uuid,uuid,text,text,text)'::regprocedure)),
+  'index', to_regclass('public.invoices_company_customer_date_idx') is not null)::text v`;
 
 const db = await PGlite.create({ extensions: { pgcrypto } });
 await setup(db, src);
@@ -49,8 +56,18 @@ for (const name of downs) {
     await db.exec('begin;');
     await db.exec(text);
     const after = (await db.query(`select md5(pg_get_functiondef(${SIG})) h, (select proacl::text from pg_proc where oid = ${SIG}) acl`)).rows[0];
+    const after51 = name.startsWith('0051_') ? (await db.query(DEFS51)).rows[0].v : null;
     await db.exec('rollback;');
-    if (name.startsWith('0046_')) {
+    if (name.startsWith('0051_')) {
+      const prod = await PGlite.create({ extensions: { pgcrypto } });
+      await setup(prod, src, ['0051_fact_sales_performance']);
+      const before = (await prod.query(DEFS51)).rows[0].v;
+      await prod.close();
+      const same = before === after51;
+      if (!same) failed++;
+      console.log(`${same ? 'OK  ' : 'FAIL'} rollback ${name}: funções, permissões e índice ${same ? 'idênticos' : 'DIFERENTES'} aos de antes da 0051`);
+      if (!same) console.log(`     antes ${before}\n     depois ${after51}`);
+    } else if (name.startsWith('0046_')) {
       const prod = await PGlite.create({ extensions: { pgcrypto } });
       await setup(prod, src, ['0046_sales_kpis_fast']);
       const before = (await prod.query(`select md5(pg_get_functiondef(${SIG})) h, (select proacl::text from pg_proc where oid = ${SIG}) acl`)).rows[0];
