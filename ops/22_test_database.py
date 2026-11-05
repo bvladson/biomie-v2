@@ -28,6 +28,8 @@ SUITES = ['deploy/db/verify_security.sql', 'deploy/db/verify_channel_filter.sql'
           'deploy/db/verify_stock_intel.sql', 'deploy/db/verify_stock_intel_insights.sql',
           'deploy/db/verify_stock_intel_commercial.sql',
           'deploy/db/verify_sales_kpis.sql',
+          'deploy/db/verify_flight_plan_v2.sql',
+          'deploy/db/verify_fact_sales_equivalence.sql',
           'scripts/test-commercial-contract.sql',
           'scripts/test-omie-matching.sql']
 
