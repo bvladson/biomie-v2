@@ -1349,21 +1349,110 @@ def rollback_after_activation(out, previous, reason, release=None):
     return r
 
 
-def ativar_plano(release, expected_previous=None, now_reason=None):
+#: Importação única de fornecedores depois da ativação (D1; combinado com biomie-24 em 06/11): só enfileira até
+#: 21:30, com o worker batendo há menos de 5 min e sem pausa do limitador do Omie na última hora; espera o worker
+#: terminar até 23:00 (o fechamento do estoque é às 23:50).
+IMPORT_UNTIL = dt.time(21, 30)
+IMPORT_WAIT_UNTIL = dt.time(23, 0)
+
+
+def start_limit():
+    """--comecar-ate da tarefa (o __main__ põe em BIOMIE_NOTURNO_COMECAR_ATE), em segundos desde a época, ou None."""
+    value = os.environ.get('BIOMIE_NOTURNO_COMECAR_ATE')
+    return dt.datetime.fromisoformat(value).timestamp() if value else None
+
+
+def iso_seconds(value):
+    """Instante ISO (com Z ou fuso) em segundos desde a época, ou None."""
+    try:
+        return dt.datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
+    except ValueError:
+        return None
+
+
+def import_suppliers_after_activation(out):
+    """Importação única dos fornecedores depois de uma ativação BOA (navegador e regressão ok, sem retorno).
+    Separada do retorno da release: se alguma empresa falhar, roda o desfazer DA IMPORTAÇÃO (40_stock.py
+    suppliers-undo --confirmar, todas as empresas), nunca o 21. Devolve o 'import' do resumo, com status
+    ok | desfeita | nao_feita | em_andamento | erro."""
+    now = dt.datetime.now().time()
+    if now > IMPORT_UNTIL or now < dt.time(12, 0):
+        return {'status': 'nao_feita', 'motivo': f'passou das {IMPORT_UNTIL:%H:%M}: fica para outra noite'}
+    state = worker_state(out, '06a-worker-antes-da-importacao')
+    beat_at = iso_seconds(state.get('heartbeat_at'))
+    beat = None if beat_at is None else round((time.time() - beat_at) / 60, 1)
+    if beat is None or beat >= 5:
+        return {'status': 'nao_feita', 'motivo': f'worker sem batimento recente ({beat} min): fica para outra noite'}
+    rc, rhythm, err = remote(['ops/44_omie_ritmo.py', '1'], '06b-omie-ultima-hora', out)
+    pauses = ((rhythm or {}).get('circuitPauseLines') or {}).get('total')
+    if pauses is None or pauses > 0:
+        return {'status': 'nao_feita', 'motivo': f'limitador do Omie pausou na última hora ({pauses}): fica para outra noite'}
+    rc, before, err = remote(['ops/40_stock.py', 'suppliers-status'] + WAIT, '06c-fornecedores-antes', out)
+    if not before or before.get('enabled'):
+        return {'status': 'nao_feita', 'motivo': 'importação diária ligada ou situação dos fornecedores indisponível'}
+    started = time.time()
+    rc, queued, err = remote(['ops/40_stock.py', 'suppliers-import'] + WAIT, '06d-importacao-enfileirada', out)
+    if rc != 0 or not queued or not queued.get('queued'):
+        return {'status': 'nao_feita', 'motivo': f'nada enfileirado (rc={rc}): {err[-200:]}', 'queued': queued}
+    result = {'queued': queued.get('queued'), 'heartbeatMinutes': beat, 'omiePausesLastHour': pauses}
+    n = 0
+    while True:
+        n += 1
+        rc, st, err = remote(['ops/40_stock.py', 'suppliers-status'] + WAIT, f'06e-fornecedores-{n:02d}', out)
+        jobs = {c['company']: c.get('lastJob') or {} for c in ((st or {}).get('companies') or [])}
+        fresh = {k: j for k, j in jobs.items() if (iso_seconds(j.get('created')) or 0) >= started - 60}
+        if len(fresh) >= result['queued'] and all(j.get('status') in ('complete', 'failed') for j in fresh.values()):
+            break
+        if dt.datetime.now().time() >= IMPORT_WAIT_UNTIL:
+            result.update(status='em_andamento', jobs=fresh,
+                          motivo=f'não terminou até {IMPORT_WAIT_UNTIL:%H:%M}: conferir de manhã (desfazer: '
+                                 'python ops/remote.py ops/40_stock.py suppliers-undo --confirmar, depois de terminar)')
+            return result
+        time.sleep(120)
+    result['jobs'] = fresh
+    result['companies'] = {c['company']: {'suppliers': c.get('suppliers'), 'links': c.get('links')}
+                           for c in (st or {}).get('companies') or []}
+    failed = sorted(k for k, j in fresh.items() if j.get('status') == 'failed')
+    if not failed:
+        result['status'] = 'ok'
+        return result
+    rc, undo, err = remote(['ops/40_stock.py', 'suppliers-undo', '--confirmar'] + WAIT, '06f-desfazer-importacao', out)
+    result['failed'] = failed
+    result['undo'] = ({k: undo.get(k) for k in ('ok', 'sameAsTrial', 'result', 'removedCopy')} if undo
+                      else {'rc': rc, 'error': err})
+    result['status'] = 'desfeita' if (undo or {}).get('ok') else 'erro'
+    result['motivo'] = (f"importação falhou em {', '.join(failed)}: "
+                        + ('desfeita nas cinco empresas' if result['status'] == 'desfeita'
+                           else 'ATENÇÃO: o desfazer não terminou; ver undo'))
+    return result
+
+
+def ativar_plano(release, expected_previous=None, now_reason=None, require_stock=False, import_suppliers=False):
     """Ativação do Plano de Voo na produção, só depois da homologação do dia inteira (mesmos portões da
     ativação de 23/10 e 30/10). --anterior=<release>: só ativa se a produção estiver nessa release (a
     combinada com a outra fila). Só de madrugada (18:30–05:30), salvo --agora="motivo". Se a ativação
-    falhar, ou terminar mas o navegador falhar na produção, volta sozinha para a release anterior."""
+    falhar, ou terminar mas o navegador falhar na produção, volta sozinha para a release anterior.
+    --exigir-estoque: exige também a validação do Estoque (intel-fornecedores) da release (candidata conjunta).
+    --importar-fornecedores (implica --exigir-estoque): depois da ativação boa, a importação única dos fornecedores,
+    separada do retorno da release (import_suppliers_after_activation). Sem o desfazer testado na cópia, ativa só
+    a release e registra a importação como não feita (decisão de 06/11)."""
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-ativacao-plano-{release}'
     out.mkdir(parents=True, exist_ok=True)
+    require_stock = require_stock or import_suppliers
     summary = {'release': release, 'expectedPrevious': expected_previous,
-               'started': dt.datetime.now().isoformat(timespec='seconds')}
+               'started': dt.datetime.now().isoformat(timespec='seconds'),
+               'requireStock': require_stock, 'importSuppliers': import_suppliers}
     if now_reason:
         summary['mode'] = {'agora': now_reason}
 
     def done(reason=None):
         if reason:
             summary['stopped'] = reason
+        if summary['importSuppliers']:
+            summary.setdefault('import', {'status': 'nao_feita', 'motivo': 'a release não ficou ativa nesta tarefa'})
+            imp = summary['import']
+            summary['finalStatus'] = (f"release {'NÃO ativada' if reason else 'ok'}; importação {imp['status']}"
+                                      + (f": {imp['motivo']}" if imp.get('motivo') else ''))
         summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
         summary['rollback'] = ('python ops/remote.py ops/21_activate_release.py '
                                f"{summary.get('previous') or PRODUCTION_RELEASE} --start-worker")
@@ -1373,19 +1462,43 @@ def ativar_plano(release, expected_previous=None, now_reason=None):
     def unexpected():
         return bool(expected_previous) and summary['previous'] != expected_previous
 
-    ok, why = plano_validation_ok(release)
-    summary['validation'] = {'ok': ok, 'problems': why}
-    if not ok:
-        return done('a homologação não passou inteira: ' + '; '.join(why))
+    def validations(moment):
+        """Portões das validações; relidos depois de achar o horário (o laço pode passar da meia-noite e a validação
+        de anteontem não vale). Devolve o motivo de parar ou None."""
+        nonlocal import_suppliers
+        ok, why = plano_validation_ok(release)
+        summary[f'validation{moment}'] = {'ok': ok, 'problems': why}
+        if not ok:
+            return 'a homologação não passou inteira: ' + '; '.join(why)
+        if require_stock:
+            ok, why = validation_ok(release)
+            summary[f'stockValidation{moment}'] = {'ok': ok, 'problems': why}
+            if not ok:
+                return 'a validação do Estoque não passou inteira: ' + '; '.join(why)
+        if import_suppliers:
+            ok, why = suppliers_undo_ok(release)
+            summary[f'suppliersUndoTested{moment}'] = {'ok': ok, 'problems': why}
+            if not ok:
+                import_suppliers = False
+                summary['import'] = {'status': 'nao_feita', 'motivo': 'desfazer não testado na cópia: ' + '; '.join(why)}
+                summary['importDecision'] = 'ativa só a release; importação não feita (decisão de 06/11)'
+        return None
+
+    stop = validations('')
+    if stop:
+        return done(stop)
     summary['previous'] = production_release(out)
     if summary['previous'] == release:
         return done('esta release já está ativa na produção: nada a fazer')
     if unexpected():
         return done(f"a release ativa é a {summary['previous']}, não a {expected_previous} combinada: nada mudou na produção")
     deadline = time.time() + 4 * 3600
+    start_by = start_limit()
     while True:
         if not now_reason and not plano_night_ok():
             return done('fora da madrugada (18:30–05:30): a ativação fica para a próxima noite; nada mudou na produção')
+        if start_by is not None and time.time() >= start_by:
+            return done('passou do --comecar-ate sem horário livre: a ativação fica para outra noite; nada mudou na produção')
         busy = activation_slot()
         if not busy:
             break
@@ -1393,6 +1506,9 @@ def ativar_plano(release, expected_previous=None, now_reason=None):
             return done('sem horário livre para a ativação em 4 h: ' + '; '.join(busy))
         time.sleep(30)
     summary['slotAt'] = dt.datetime.now().isoformat(timespec='seconds')
+    stop = validations('AtSlot')
+    if stop:
+        return done('depois de achar o horário: ' + stop + '; nada mudou na produção')
     summary['previous'] = production_release(out)
     if summary['previous'] == release:
         return done('esta release já está ativa na produção: nada a fazer')
@@ -1404,6 +1520,11 @@ def ativar_plano(release, expected_previous=None, now_reason=None):
         return done('a preservação da interface não foi confirmada: nada mudou na produção')
     if ui.get('active') != summary['previous']:
         return done('a release da produção mudou durante a conferência: repita a ativação; nada mudou na produção')
+    # Navegador local antes de pausar o worker: um Chromium que não abre faria o retorno automático de uma release boa.
+    problem = browser_problem()
+    if problem:
+        summary['browserPreCheck'] = problem
+        return done('o navegador local não abre (Playwright/Chromium): nada mudou na produção; ' + problem[:200])
     reason = f'ativacao {release}'
     remote(['ops/25_load.py', 'pause', reason], '00c-worker-pausa', out)
     limit = time.time() + 20 * 60
@@ -1457,6 +1578,9 @@ def ativar_plano(release, expected_previous=None, now_reason=None):
                     'não terminou: ver autoRollback')
     summary['workerAfter'] = {k: v for k, v in worker_state(out, '05-worker-depois').items()
                               if k in ('state', 'reason', 'at', 'commit')}
+    if import_suppliers:
+        # Só aqui: release ativa, navegador e regressão ok, sem retorno. Falha da importação → desfazer dela, nunca o 21.
+        summary['import'] = import_suppliers_after_activation(out)
     return done()
 
 def banco(release):
@@ -1488,6 +1612,8 @@ if __name__ == '__main__':
     limit = clock_option(sys.argv, '--ate', started_at)
     if limit is not None:
         os.environ[janela_testes.LIMIT_ENV] = limit.isoformat()
+    if start_by is not None:  # o laço de horário do ativar-plano também respeita (start_limit)
+        os.environ['BIOMIE_NOTURNO_COMECAR_ATE'] = start_by.isoformat()
     sys.argv = [a for a in sys.argv if not a.startswith(('--ate=', '--comecar-ate='))]
     task = sys.argv[1] if len(sys.argv) > 1 else ''
     queue_hours = 10 if task in ('plano', 'ativar-plano') else 6
@@ -1505,7 +1631,8 @@ if __name__ == '__main__':
     if task in ('plano', 'ativar-plano'):
         args = [a for a in sys.argv[2:] if not a.startswith('--')]
         if not args or not args[0].isalnum():
-            raise SystemExit(f'uso: {task} <release> [--anterior=<release>] [--agora="motivo"]')
+            raise SystemExit(f'uso: {task} <release> [--anterior=<release>] [--agora="motivo"] [--exigir-estoque] '
+                             '[--importar-fornecedores]')
         if task == 'plano':
             plano(args[0])
         else:
@@ -1515,7 +1642,9 @@ if __name__ == '__main__':
             now_reason = next((a.split('=', 1)[1].strip() for a in sys.argv if a.startswith('--agora=')), None)
             if now_reason is not None and len(now_reason) < 10:
                 raise SystemExit('--agora precisa de um motivo (10 caracteres ou mais).')
-            ativar_plano(args[0], expected_previous=previous, now_reason=now_reason)
+            ativar_plano(args[0], expected_previous=previous, now_reason=now_reason,
+                         require_stock='--exigir-estoque' in sys.argv,
+                         import_suppliers='--importar-fornecedores' in sys.argv)
     elif task == 'legado-exclusao':
         if len(sys.argv) < 4 or not (sys.argv[2].isdigit() and sys.argv[3].isdigit()):
             raise SystemExit('uso: legado-exclusao <quantidade no servidor> <quantidade na Hostinger>')

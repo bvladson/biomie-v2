@@ -2,6 +2,7 @@
 Uso: python test_noturno_plano.py <worktree>"""
 import datetime as real_dt
 import json
+import os
 import pathlib
 import shutil
 import sys
@@ -34,13 +35,18 @@ noturno.time.sleep = lambda s: None
 
 class World:
     def __init__(self, prod=PREV, activation_rc=0, rollback_rc=0, smokes=None, night=True, check_ok=True, fat='skipped',
-                 undo='skipped', photos=None, up_fail=False, refresh_fail=False, raise_at=None):
+                 undo='skipped', photos=None, up_fail=False, refresh_fail=False, raise_at=None,
+                 beat=1, pauses=0, import_jobs='complete', supplier_undo_ok=True):
         self.prod, self.activation_rc, self.rollback_rc = prod, activation_rc, rollback_rc
         self.fat, self.undo, self.photos = fat, undo, photos or {}
         self.up_fail, self.refresh_fail, self.raise_at = up_fail, refresh_fail, raise_at
         self.smokes = smokes or {}
         self.calls, self.smoke_calls, self.pause_reason = [], [], None
         self.check_ok = check_ok
+        # Importação de fornecedores depois da ativação (06/11): batimento do worker (min), pausas do limitador na
+        # última hora, situação das importações (complete | failed | open) e resultado do desfazer.
+        self.beat, self.pauses, self.import_jobs, self.supplier_undo_ok = beat, pauses, import_jobs, supplier_undo_ok
+        self.import_started = False
         noturno.plano_night_ok = lambda now=None: night
 
     def remote(self, args, name, outdir, timeout=0):
@@ -81,7 +87,27 @@ class World:
                 self.pause_reason = args[2]
             if args[1] == 'resume':
                 self.pause_reason = None
-            return 0, {'worker': {'state': 'PAUSED' if self.pause_reason else 'IDLE', 'reason': self.pause_reason}}, ''
+            beat = (real_dt.datetime.now(real_dt.timezone.utc) - real_dt.timedelta(minutes=self.beat)).isoformat()
+            return 0, {'worker': {'state': 'PAUSED' if self.pause_reason else 'IDLE', 'reason': self.pause_reason,
+                                  'heartbeat_at': beat}}, ''
+        if script == '44_omie_ritmo.py':
+            return 0, {'circuitPauseLines': {'total': self.pauses}, 'busyAnswers': {'total': 0}}, ''
+        if script == '40_stock.py' and args[1] == 'suppliers-import':
+            self.import_started = True
+            return 0, {'queued': 2}, ''
+        if script == '40_stock.py' and args[1] == 'suppliers-status':
+            if not self.import_started:
+                return 0, {'enabled': False, 'companies': []}, ''
+            # Cada consulta "passa" 30 min, para o caso da importação que não termina chegar às 23:00.
+            FakeDatetime.fixed = (FakeDatetime.fixed or real_dt.datetime.now()) + real_dt.timedelta(minutes=30)
+            created = real_dt.datetime.now(real_dt.timezone.utc).isoformat()
+            status = {'complete': ['complete', 'complete'], 'failed': ['complete', 'failed'],
+                      'open': ['running', 'complete']}[self.import_jobs]
+            return 0, {'enabled': False, 'companies': [
+                {'company': f'e{i}', 'suppliers': 3, 'links': 9, 'lastJob': {'status': s, 'created': created}}
+                for i, s in enumerate(status)]}, ''
+        if script == '40_stock.py' and args[1] == 'suppliers-undo':
+            return 0, {'ok': self.supplier_undo_ok, 'sameAsTrial': True, 'result': {'companies': []}}, ''
         if script == '21_activate_release.py':
             target = args[1]
             rc = self.activation_rc if target == REL else self.rollback_rc
@@ -141,8 +167,8 @@ try:
     FakeDatetime.fixed = real_dt.datetime(2026, 11, 4, 21, 0)
     noturno.plano(REL)
     s = read(f'{today}-plano-de-voo')
-    case('navegador que não abre: para antes de tudo', 'navegador local não abre' in (s.get('stopped') or '') and not w.calls,
-         str(s.get('stopped')) + ' ' + str(w.calls))
+    case('navegador que não abre: para antes de tudo', 'navegador local não abre' in (s.get('stopped') or '') and not w.calls
+         and 'playwright' in (s.get('browserPreCheck') or ''), str(s.get('stopped')) + ' ' + str(w.calls))
 
     # I. Homologação completa à noite → validação ok.
     w = World(); install(w)
@@ -294,6 +320,96 @@ try:
     s = read(f'{today}-ativacao-plano-{REL}')
     case('58 falhou no retorno: release volta, mas vira ATENÇÃO', w.prod == PREV and not s['autoRollback']['ok']
          and (s.get('stopped') or '').startswith('ATENÇÃO'), str(s.get('stopped')))
+
+    # AA–AK (06/11). Ativação conjunta de sábado: validação do Estoque, validações relidas no horário, --comecar-ate,
+    # pré-teste do navegador antes da pausa e importação de fornecedores separada do retorno da release.
+    real_validation, real_undo_ok, real_plano_ok = noturno.validation_ok, noturno.suppliers_undo_ok, noturno.plano_validation_ok
+
+    def joint(w, stock=True, undo_ok=True, at=(21, 0), **kw):
+        install(w, **{k: v for k, v in kw.items() if k == 'browser'})
+        FakeDatetime.fixed = real_dt.datetime(2026, 11, 7, *at)
+        noturno.validation_ok = lambda release: (stock, [] if stock else ['conferência 43'])
+        noturno.suppliers_undo_ok = lambda release: (undo_ok, [] if undo_ok else ['o desfazer da importação não passou inteiro na cópia'])
+        opts = {k: v for k, v in kw.items() if k in ('require_stock', 'import_suppliers')}
+        noturno.ativar_plano(REL, expected_previous=PREV, **opts)
+        return read(f'{today}-ativacao-plano-{REL}')
+
+    def idx(w, prefix):
+        return [i for i, c in enumerate(w.calls) if c.startswith(prefix)]
+
+    try:
+        w = World()
+        s = joint(w, stock=False, require_stock=True)
+        case('conjunta: validação do Estoque falhando barra antes de tudo', 'validação do Estoque' in (s.get('stopped') or '')
+             and not w.calls, str(s.get('stopped')) + ' ' + str(w.calls))
+
+        w = World()
+        answers = iter([(True, []), (False, ['sem resumo da homologação de hoje ou de ontem'])])
+        noturno.plano_validation_ok = lambda release: next(answers)
+        s = joint(w, require_stock=True)
+        noturno.plano_validation_ok = real_plano_ok
+        case('conjunta: validações relidas depois de achar o horário', 'depois de achar o horário' in (s.get('stopped') or '')
+             and not idx(w, 'ops/25_load.py pause') and not idx(w, 'ops/21_activate'), str(s.get('stopped')) + ' ' + str(w.calls))
+
+        w = World()
+        os.environ['BIOMIE_NOTURNO_COMECAR_ATE'] = (real_dt.datetime.now(real_dt.timezone.utc) - real_dt.timedelta(minutes=1)).isoformat()
+        try:
+            s = joint(w, require_stock=True)
+        finally:
+            os.environ.pop('BIOMIE_NOTURNO_COMECAR_ATE', None)
+        case('conjunta: --comecar-ate vencido no laço de horário: nada muda', '--comecar-ate' in (s.get('stopped') or '')
+             and not idx(w, 'ops/25_load.py pause'), str(s.get('stopped')))
+
+        w = World()
+        s = joint(w, require_stock=True, browser='chromium não abriu')
+        case('conjunta: navegador local que não abre para ANTES de pausar o worker', 'navegador local não abre' in (s.get('stopped') or '')
+             and not idx(w, 'ops/25_load.py pause') and not idx(w, 'ops/21_activate') and s.get('browserPreCheck'), str(w.calls))
+
+        w = World()
+        s = joint(w, import_suppliers=True)
+        acts, imps = idx(w, 'ops/21_activate_release.py'), idx(w, 'ops/40_stock.py suppliers-import')
+        case('conjunta: importação só depois da ativação boa (navegador e regressão ok)', not s.get('stopped') and s['browser']['ok']
+             and s['regression']['ok'] and len(acts) == 1 and imps and imps[0] > acts[0] and s['import']['status'] == 'ok'
+             and s['finalStatus'].startswith('release ok; importação ok') and s['requireStock'], json.dumps(s.get('import'))[:300])
+
+        w = World(import_jobs='failed')
+        s = joint(w, import_suppliers=True)
+        case('conjunta: importação que falha → desfazer DELA, nunca o 21', s['import']['status'] == 'desfeita'
+             and idx(w, 'ops/40_stock.py suppliers-undo') and len(idx(w, 'ops/21_activate_release.py')) == 1 and w.prod == REL
+             and 'importação desfeita' in s['finalStatus'], json.dumps(s.get('import'))[:300] + ' ' + str(w.calls))
+
+        w = World(import_jobs='failed', supplier_undo_ok=False)
+        s = joint(w, import_suppliers=True)
+        case('conjunta: desfazer da importação que não termina vira ATENÇÃO, sem 21', s['import']['status'] == 'erro'
+             and 'ATENÇÃO' in s['import']['motivo'] and len(idx(w, 'ops/21_activate_release.py')) == 1, json.dumps(s.get('import'))[:300])
+
+        w = World(import_jobs='open')
+        s = joint(w, import_suppliers=True)
+        case('conjunta: importação que não termina até 23:00 fica em andamento (sem desfazer)', s['import']['status'] == 'em_andamento'
+             and not idx(w, 'ops/40_stock.py suppliers-undo'), json.dumps(s.get('import'))[:300])
+
+        w = World(smokes={'03-navegador-plano-producao': False, '03-navegador-plano-producao-2': False})
+        s = joint(w, import_suppliers=True)
+        case('conjunta: retorno da release nunca importa', s['autoRollback']['ok'] and w.prod == PREV
+             and not idx(w, 'ops/40_stock.py suppliers-import') and s['import']['status'] == 'nao_feita'
+             and s['finalStatus'].startswith('release NÃO ativada'), str(s.get('finalStatus')))
+
+        w = World()
+        s = joint(w, import_suppliers=True, undo_ok=False)
+        case('conjunta: sem desfazer testado → ativa só a release, importação não feita', w.prod == REL and not s.get('stopped')
+             and not idx(w, 'ops/40_stock.py suppliers-import') and s['import']['status'] == 'nao_feita'
+             and 'desfazer não testado' in s['import']['motivo'] and s.get('importDecision'), json.dumps(s.get('import')))
+
+        for kw, at, word, label in (({}, (21, 45), 'passou das 21:30', 'depois das 21:30'),
+                                    ({'beat': 9}, (21, 0), 'batimento', 'worker sem batimento recente'),
+                                    ({'pauses': 2}, (21, 0), 'limitador', 'limitador do Omie pausou na última hora')):
+            w = World(**kw)
+            s = joint(w, import_suppliers=True, at=at)
+            case(f'conjunta: importação não feita ({label})', w.prod == REL and s['import']['status'] == 'nao_feita'
+                 and word in s['import']['motivo'] and not idx(w, 'ops/40_stock.py suppliers-import'), json.dumps(s.get('import')))
+    finally:
+        noturno.validation_ok, noturno.suppliers_undo_ok, noturno.plano_validation_ok = real_validation, real_undo_ok, real_plano_ok
+        FakeDatetime.fixed = real_dt.datetime(2026, 11, 4, 21, 0)
 
     # K. Já ativa → nada.
     w = World(prod=REL); install(w)
