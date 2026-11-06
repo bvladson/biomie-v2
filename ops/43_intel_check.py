@@ -62,13 +62,28 @@ pos as (
         from private.stock_current sc join private.stock_positions p on p.reading_id = sc.reading_id
         group by 1, 2) t
   group by 1),
-sales as (
-  select cur.company_id, round(coalesce(sum(f.qty), 0), 3) as units365,
-    count(distinct pr.external_id) as products_sold
+fsp as (
+  select cur.company_id, pr.external_id as omie_product_id, sum(f.qty) as units
   from cur
   cross join lateral public.fact_sales(cur.company_id, cur.as_of - 364, cur.as_of) f
   join public.products pr on pr.id = f.product_id and pr.source = 'omie'
-  group by cur.company_id),
+  group by 1, 2),
+sales as (
+  select company_id, round(coalesce(sum(units), 0), 3) as units365, count(distinct omie_product_id) as products_sold
+  from fsp group by company_id),
+-- Diagnóstico (06/11): produtos em que as unidades de 12 meses do fact_sales e do motor não batem, e se o produto
+-- está na leitura de estoque (o motor só analisa produtos da leitura). Não muda o critério da conferência.
+emp as (
+  select x.company_id, x.omie_product_id, (x.metrics->'sales'->'d365'->>'units')::numeric as units
+  from private.intel_product_metrics x join cur on cur.run_id = x.run_id and cur.company_id = x.company_id),
+dif as (
+  select coalesce(f.company_id, e.company_id) as company_id, coalesce(f.omie_product_id, e.omie_product_id) as omie_product_id,
+    round(f.units, 3) as fact_units, round(e.units, 3) as engine_units,
+    exists (select 1 from private.stock_current sc join private.stock_positions p on p.reading_id = sc.reading_id
+            where sc.company_id = coalesce(f.company_id, e.company_id)
+              and p.omie_product_id = coalesce(f.omie_product_id, e.omie_product_id)) as in_reading
+  from fsp f full join emp e on e.company_id = f.company_id and e.omie_product_id = f.omie_product_id
+  where round(coalesce(f.units, 0), 3) <> round(coalesce(e.units, 0), 3)),
 snap as (
   select s.company_id, s.day, s.totals from private.stock_snapshots s
   join (select company_id, max(day) as day from private.stock_snapshots group by 1) l
@@ -102,6 +117,14 @@ select json_agg(json_build_object(
   'products', m.products, 'withStock', m.with_stock,
   'capitalEngine', m.capital, 'capitalPositionsByProduct', pos.capital_by_product, 'capitalPositions', pos.capital,
   'units365Engine', m.units365, 'units365FactSales', sales.units365,
+  'unitsDiffProducts', (select count(*) from dif d where d.company_id = co.id),
+  'unitsDiffOutsideReading', (select coalesce(sum(coalesce(d.fact_units, 0) - coalesce(d.engine_units, 0)), 0)
+                              from dif d where d.company_id = co.id and not d.in_reading),
+  'unitsDiff', (select json_agg(t.j) from (
+      select json_build_object('omie', d.omie_product_id, 'factSales', d.fact_units, 'engine', d.engine_units,
+                               'inReading', d.in_reading) as j
+      from dif d where d.company_id = co.id
+      order by abs(coalesce(d.fact_units, 0) - coalesce(d.engine_units, 0)) desc, d.omie_product_id limit 10) t),
   'productsSold', sales.products_sold, 'productsWithQty', pos.products_with_qty,
   'priorityWithoutStock', m.priority_without_stock, 'stockWithoutPriority', m.stock_without_priority,
   'novoNotNew', m.novo_not_new, 'semSaldoWithStock', m.sem_saldo_with_stock,
@@ -209,6 +232,11 @@ for c in companies:
                and c['units365Engine'] is not None and c['units365Engine'] == (c['units365FactSales'] or 0)
                and not c['priorityWithoutStock'] and not c['stockWithoutPriority'] and not c['novoNotNew']
                and not c['semSaldoWithStock'] and bool(c['snapshotMatchesCurves']))
+    # Diagnóstico (não muda o critério): a diferença de unidades vem toda de produtos fora da leitura de estoque?
+    gap = (c['units365FactSales'] or 0) - (c['units365Engine'] or 0)
+    if gap and c.get('unitsDiffProducts') and gap == (c.get('unitsDiffOutsideReading') or 0):
+        notes.append(f"{c['company']}: diferença de {gap} unidades = vendas de {c['unitsDiffProducts']} produto(s) fora "
+                     f"da leitura de estoque (o motor só analisa produtos da leitura); ver unitsDiff")
 p5 = phases['phase5']
 phases_ok = (not phases['phase3']['textsWithMoney'] and not p5['buyWithoutForecastOrLead'] and not p5['buyRecMismatch']
              and not p5['costEstimateWithoutCost'] and not p5.get('buyWithoutSupplier'))

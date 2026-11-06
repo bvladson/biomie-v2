@@ -16,5 +16,7 @@ Precisa de `npm i @electric-sql/pglite@0.5.8` nesta pasta (fica fora do `package
 - `node test_suppliers_undo.mjs <source> ../../40_stock.py` — ensaio do SQL do `40_stock.py suppliers-undo` (desfazer
   da importação de fornecedores): ensaio sem mudança, desfazer de uma empresa só, prazos/principal/vínculos manuais
   intactos, repetição sem efeito e recusas (importação aberta, diária ligada, empresa inexistente).
+- `node test43_diag.mjs <source> ../../43_intel_check.py` — ensaio do diagnóstico de unidades da conferência 43:
+  venda de produto fora da leitura de estoque aparece em unitsDiff (o critério da conferência não muda).
 - `python ../test_noturno_plano.py <worktree>` — fluxo de decisão de noturno.plano/ativar_plano com o servidor
   simulado (homologação, 57, 58, foto, retornos).
