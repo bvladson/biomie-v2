@@ -9,11 +9,15 @@ movimentações, suítes de banco (22_test_database) e testes de navegador na ho
 - com o servidor folgado (carga de 1 minuto abaixo de 1,0 nas 2 CPUs).
 Fora disso o comando é recusado. Exceção só com --fora-da-janela="motivo" (o motivo vai para a saída).
 Com --esperar, aguarda a janela abrir (checa a cada 60 s, até 3 h).
+Prazo da noite (opcional): com BIOMIE_JANELA_ATE (data e hora com fuso; o noturno.py define com --ate=HH:MM),
+nenhum teste pesado COMEÇA depois do prazo e o --esperar desiste nele. Passos leves (como o down da
+homologação) não passam pela janela e seguem rodando.
 
 Os limites de recursos ficam na própria homologação (41_homolog.py): builds num builder com 1 CPU e
 3 GB, site da homologação com 0,5 CPU, motor com 0,5 CPU e 512 MB.
 """
 import datetime as dt
+import os
 import pathlib
 import subprocess
 import sys
@@ -31,6 +35,21 @@ HEAVY_HOMOLOG = {'db-refresh', 'up', 'intel-run', 'movements-load', 'tx-probe', 
 PROBE = ("cut -d' ' -f1 /proc/loadavg; docker compose --env-file /opt/biomie-v2/shared/stack.env "
          "-f /opt/biomie-v2/compose.yml exec -T db psql -X -U postgres -d biomie_v2 -At -c "
          "\"select count(*) from private.stock_readings where status in ('queued','running')\"")
+LIMIT_ENV = 'BIOMIE_JANELA_ATE'
+
+
+def night_limit(environ=None) -> dt.datetime | None:
+    """Prazo da noite (BIOMIE_JANELA_ATE, ISO com fuso), ou None sem prazo."""
+    value = (os.environ if environ is None else environ).get(LIMIT_ENV, '').strip()
+    if not value:
+        return None
+    try:
+        limit = dt.datetime.fromisoformat(value)
+    except ValueError:
+        raise SystemExit(f'{LIMIT_ENV} inválido: {value!r}')
+    if limit.tzinfo is None:
+        raise SystemExit(f'{LIMIT_ENV} precisa de fuso explícito: {value!r}')
+    return limit
 
 
 def is_heavy(script: pathlib.Path, args: list[str]) -> bool:
@@ -98,7 +117,11 @@ def guard(script: pathlib.Path, args: list[str]) -> list[str]:
         print(f'[janela] EXCEÇÃO autorizada: {reason}', file=sys.stderr)
         return clean
     deadline = time.time() + 3 * 3600
+    limit = night_limit()
     while True:
+        if limit is not None and time.time() >= limit.timestamp():
+            raise SystemExit(f'[janela] prazo da noite ({limit.astimezone(TZ):%d/%m %H:%M}) passou: teste pesado '
+                             'recusado; fica para outra noite.')
         blocked = reasons()
         if not blocked:
             print(f'[janela] ok: {dt.datetime.now(TZ):%d/%m %H:%M}', file=sys.stderr)

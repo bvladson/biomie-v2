@@ -81,6 +81,7 @@ import sys
 import time
 
 sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 BASE = pathlib.Path(__file__).resolve().parent.parent
 # --teste: não espera a janela (no expediente a janela recusa na hora): confere só o encanamento.
 WAIT = [] if '--teste' in sys.argv else ['--esperar']
@@ -116,6 +117,24 @@ def _held(path):
         return False
     except OSError:
         return True
+
+
+def clock_option(argv, name, start):
+    """--nome=HH:MM → o horário mais próximo de `start` (até 12 h antes ou depois). À noite, --ate=23:00 é hoje e
+    --ate=01:00 é amanhã; para uma tarefa que começa depois do horário, ele já passou."""
+    value = next((a.split('=', 1)[1] for a in argv if a.startswith(name + '=')), None)
+    if value is None:
+        return None
+    try:
+        hour, minute = (int(x) for x in value.split(':'))
+        moment = start.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    except ValueError:
+        raise SystemExit(f'{name} precisa de HH:MM (recebi {value!r})')
+    if moment < start - dt.timedelta(hours=12):
+        moment += dt.timedelta(days=1)
+    elif moment > start + dt.timedelta(hours=12):
+        moment -= dt.timedelta(days=1)
+    return moment
 
 
 def night_lock(hours=6):
@@ -1348,11 +1367,29 @@ if __name__ == '__main__':
     # de onde quer que o comando tenha sido digitado.
     os.chdir(BASE)
     sys.argv = [a for a in sys.argv if a != '--teste']
+    # Horários da noite (combinado com o MAG AI, 06/11): --comecar-ate=HH:MM → se a vez na fila chegar depois,
+    # a tarefa desiste sem fazer nada; --ate=HH:MM → nenhum passo pesado começa depois (a janela recusa e o
+    # --esperar desiste no prazo); os fluxos saem pelo caminho normal, com a homologação desligada.
+    import janela_testes
+    started_at = dt.datetime.now(janela_testes.TZ)
+    start_by = clock_option(sys.argv, '--comecar-ate', started_at)
+    limit = clock_option(sys.argv, '--ate', started_at)
+    if limit is not None:
+        os.environ[janela_testes.LIMIT_ENV] = limit.isoformat()
+    sys.argv = [a for a in sys.argv if not a.startswith(('--ate=', '--comecar-ate='))]
     task = sys.argv[1] if len(sys.argv) > 1 else ''
-    lock = night_lock(10 if task in ('plano', 'ativar-plano') else 6) if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
+    queue_hours = 10 if task in ('plano', 'ativar-plano') else 6
+    if start_by is not None:  # não segura lugar na fila além do --comecar-ate
+        queue_hours = max(0.0, min(queue_hours, (start_by - started_at).total_seconds() / 3600))
+    lock = night_lock(queue_hours) if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
                                     'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups',
                                     'matriz-teste', 'legado-restauracao', 'legado-exclusao',
                                     'legado-passo1', 'plano', 'ativar-plano') else None
+    if start_by is not None and dt.datetime.now(janela_testes.TZ) > start_by:
+        raise SystemExit(f'{task}: a vez na fila chegou às {dt.datetime.now(janela_testes.TZ):%H:%M}, depois do '
+                         f'--comecar-ate ({start_by:%d/%m %H:%M}); fica para outra noite (nada foi feito).')
+    if limit is not None:
+        print(f'[noturno] {task}: nenhum passo pesado começa depois de {limit:%d/%m %H:%M}', file=sys.stderr)
     if task in ('plano', 'ativar-plano'):
         args = [a for a in sys.argv[2:] if not a.startswith('--')]
         if not args or not args[0].isalnum():
