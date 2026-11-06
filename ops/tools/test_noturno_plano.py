@@ -436,11 +436,12 @@ try:
         s = joint(w, import_suppliers=True)
         case('conjunta: exceção antes de enfileirar → erro registrado, release segue ativa', w.prod == REL
              and s['import']['status'] == 'erro' and 'nada foi enfileirado' in s['import']['motivo']
-             and s['finalStatus'].startswith('release ok; importação erro'), json.dumps(s.get('import')))
+             and s['finalStatus'].startswith('ATENÇÃO: release ok; importação erro'), json.dumps(s.get('import')))
         w = World(raise_after_import=True)
         s = joint(w, import_suppliers=True)
         case('conjunta: exceção depois de enfileirar → "pode estar em andamento", resumo gravado', w.prod == REL
-             and s['import']['status'] == 'erro' and 'pode estar em andamento' in s['import']['motivo'], json.dumps(s.get('import')))
+             and s['import']['status'] == 'erro' and 'pode estar em andamento' in s['import']['motivo']
+             and s['finalStatus'].startswith('ATENÇÃO: release ok'), json.dumps(s.get('import')) + ' ' + str(s.get('finalStatus')))
         w = World(beat=9, beat_recover_after=2)
         s = joint(w, import_suppliers=True)
         case('conjunta: batimento que volta na 3ª conferência → importa', s['import']['status'] == 'ok' and w.beat_checks == 3,

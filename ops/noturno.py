@@ -1507,8 +1507,9 @@ def ativar_plano(release, expected_previous=None, now_reason=None, require_stock
             imp = summary['import']
             head = ('ATENÇÃO: estado incerto' if (reason or '').startswith('ATENÇÃO')
                     else 'release NÃO ativada' if reason else 'release ok')
-            summary['finalStatus'] = (('ATENÇÃO: ' if 'ATENÇÃO' in (imp.get('motivo') or '') and not head.startswith('ATENÇÃO')
-                                       else '') + f"{head}; importação {imp['status']}"
+            alert = imp['status'] == 'erro' or 'ATENÇÃO' in (imp.get('motivo') or '')
+            summary['finalStatus'] = (('ATENÇÃO: ' if alert and not head.startswith('ATENÇÃO') else '')
+                                      + f"{head}; importação {imp['status']}"
                                       + (f": {imp['motivo']}" if imp.get('motivo') else ''))
         summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
         summary['rollback'] = ('python ops/remote.py ops/21_activate_release.py '
