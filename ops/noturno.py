@@ -74,6 +74,7 @@ matriz (parecer de 26/10/2026): base da produção (72 h) → até N rodadas do 
 uma janela sem uso real da chave pela produção) → produção nas últimas horas. A série PARA na primeira
 rodada encerrada por segurança ou com 2 ou mais respostas "já existe uma requisição".
 """
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -1370,40 +1371,91 @@ def iso_seconds(value):
         return None
 
 
-def import_suppliers_after_activation(out):
+def night_deadlines(now=None):
+    """Prazos ABSOLUTOS da importação (21:30 para enfileirar, 23:00 para esperar), da noite em que a importação
+    começou: a noite começa ao meio-dia, então depois da meia-noite ainda vale a de ontem (e os prazos já passaram).
+    Comparar só a hora do dia deixava a virada da meia-noite segurar o laço até o dia seguinte (biomie-24, 06/11)."""
+    now = now or dt.datetime.now()
+    night = now.date() if now.time() >= dt.time(12, 0) else now.date() - dt.timedelta(days=1)
+    return dt.datetime.combine(night, IMPORT_UNTIL), dt.datetime.combine(night, IMPORT_WAIT_UNTIL)
+
+
+@contextlib.contextmanager
+def window_limit(moment):
+    """Prazo da janela de testes (BIOMIE_JANELA_ATE) só para os passos dentro do bloco: o menor entre o da tarefa e
+    `moment` (hora local do PC). moment=None tira o prazo: o desfazer da importação é retorno e não pode ser recusado
+    pelo --ate da tarefa."""
+    import janela_testes
+    key, old = janela_testes.LIMIT_ENV, os.environ.get(janela_testes.LIMIT_ENV)
+    try:
+        if moment is None:
+            os.environ.pop(key, None)
+        else:
+            aware = moment.astimezone() if moment.tzinfo is None else moment
+            current = janela_testes.night_limit()
+            os.environ[key] = (min(current, aware) if current else aware).isoformat()
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old
+
+
+def import_suppliers_after_activation(out, progress):
     """Importação única dos fornecedores depois de uma ativação BOA (navegador e regressão ok, sem retorno).
     Separada do retorno da release: se alguma empresa falhar, roda o desfazer DA IMPORTAÇÃO (40_stock.py
     suppliers-undo --confirmar, todas as empresas), nunca o 21. Devolve o 'import' do resumo, com status
-    ok | desfeita | nao_feita | em_andamento | erro."""
-    now = dt.datetime.now().time()
-    if now > IMPORT_UNTIL or now < dt.time(12, 0):
+    ok | desfeita | nao_feita | em_andamento | erro. `progress['queued']` fica verdadeiro depois de enfileirar."""
+    until, wait_until = night_deadlines()
+
+    def late():
+        return dt.datetime.now() > until
+
+    if late():
         return {'status': 'nao_feita', 'motivo': f'passou das {IMPORT_UNTIL:%H:%M}: fica para outra noite'}
-    state = worker_state(out, '06a-worker-antes-da-importacao')
-    beat_at = iso_seconds(state.get('heartbeat_at'))
-    beat = None if beat_at is None else round((time.time() - beat_at) / 60, 1)
-    if beat is None or beat >= 5:
-        return {'status': 'nao_feita', 'motivo': f'worker sem batimento recente ({beat} min): fica para outra noite'}
+    # O 1º ciclo depois da retomada recupera as cargas e só grava o batimento no fim: tenta por até 15 min.
+    for attempt in range(16):
+        state = worker_state(out, f'06a-worker-antes-da-importacao-{attempt:02d}')
+        beat_at = iso_seconds(state.get('heartbeat_at'))
+        beat = None if beat_at is None else round((time.time() - beat_at) / 60, 1)
+        if beat is not None and beat < 5:
+            break
+        if attempt == 15 or late():
+            return {'status': 'nao_feita', 'motivo': f'worker sem batimento recente ({beat} min) em 15 min: '
+                                                     'fica para outra noite'}
+        time.sleep(60)
     rc, rhythm, err = remote(['ops/44_omie_ritmo.py', '1'], '06b-omie-ultima-hora', out)
     pauses = ((rhythm or {}).get('circuitPauseLines') or {}).get('total')
     if pauses is None or pauses > 0:
         return {'status': 'nao_feita', 'motivo': f'limitador do Omie pausou na última hora ({pauses}): fica para outra noite'}
-    rc, before, err = remote(['ops/40_stock.py', 'suppliers-status'] + WAIT, '06c-fornecedores-antes', out)
+    # Passos de 40_stock esperam a janela (--esperar): nenhum começa depois das 21:30 (enfileirar) ou 23:00 (esperar).
+    with window_limit(until):
+        rc, before, err = remote(['ops/40_stock.py', 'suppliers-status'] + WAIT, '06c-fornecedores-antes', out)
+    if late():
+        return {'status': 'nao_feita', 'motivo': f'passou das {IMPORT_UNTIL:%H:%M} esperando a janela: fica para outra noite'}
     if not before or before.get('enabled'):
         return {'status': 'nao_feita', 'motivo': 'importação diária ligada ou situação dos fornecedores indisponível'}
-    started = time.time()
-    rc, queued, err = remote(['ops/40_stock.py', 'suppliers-import'] + WAIT, '06d-importacao-enfileirada', out)
+    # Importação nova = lastJob diferente do de antes (sem depender do relógio do PC contra o do servidor).
+    previous = {c['company']: (c.get('lastJob') or {}).get('created') for c in before.get('companies') or []}
+    with window_limit(until):
+        rc, queued, err = remote(['ops/40_stock.py', 'suppliers-import'] + WAIT, '06d-importacao-enfileirada', out)
     if rc != 0 or not queued or not queued.get('queued'):
         return {'status': 'nao_feita', 'motivo': f'nada enfileirado (rc={rc}): {err[-200:]}', 'queued': queued}
+    progress['queued'] = True
     result = {'queued': queued.get('queued'), 'heartbeatMinutes': beat, 'omiePausesLastHour': pauses}
-    n = 0
+    n, fresh, st = 0, {}, None
     while True:
         n += 1
-        rc, st, err = remote(['ops/40_stock.py', 'suppliers-status'] + WAIT, f'06e-fornecedores-{n:02d}', out)
-        jobs = {c['company']: c.get('lastJob') or {} for c in ((st or {}).get('companies') or [])}
-        fresh = {k: j for k, j in jobs.items() if (iso_seconds(j.get('created')) or 0) >= started - 60}
-        if len(fresh) >= result['queued'] and all(j.get('status') in ('complete', 'failed') for j in fresh.values()):
-            break
-        if dt.datetime.now().time() >= IMPORT_WAIT_UNTIL:
+        with window_limit(wait_until):
+            rc, status, err = remote(['ops/40_stock.py', 'suppliers-status'] + WAIT, f'06e-fornecedores-{n:02d}', out)
+        if status:
+            st = status
+            jobs = {c['company']: c.get('lastJob') or {} for c in status.get('companies') or []}
+            fresh = {k: j for k, j in jobs.items() if j.get('created') and j.get('created') != previous.get(k)}
+            if len(fresh) >= result['queued'] and all(j.get('status') in ('complete', 'failed') for j in fresh.values()):
+                break
+        if dt.datetime.now() >= wait_until:
             result.update(status='em_andamento', jobs=fresh,
                           motivo=f'não terminou até {IMPORT_WAIT_UNTIL:%H:%M}: conferir de manhã (desfazer: '
                                  'python ops/remote.py ops/40_stock.py suppliers-undo --confirmar, depois de terminar)')
@@ -1416,7 +1468,9 @@ def import_suppliers_after_activation(out):
     if not failed:
         result['status'] = 'ok'
         return result
-    rc, undo, err = remote(['ops/40_stock.py', 'suppliers-undo', '--confirmar'] + WAIT, '06f-desfazer-importacao', out)
+    with window_limit(None):  # retorno: o --ate da tarefa não recusa o desfazer
+        rc, undo, err = remote(['ops/40_stock.py', 'suppliers-undo', '--confirmar'] + WAIT, '06f-desfazer-importacao',
+                               out)
     result['failed'] = failed
     result['undo'] = ({k: undo.get(k) for k in ('ok', 'sameAsTrial', 'result', 'removedCopy')} if undo
                       else {'rc': rc, 'error': err})
@@ -1451,7 +1505,10 @@ def ativar_plano(release, expected_previous=None, now_reason=None, require_stock
         if summary['importSuppliers']:
             summary.setdefault('import', {'status': 'nao_feita', 'motivo': 'a release não ficou ativa nesta tarefa'})
             imp = summary['import']
-            summary['finalStatus'] = (f"release {'NÃO ativada' if reason else 'ok'}; importação {imp['status']}"
+            head = ('ATENÇÃO: estado incerto' if (reason or '').startswith('ATENÇÃO')
+                    else 'release NÃO ativada' if reason else 'release ok')
+            summary['finalStatus'] = (('ATENÇÃO: ' if 'ATENÇÃO' in (imp.get('motivo') or '') and not head.startswith('ATENÇÃO')
+                                       else '') + f"{head}; importação {imp['status']}"
                                       + (f": {imp['motivo']}" if imp.get('motivo') else ''))
         summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
         summary['rollback'] = ('python ops/remote.py ops/21_activate_release.py '
@@ -1580,7 +1637,20 @@ def ativar_plano(release, expected_previous=None, now_reason=None, require_stock
                               if k in ('state', 'reason', 'at', 'commit')}
     if import_suppliers:
         # Só aqui: release ativa, navegador e regressão ok, sem retorno. Falha da importação → desfazer dela, nunca o 21.
-        summary['import'] = import_suppliers_after_activation(out)
+        # Exceção aqui (com a release JÁ ativa) não pode sair sem o resumo: registra e segue para o done().
+        progress, pending = {}, None
+        try:
+            summary['import'] = import_suppliers_after_activation(out, progress)
+        except BaseException as error:  # noqa: BLE001
+            summary['import'] = {'status': 'erro', 'motivo': f'exceção: {type(error).__name__}: {error}'[:300]
+                                 + ('; a importação pode estar em andamento (conferir suppliers-status)'
+                                    if progress.get('queued') else '; nada foi enfileirado')}
+            if not isinstance(error, Exception):
+                pending = error
+        done()
+        if pending is not None:
+            raise pending
+        return
     return done()
 
 def banco(release):

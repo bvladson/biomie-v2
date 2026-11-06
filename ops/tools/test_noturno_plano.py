@@ -36,7 +36,8 @@ noturno.time.sleep = lambda s: None
 class World:
     def __init__(self, prod=PREV, activation_rc=0, rollback_rc=0, smokes=None, night=True, check_ok=True, fat='skipped',
                  undo='skipped', photos=None, up_fail=False, refresh_fail=False, raise_at=None,
-                 beat=1, pauses=0, import_jobs='complete', supplier_undo_ok=True):
+                 beat=1, pauses=0, import_jobs='complete', supplier_undo_ok=True, status_wait=0, poll_step=30,
+                 raise_after_import=False, beat_recover_after=None):
         self.prod, self.activation_rc, self.rollback_rc = prod, activation_rc, rollback_rc
         self.fat, self.undo, self.photos = fat, undo, photos or {}
         self.up_fail, self.refresh_fail, self.raise_at = up_fail, refresh_fail, raise_at
@@ -46,6 +47,11 @@ class World:
         # Importação de fornecedores depois da ativação (06/11): batimento do worker (min), pausas do limitador na
         # última hora, situação das importações (complete | failed | open) e resultado do desfazer.
         self.beat, self.pauses, self.import_jobs, self.supplier_undo_ok = beat, pauses, import_jobs, supplier_undo_ok
+        # status_wait: minutos que a consulta de ANTES "espera a janela"; poll_step: minutos por consulta do laço;
+        # raise_after_import: exceção nas consultas depois de enfileirar; beat_recover_after: o batimento volta
+        # depois de N conferências da importação.
+        self.status_wait, self.poll_step, self.raise_after_import = status_wait, poll_step, raise_after_import
+        self.beat_recover_after, self.beat_checks = beat_recover_after, 0
         self.import_started = False
         noturno.plano_night_ok = lambda now=None: night
 
@@ -87,7 +93,12 @@ class World:
                 self.pause_reason = args[2]
             if args[1] == 'resume':
                 self.pause_reason = None
-            beat = (real_dt.datetime.now(real_dt.timezone.utc) - real_dt.timedelta(minutes=self.beat)).isoformat()
+            minutes = self.beat
+            if name.startswith('06a-'):
+                self.beat_checks += 1
+                if self.beat_recover_after is not None and self.beat_checks > self.beat_recover_after:
+                    minutes = 1
+            beat = (real_dt.datetime.now(real_dt.timezone.utc) - real_dt.timedelta(minutes=minutes)).isoformat()
             return 0, {'worker': {'state': 'PAUSED' if self.pause_reason else 'IDLE', 'reason': self.pause_reason,
                                   'heartbeat_at': beat}}, ''
         if script == '44_omie_ritmo.py':
@@ -97,9 +108,12 @@ class World:
             return 0, {'queued': 2}, ''
         if script == '40_stock.py' and args[1] == 'suppliers-status':
             if not self.import_started:
-                return 0, {'enabled': False, 'companies': []}, ''
-            # Cada consulta "passa" 30 min, para o caso da importação que não termina chegar às 23:00.
-            FakeDatetime.fixed = (FakeDatetime.fixed or real_dt.datetime.now()) + real_dt.timedelta(minutes=30)
+                FakeDatetime.fixed = (FakeDatetime.fixed or real_dt.datetime.now()) + real_dt.timedelta(minutes=self.status_wait)
+                return 0, {'enabled': False, 'companies': [{'company': 'e0', 'lastJob': None}, {'company': 'e1', 'lastJob': None}]}, ''
+            if self.raise_after_import:
+                raise RuntimeError('simulado: suppliers-status depois de enfileirar')
+            # Cada consulta "passa" poll_step min, para o caso da importação que não termina chegar ao prazo.
+            FakeDatetime.fixed = (FakeDatetime.fixed or real_dt.datetime.now()) + real_dt.timedelta(minutes=self.poll_step)
             created = real_dt.datetime.now(real_dt.timezone.utc).isoformat()
             status = {'complete': ['complete', 'complete'], 'failed': ['complete', 'failed'],
                       'open': ['running', 'complete']}[self.import_jobs]
@@ -407,6 +421,38 @@ try:
             s = joint(w, import_suppliers=True, at=at)
             case(f'conjunta: importação não feita ({label})', w.prod == REL and s['import']['status'] == 'nao_feita'
                  and word in s['import']['motivo'] and not idx(w, 'ops/40_stock.py suppliers-import'), json.dumps(s.get('import')))
+
+        # Revisão de biomie-24 (06/11 ~10:10): virada da meia-noite, exceção na importação, batimento, estado incerto.
+        w = World(status_wait=200)
+        s = joint(w, import_suppliers=True, at=(21, 0))
+        case('conjunta: consulta de antes que volta depois da meia-noite não enfileira', s['import']['status'] == 'nao_feita'
+             and 'esperando a janela' in s['import']['motivo'] and not idx(w, 'ops/40_stock.py suppliers-import'),
+             json.dumps(s.get('import')))
+        w = World(import_jobs='open', poll_step=200)
+        s = joint(w, import_suppliers=True, at=(21, 20))
+        case('conjunta: laço que passa da meia-noite termina no prazo absoluto', s['import']['status'] == 'em_andamento'
+             and len(idx(w, 'ops/40_stock.py suppliers-status')) == 2, str(len(idx(w, 'ops/40_stock.py suppliers-status'))))
+        w = World(raise_at='44_omie_ritmo.py')
+        s = joint(w, import_suppliers=True)
+        case('conjunta: exceção antes de enfileirar → erro registrado, release segue ativa', w.prod == REL
+             and s['import']['status'] == 'erro' and 'nada foi enfileirado' in s['import']['motivo']
+             and s['finalStatus'].startswith('release ok; importação erro'), json.dumps(s.get('import')))
+        w = World(raise_after_import=True)
+        s = joint(w, import_suppliers=True)
+        case('conjunta: exceção depois de enfileirar → "pode estar em andamento", resumo gravado', w.prod == REL
+             and s['import']['status'] == 'erro' and 'pode estar em andamento' in s['import']['motivo'], json.dumps(s.get('import')))
+        w = World(beat=9, beat_recover_after=2)
+        s = joint(w, import_suppliers=True)
+        case('conjunta: batimento que volta na 3ª conferência → importa', s['import']['status'] == 'ok' and w.beat_checks == 3,
+             json.dumps(s.get('import'))[:200] + f' checks={w.beat_checks}')
+        w = World(activation_rc=1, rollback_rc=1)
+        s = joint(w, import_suppliers=True)
+        case('conjunta: retorno que falha → "ATENÇÃO: estado incerto", sem importar', s['finalStatus'].startswith('ATENÇÃO: estado incerto')
+             and not idx(w, 'ops/40_stock.py suppliers-import'), str(s.get('finalStatus')))
+        w = World(import_jobs='failed', supplier_undo_ok=False)
+        s = joint(w, import_suppliers=True)
+        case('conjunta: desfazer que falha → finalStatus com ATENÇÃO na frente', s['finalStatus'].startswith('ATENÇÃO: release ok'),
+             str(s.get('finalStatus')))
     finally:
         noturno.validation_ok, noturno.suppliers_undo_ok, noturno.plano_validation_ok = real_validation, real_undo_ok, real_plano_ok
         FakeDatetime.fixed = real_dt.datetime(2026, 11, 4, 21, 0)
