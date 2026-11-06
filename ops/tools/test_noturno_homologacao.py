@@ -106,7 +106,8 @@ class FakeSubprocess:
         self.run = world.run
 
 
-def install(w):
+def install(w, browser=None):
+    noturno.browser_problem = lambda: browser
     noturno.remote = w.remote
     noturno.smoke = w.smoke
     noturno.subprocess = FakeSubprocess(w)
@@ -173,6 +174,12 @@ try:
         s = read(folder)
         case(f'{tag}: suítes falhando não mexem na cópia', 'suítes' in (s.get('stopped') or '')
              and not any(c.startswith('ops/41_homolog.py') for c in w.calls), str(w.calls))
+
+        w = World(); install(w, browser="Error: Cannot find module 'playwright'")
+        run(noturno.intel, REL, suppliers)
+        s = read(folder)
+        case(f'{tag}: navegador que não abre para antes de tudo', 'navegador local não abre' in (s.get('stopped') or '')
+             and not w.calls and 'playwright' in (s.get('browserPreCheck') or ''), str(s.get('stopped')) + ' ' + str(w.calls))
 
         for fail, word in (('refresh', 'cópia nova'), ('up', 'não subiu'), ('engine', 'motor')):
             w = World(fail={fail}); install(w)
@@ -245,6 +252,11 @@ try:
     w = World(fail={'up'}); install(w)
     raised = run(noturno.trem, REL)
     case('trem: subida falhou → desligado', not raised and ends_down(w), str(w.calls[-2:]))
+    w = World(); install(w, browser='chromium não abriu')
+    raised = run(noturno.trem, REL)
+    s = read(f'{today}-trem-{REL}')
+    case('trem: navegador que não abre para antes das suítes', not raised and 'navegador local não abre' in (s.get('stopped') or '')
+         and not any(c.startswith('ops/22_test_database.py') for c in w.calls), str(w.calls))
 
     # intel_diaria_copia.
     w = World(); install(w)

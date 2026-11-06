@@ -189,6 +189,21 @@ def remote(args, name, outdir, timeout=5 * 3600):
     return p.returncode, data, p.stderr.strip()[-600:]
 
 
+def browser_problem():
+    """O navegador local abre? (Playwright/Chromium de ops/browser, no perfil do usuário: a tarefa do Agendador tem de
+    rodar como ele.) Em 05/11 18:30 o Playwright não abriu e a homologação gastou 1h40 da cópia à toa. Devolve None se
+    abriu, senão o erro. Mesmo teste do browser_problem() do plano_voo_noite.py (biomie-24)."""
+    code = ("const {chromium}=require('playwright');(async()=>{const b=await chromium.launch();"
+            "const p=await b.newPage();await p.setContent('<p>ok</p>');console.log(await p.textContent('p'));"
+            "await b.close();})().catch(e=>{console.error(String(e));process.exit(1)})")
+    try:
+        p = subprocess.run(['node', '-e', code], cwd=BASE / 'ops' / 'browser', capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f'{type(e).__name__}: {e}'[:500]
+    return None if p.returncode == 0 and p.stdout.strip() == 'ok' else (p.stderr or p.stdout or '?')[-500:]
+
+
 def homolog_down(out, summary, name='99-homologacao-down', early=True):
     """Desliga a homologação (41_homolog.py down) e registra em summary['down']. Nunca levanta exceção: quem chama
     já está saindo por outra falha. A cópia não pode ficar ligada: a fila seguinte e o portão do MAG AI (para se
@@ -297,6 +312,10 @@ def intel(release, suppliers=False):
         (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
         print(json.dumps(summary, indent=1, ensure_ascii=False))
 
+    problem = browser_problem()
+    if problem:
+        summary['browserPreCheck'] = problem
+        return done('o navegador local não abre (Playwright/Chromium): nada foi feito na cópia; ' + problem[:200])
     rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
     summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
                           'migrations': (tests or {}).get('migrations_applied'),
@@ -737,6 +756,10 @@ def trem(release):
         print(json.dumps(summary, indent=1, ensure_ascii=False))
 
     try:
+        problem = browser_problem()
+        if problem:
+            summary['browserPreCheck'] = problem
+            return done('o navegador local não abre (Playwright/Chromium): nada foi feito na cópia; ' + problem[:200])
         rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
         summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
                               'migrations': (tests or {}).get('migrations_applied'),
@@ -1174,6 +1197,10 @@ def plano(release):
     now = dt.datetime.now()
     if now.weekday() < 5 and dt.time(5, 0) <= now.time() < dt.time(18, 0):
         return done('a fila chegou fora da noite: a homologação fica para a próxima noite (nada foi feito)')
+    problem = browser_problem()
+    if problem:
+        summary['browserPreCheck'] = problem
+        return done('o navegador local não abre (Playwright/Chromium): nada foi feito na cópia; ' + problem[:200])
     rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
     summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
                           'migrations': (tests or {}).get('migrations_applied'),

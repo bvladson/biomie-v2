@@ -102,7 +102,8 @@ class World:
         return {'ok': ok, 'failed': [] if ok else [{'name': 'x'}], 'problems': None, 'error': None}
 
 
-def install(w):
+def install(w, browser=None):
+    noturno.browser_problem = lambda: browser  # pré-teste do navegador (06/11): sem abrir um Chromium de verdade
     noturno.remote = w.remote
     noturno.smoke = w.smoke
     noturno.production_release = lambda out: w.prod
@@ -134,6 +135,14 @@ try:
     noturno.plano(REL)
     s = read(f'{today}-plano-de-voo')
     case('homologação de dia útil não roda', 'fora da noite' in (s.get('stopped') or '') and not w.calls, str(s))
+
+    # H2. Navegador local que não abre (05/11: 1h40 de cópia à toa) → para antes das suítes, nada feito.
+    w = World(); install(w, browser="Error: Cannot find module 'playwright'")
+    FakeDatetime.fixed = real_dt.datetime(2026, 11, 4, 21, 0)
+    noturno.plano(REL)
+    s = read(f'{today}-plano-de-voo')
+    case('navegador que não abre: para antes de tudo', 'navegador local não abre' in (s.get('stopped') or '') and not w.calls,
+         str(s.get('stopped')) + ' ' + str(w.calls))
 
     # I. Homologação completa à noite → validação ok.
     w = World(); install(w)
