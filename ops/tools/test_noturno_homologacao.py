@@ -71,6 +71,11 @@ class World:
                                'calls': 4, 'outcomes': {'ok': 4}, 'records': 0, 'seconds': 40,
                                'emptyThenWaited12s': 3, 'gapAfterEmpty': [], 'gapAfterOk': []}},
                            'finance': {'copy': 1, 'production': 1}, 'productionWorker': {}}, ''
+        if script == '40_stock.py' and 'suppliers-undo' in args:
+            left = 3 if 'undo' in self.fail else 0
+            return 0, {'ok': not left, 'sameAsTrial': True, 'beforeCopy': {'links': 5}, 'removedCopy': {'links': 5},
+                       'result': {'companies': [{'company': 'empresa-a', 'userDataIntact': True,
+                                                 'leftFromOmie': left}]}}, ''
         if script == '44_omie_ritmo.py':
             return 0, {'busyAnswers': {'total': 0, 'byCall': {}}, 'circuitPauseLines': {'total': 0}, 'runs': []}, ''
         if script in ('40_stock.py', '47_hml_replenishment_seed.py', '48_hml_vs_prod.py'):
@@ -152,6 +157,16 @@ try:
         if suppliers:
             ok, why = noturno.validation_ok(REL)
             case(f'{tag}: completa passa na validação', ok, json.dumps(why))
+            ok, why = noturno.suppliers_undo_ok(REL)
+            undo_at = next((i for i, c in enumerate(w.calls) if 'suppliers-undo --confirmar' in c), None)
+            back_at = next((i for i, c in enumerate(w.calls) if c.startswith(f'ops/41_homolog.py up {PROD}')), None)
+            case(f'{tag}: desfazer testado na cópia antes do retorno', ok and undo_at is not None and back_at is not None
+                 and undo_at < back_at and '--db=biomie_v2_hml' in w.calls[undo_at], json.dumps(why) + ' ' + str(w.calls))
+            w = World(fail={'undo'}); install(w)
+            run(noturno.intel, REL, suppliers)
+            ok, why = noturno.suppliers_undo_ok(REL)
+            case(f'{tag}: desfazer que deixa dado do Omie barra a importação', not ok
+                 and any('desfazer' in x for x in why), json.dumps(why))
 
         w = World(fail={'tests'}); install(w)
         run(noturno.intel, REL, suppliers)
@@ -168,7 +183,8 @@ try:
 
         steps = ['41_homolog.py db-refresh', '41_homolog.py intel-run', '43_intel_check.py', '29_smoke.py']
         if suppliers:
-            steps += ['41_homolog.py suppliers-load', f'41_homolog.py up {PROD}', 'smoke']
+            steps += ['41_homolog.py suppliers-load', f'41_homolog.py up {PROD}', 'smoke',
+                      '40_stock.py --db=biomie_v2_hml suppliers-undo']
         for step in steps:
             w = World(raise_at=step); install(w)
             raised = run(noturno.intel, REL, suppliers)
@@ -185,6 +201,19 @@ try:
         s = read(folder)
         case(f'{tag}: down que falha fica registrado', raised and 'error' in (s.get('down') or {})
              and 'exceção' in (s.get('stopped') or ''), str(s.get('down')))
+
+    # Ativação com importação de fornecedores: sem o desfazer testado na cópia, para ANTES de mexer em qualquer coisa.
+    real_validation, real_undo_ok = noturno.validation_ok, noturno.suppliers_undo_ok
+    try:
+        noturno.validation_ok = lambda release: (True, [])
+        noturno.suppliers_undo_ok = lambda release: (False, ['o desfazer da importação não passou inteiro na cópia'])
+        w = World(); install(w)
+        noturno.ativar(REL, import_suppliers=True)
+        s = read(f'{today}-ativacao-{REL}')
+        case('ativar com importação sem desfazer testado: nada muda', 'sem o desfazer testado' in (s.get('stopped') or '')
+             and not w.calls, str(s.get('stopped')) + ' ' + str(w.calls))
+    finally:
+        noturno.validation_ok, noturno.suppliers_undo_ok = real_validation, real_undo_ok
 
     # matriz_teste: rodadas com a cópia no ar.
     w = World(); install(w)

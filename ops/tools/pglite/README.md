@@ -13,5 +13,8 @@ Precisa de `npm i @electric-sql/pglite@0.5.8` nesta pasta (fica fora do `package
   nova × anterior). `../gen_57.py <source> ../../57_faturamento_check.py` regera a 57 a partir do texto da 0021.
 - `node test58.mjs <source> ../../58_desfazer_0051.py` — ensaio do retorno da 0051: desfaz, confere que o banco
   fica igual ao de antes da 0051, reaplica e roda a suíte de equivalência.
+- `node test_suppliers_undo.mjs <source> ../../40_stock.py` — ensaio do SQL do `40_stock.py suppliers-undo` (desfazer
+  da importação de fornecedores): ensaio sem mudança, desfazer de uma empresa só, prazos/principal/vínculos manuais
+  intactos, repetição sem efeito e recusas (importação aberta, diária ligada, empresa inexistente).
 - `python ../test_noturno_plano.py <worktree>` — fluxo de decisão de noturno.plano/ativar_plano com o servidor
   simulado (homologação, 57, 58, foto, retornos).

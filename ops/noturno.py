@@ -365,6 +365,13 @@ def intel(release, suppliers=False):
                                              encoding='utf-8')
         summary['browser'] = browser_result(p)
         if suppliers:
+            # Desfazer da importação (pré-requisito da importação na produção, 06/11): ensaio e desfazer de verdade
+            # na cópia. Só o que veio do Omie sai; prazos (os de teste do 47), fornecedor principal e vínculos
+            # manuais ficam. A ativação com --importar-fornecedores exige este passo inteiro (suppliers_undo_ok).
+            rc, undo, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'suppliers-undo', '--confirmar'] + WAIT,
+                                   '07a-desfazer-fornecedores', out)
+            summary['suppliersUndo'] = ({k: undo.get(k) for k in ('ok', 'sameAsTrial', 'result', 'beforeCopy',
+                                                                   'removedCopy')} if undo else {'rc': rc, 'error': err})
             prod = production_release(out)
             # Depois da ativação (30/10) a produção já roda esta release: o retorno testado é o da anterior.
             if prod == release:
@@ -426,6 +433,34 @@ def validation_ok(release):
     photo_copy = s.get('photoCopy') or {}
     if photo_copy.get('compared') and not photo_copy.get('equal'):
         why.append('números da cópia mudaram com as migrações: ' + ', '.join(photo_copy.get('different') or {}))
+    return not why, why
+
+
+def suppliers_undo_ok(release):
+    """O desfazer da importação de fornecedores passou na cópia na validação de hoje ou de ontem desta release?
+    Devolve (ok, motivos). Sem isso, nenhuma importação de fornecedores na produção."""
+    s = None
+    for day in (dt.date.today(), dt.date.today() - dt.timedelta(days=1)):
+        try:
+            s = json.loads((LOGS / 'noturno' / f'{day:%Y%m%d}-inteligencia-fornecedores' / 'resumo.json')
+                           .read_text(encoding='utf-8'))
+            break
+        except (OSError, ValueError):
+            continue
+    if s is None:
+        return False, ['sem validação com fornecedores de hoje ou de ontem']
+    why = []
+    if s.get('release') != release:
+        why.append(f"a validação com fornecedores foi da release {s.get('release')}")
+    undo = s.get('suppliersUndo') or {}
+    load = s.get('suppliersLoad') or {}
+    if not load.get('complete'):
+        why.append('a importação de teste na cópia não terminou')
+    if not (undo.get('ok') and undo.get('sameAsTrial')):
+        why.append('o desfazer da importação não passou inteiro na cópia')
+    companies = (undo.get('result') or {}).get('companies') or []
+    if not companies or not all(c.get('userDataIntact') and c.get('leftFromOmie') == 0 for c in companies):
+        why.append('o desfazer na cópia deixou dados do Omie ou mexeu em dados das pessoas')
     return not why, why
 
 
@@ -564,6 +599,12 @@ def ativar(release, import_suppliers=False, now_reason=None):
         summary['validation'] = {'ok': ok, 'problems': why}
         if not ok:
             return done('a validação não passou inteira: ' + '; '.join(why))
+    if import_suppliers:
+        # Importação na produção só com o desfazer testado na cópia (06/11), conferido ANTES de mexer em qualquer coisa.
+        ok, why = suppliers_undo_ok(release)
+        summary['suppliersUndoTested'] = {'ok': ok, 'problems': why}
+        if not ok:
+            return done('importação pedida sem o desfazer testado na cópia: ' + '; '.join(why) + '; nada mudou na produção')
     summary['previous'] = production_release(out)
     if summary['previous'] == release:
         return done('esta release já está ativa na produção: nada a fazer')
@@ -629,6 +670,7 @@ def ativar(release, import_suppliers=False, now_reason=None):
     if import_suppliers:
         rc, imp, err = remote(['ops/40_stock.py', 'suppliers-import'] + heavy, '04-importacao-unica-fornecedores', out)
         summary['suppliersImport'] = imp or {'rc': rc, 'error': err}
+        summary['suppliersRollback'] = 'python ops/remote.py ops/40_stock.py suppliers-undo --confirmar'
     summary['browser'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel', '--suppliers',
                                 '--shots', f'producao-{dt.date.today():%Y%m%d}'], '05-navegador-producao', out)
     summary['workerAfter'] = {k: v for k, v in worker_state(out, '06-worker-depois').items()

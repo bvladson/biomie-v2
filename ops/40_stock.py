@@ -27,6 +27,15 @@
     python ops/remote.py ops/40_stock.py suppliers-import          # importação ÚNICA pelo worker (não liga a
                                                                    # diária; o worker lê o Omie no ritmo dele)
     python ops/remote.py ops/40_stock.py suppliers-status          # importações, vínculos e prazos
+    python ops/remote.py ops/40_stock.py suppliers-undo [empresa-slug] [--confirmar]
+                                                                   # DESFAZ a importação: apaga só o que veio do
+                                                                   # Omie (vínculos só do Omie; fornecedores sem
+                                                                   # vínculo manual, prazo nem fornecedor principal);
+                                                                   # o resto só deixa de ser "do Omie". Prazos,
+                                                                   # fornecedor principal e vínculos manuais nunca
+                                                                   # saem. Sem --confirmar é ENSAIO (mesma transação,
+                                                                   # desfeita no fim). Recusa com importação aberta
+                                                                   # ou com a importação diária ligada.
 
 Ordem da ativação (runbook, seção 12): release com a 0041 -> probe em cada empresa -> reading on
 -> validate (bate com o Omie?) -> mode pilot -> teste no navegador -> mode on. Retorno: mode off
@@ -48,7 +57,8 @@ DB = next((a.split('=', 1)[1] for a in sys.argv if a.startswith('--db=')), 'biom
 if DB not in ('biomie_v2', 'biomie_v2_test', 'biomie_v2_hml'):
     raise SystemExit('--db aceita só biomie_v2, biomie_v2_test ou biomie_v2_hml')
 FORCE = '--force' in sys.argv
-sys.argv = [a for a in sys.argv if not a.startswith('--db=') and a != '--force']
+CONFIRM = '--confirmar' in sys.argv
+sys.argv = [a for a in sys.argv if not a.startswith('--db=') and a not in ('--force', '--confirmar')]
 WINDOWS = ('30d', '90d', '180d', '12m')
 
 
@@ -141,6 +151,129 @@ select json_build_object(
 
 def curve_report(slug, window):
     return psql(CURVE_REPORT.replace('{slug}', slug).replace('{window}', window))
+
+
+# Desfaz a importação de fornecedores do Omie (0048), na mesma regra do fim de cada importação
+# (stock_worker_suppliers_finish): o que é só do Omie sai; o que tem dado das pessoas fica e deixa de ser "do Omie".
+# Uma transação; termina com {end} (commit ou rollback = ensaio). Devolve as linhas tiradas, para a cópia em arquivo.
+SUPPLIERS_UNDO = """
+begin;
+create temp table alvo on commit drop as
+  select id, slug from public.companies where not is_demo and ({slug}::text is null or slug = {slug}::text);
+do $$ begin
+  if not exists (select 1 from alvo) then raise exception 'empresa não encontrada: nada desfeito'; end if;
+  if exists (select 1 from private.stock_supplier_jobs j join alvo a on a.id = j.company_id
+             where j.status in ('queued', 'running')) then
+    raise exception 'importação de fornecedores em andamento ou na fila: nada desfeito (espere terminar)';
+  end if;
+  if coalesce((select s.suppliers_enabled from private.stock_settings s limit 1), false) then
+    raise exception 'importação diária ligada (40_stock.py suppliers off antes): nada desfeito';
+  end if;
+end $$;
+create temp table antes_contagem on commit drop as
+  select a.id as company_id,
+    (select count(*) from private.stock_lead_times t where t.company_id = a.id) as prazos,
+    (select count(*) from private.stock_preferred_suppliers p where p.company_id = a.id) as principais,
+    (select count(*) from private.stock_product_suppliers l where l.company_id = a.id and l.manual) as manuais
+  from alvo a;
+create temp table antes_vinculos on commit drop as
+  select l.company_id, a.slug, l.omie_product_id, l.supplier_id, l.supplier_code, l.manual, l.job_id, l.seen_at
+  from private.stock_product_suppliers l join alvo a on a.id = l.company_id where l.in_omie;
+create temp table antes_fornecedores on commit drop as
+  select s.company_id, a.slug, s.supplier_id, s.customer_id, s.omie_name, s.omie_trade_name, s.job_id, s.seen_at,
+    exists (select 1 from private.stock_product_suppliers l
+            where l.company_id = s.company_id and l.supplier_id = s.supplier_id and l.manual) as tem_vinculo_manual,
+    exists (select 1 from private.stock_lead_times t
+            where t.company_id = s.company_id and t.supplier_id = s.supplier_id) as tem_prazo,
+    exists (select 1 from private.stock_preferred_suppliers p
+            where p.company_id = s.company_id and p.supplier_id = s.supplier_id) as tem_principal
+  from private.stock_suppliers s join alvo a on a.id = s.company_id where s.in_omie;
+delete from private.stock_product_suppliers l using alvo a where l.company_id = a.id and l.in_omie and not l.manual;
+update private.stock_product_suppliers l set in_omie = false from alvo a
+  where l.company_id = a.id and l.in_omie and l.manual;
+delete from private.stock_suppliers s using antes_fornecedores f
+  where s.company_id = f.company_id and s.supplier_id = f.supplier_id
+    and not (f.tem_vinculo_manual or f.tem_prazo or f.tem_principal);
+update private.stock_suppliers s set in_omie = false from alvo a where s.company_id = a.id and s.in_omie;
+insert into public.audit_log (actor_id, action, entity, entity_id, payload)
+  select null, 'stock.suppliers.import_undone', 'stock', null, jsonb_build_object(
+    'empresas', (select jsonb_agg(slug order by slug) from alvo),
+    'vinculosApagados', (select count(*) from antes_vinculos where not manual),
+    'vinculosManuaisMantidos', (select count(*) from antes_vinculos where manual),
+    'fornecedoresApagados', (select count(*) from antes_fornecedores
+                             where not (tem_vinculo_manual or tem_prazo or tem_principal)),
+    'fornecedoresMantidos', (select count(*) from antes_fornecedores where tem_vinculo_manual or tem_prazo or tem_principal),
+    'origem', 'ops');
+select json_build_object('database', current_database(), 'confirmed', {confirmed},
+  'companies', (select json_agg(json_build_object('company', a.slug,
+      'linksDeleted', (select count(*) from antes_vinculos v where v.company_id = a.id and not v.manual),
+      'linksManualKept', (select count(*) from antes_vinculos v where v.company_id = a.id and v.manual),
+      'suppliersDeleted', (select count(*) from antes_fornecedores f where f.company_id = a.id
+                           and not (f.tem_vinculo_manual or f.tem_prazo or f.tem_principal)),
+      'suppliersKept', (select count(*) from antes_fornecedores f where f.company_id = a.id
+                        and (f.tem_vinculo_manual or f.tem_prazo or f.tem_principal)),
+      'leftFromOmie', (select count(*) from private.stock_suppliers s where s.company_id = a.id and s.in_omie)
+                    + (select count(*) from private.stock_product_suppliers l where l.company_id = a.id and l.in_omie),
+      'userDataIntact', (select c.prazos = (select count(*) from private.stock_lead_times t where t.company_id = a.id)
+                           and c.principais = (select count(*) from private.stock_preferred_suppliers p
+                                               where p.company_id = a.id)
+                           and c.manuais = (select count(*) from private.stock_product_suppliers l
+                                            where l.company_id = a.id and l.manual)
+                         from antes_contagem c where c.company_id = a.id))
+    order by a.slug) from alvo a),
+  'backup', json_build_object('links', (select coalesce(json_agg(v), '[]') from antes_vinculos v),
+                              'suppliers', (select coalesce(json_agg(f), '[]') from antes_fornecedores f)));
+{end};
+"""
+
+
+def suppliers_undo_sql(slug, confirm):
+    return SUPPLIERS_UNDO.format(slug=f"'{slug}'" if slug else 'null', confirmed='true' if confirm else 'false',
+                                 end='commit' if confirm else 'rollback')
+
+
+def suppliers_undo_run(slug, confirm):
+    p = subprocess.run(COMPOSE + ['exec', '-T', 'db', 'psql', '-X', '-q', '-U', 'postgres', '-d', DB, '-At',
+                                  '-v', 'ON_ERROR_STOP=1', '-f', '-'],
+                       input=suppliers_undo_sql(slug, confirm), capture_output=True, text=True, timeout=900)
+    if p.returncode:
+        raise SystemExit('postgres: ' + p.stderr[-800:])
+    line = next((l for l in reversed(p.stdout.splitlines()) if l.startswith('{')), None)
+    if line is None:
+        raise SystemExit('desfazer: sem resultado do banco')
+    return json.loads(line)
+
+
+def suppliers_undo(slug, confirm):
+    """Ensaio (rollback) sempre primeiro: as linhas que vão sair ficam num arquivo ANTES de confirmar; com
+    --confirmar, a transação de verdade e a cópia do que saiu de fato."""
+    import datetime
+    import hashlib
+    import os
+    folder = pathlib.Path('/var/backups/biomie-v2/fornecedores')
+
+    def keep(backup, name):
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = folder / f"{name}-{DB}-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}.json"
+        text = json.dumps(backup, ensure_ascii=False, default=str)
+        path.write_text(text, encoding='utf-8')
+        os.chmod(path, 0o600)
+        return {'file': str(path), 'sha256': hashlib.sha256(text.encode()).hexdigest(),
+                'links': len(backup['links']), 'suppliers': len(backup['suppliers'])}
+
+    trial = suppliers_undo_run(slug, False)
+    backup = trial.pop('backup')
+    out = {'trial': trial, 'trialCopy': {'links': len(backup['links']), 'suppliers': len(backup['suppliers'])}}
+    if not confirm:
+        return out
+    out['beforeCopy'] = keep(backup, 'desfazer-antes')
+    real = suppliers_undo_run(slug, True)
+    removed = real.pop('backup')
+    out['result'] = real
+    out['removedCopy'] = keep(removed, 'desfazer-feito')
+    out['sameAsTrial'] = real['companies'] == trial['companies']
+    out['ok'] = all(c['userDataIntact'] and c['leftFromOmie'] == 0 for c in real['companies'])
+    return out
 
 
 def slug_arg(position=2, required=True):
@@ -327,6 +460,14 @@ elif command == 'suppliers-status':
                     'finished', j.finished_at, 'error', j.error) from private.stock_supplier_jobs j
                   where j.company_id = c.id order by j.created_at desc limit 1)) order by c.slug)
     from public.companies c where not c.is_demo));"""), indent=1))
+elif command == 'suppliers-undo':
+    slug = sys.argv[2] if len(sys.argv) > 2 else None
+    if slug is not None and not SLUG.match(slug):
+        raise SystemExit('uso: suppliers-undo [empresa-slug] [--confirmar]')
+    print(json.dumps(suppliers_undo(slug, CONFIRM), indent=1, ensure_ascii=False, default=str))
+elif command == 'suppliers-undo-sql':  # para o teste local (PGlite): só imprime o SQL, nada roda
+    slug = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] != '-' else None
+    print(suppliers_undo_sql(slug, CONFIRM))
 elif command == 'movements-status':
     print(json.dumps(psql("""
 select json_build_object(
