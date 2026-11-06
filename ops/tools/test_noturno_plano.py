@@ -34,9 +34,10 @@ noturno.time.sleep = lambda s: None
 
 class World:
     def __init__(self, prod=PREV, activation_rc=0, rollback_rc=0, smokes=None, night=True, check_ok=True, fat='skipped',
-                 undo='skipped', photos=None):
+                 undo='skipped', photos=None, up_fail=False, refresh_fail=False, raise_at=None):
         self.prod, self.activation_rc, self.rollback_rc = prod, activation_rc, rollback_rc
         self.fat, self.undo, self.photos = fat, undo, photos or {}
+        self.up_fail, self.refresh_fail, self.raise_at = up_fail, refresh_fail, raise_at
         self.smokes = smokes or {}
         self.calls, self.smoke_calls, self.pause_reason = [], [], None
         self.check_ok = check_ok
@@ -45,9 +46,15 @@ class World:
     def remote(self, args, name, outdir, timeout=0):
         self.calls.append(' '.join(args))
         script = args[0].split('/')[-1]
+        if self.raise_at and script == self.raise_at:
+            raise RuntimeError('simulado: ' + script)
         if script == '22_test_database.py':
             return 0, {'all_ok': True, 'migrations_applied': 51, 'suites': {}}, ''
         if script == '41_homolog.py':
+            if args[1] == 'db-refresh' and self.refresh_fail:
+                return 1, None, 'cópia falhou'
+            if args[1] == 'up' and args[2] == REL and self.up_fail:
+                return 1, None, 'subida falhou'
             if args[1] == 'up':
                 return 0, {'migrations': '51 / 0050', 'login_page': 200, 'seconds': 90, 'image': 'i'}, ''
             return 0, {'ok': True}, ''
@@ -177,6 +184,28 @@ try:
     noturno.plano(REL)
     ok, why = noturno.plano_validation_ok(REL)
     case('homologação com 0051: foto sem o faturamento barra', not ok and any('partes do faturamento' in x for x in why), json.dumps(why))
+
+    # W–Z. Saída antecipada ou exceção depois de mexer na cópia → a cópia é desligada antes de registrar
+    # (o portão do MAG AI para se houver biomie-hml rodando).
+    for kw, label in (({'up_fail': True}, 'subida falhou: cópia desligada'),
+                      ({'refresh_fail': True}, 'cópia nova falhou: cópia desligada')):
+        w = World(**kw); install(w)
+        noturno.plano(REL)
+        s = read(f'{today}-plano-de-voo')
+        case(label, bool(s.get('stopped')) and w.calls[-1] == 'ops/41_homolog.py down'
+             and (s.get('down') or {}).get('early') is True, str(s.get('stopped')) + ' ' + str(w.calls[-2:]))
+    w = World(raise_at='56_plano_voo_check.py'); install(w)
+    try:
+        noturno.plano(REL)
+        raised = False
+    except RuntimeError:
+        raised = True
+    s = read(f'{today}-plano-de-voo')
+    case('exceção no meio: cópia desligada e registrada', raised and w.calls[-1] == 'ops/41_homolog.py down'
+         and 'exceção' in (s.get('stopped') or '') and (s.get('down') or {}).get('early') is True,
+         str(s.get('stopped')) + ' ' + str(w.calls[-2:]))
+    ok, why = noturno.plano_validation_ok(REL)
+    case('exceção no meio barra a ativação', not ok and any('parou' in x for x in why), json.dumps(why))
 
     # Volta a homologação boa para os casos de ativação.
     w = World(); install(w)

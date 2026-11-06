@@ -1029,45 +1029,65 @@ def plano(release):
     if not (tests or {}).get('all_ok'):
         return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
     remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
-    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
-    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
-    if not refresh:
-        return done('a cópia nova da produção falhou')
-    photo_before = photo(out, '02c-foto-da-copia-antes', copy=True)
-    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
-    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
-    if not up:
-        return done('a homologação não subiu')
-    # A 0050 só acrescenta: os números de antes (faturamento, sales_kpis, estoque, curvas) não podem mudar.
-    summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
-    rc, check, err = remote(['ops/56_plano_voo_check.py'] + WAIT, '03-conferencia-e-tempos', out)
-    summary['check'] = check or {'rc': rc, 'error': err}
-    # Faturamento (0051): definição nova × anterior na cópia, linha a linha, e o tempo de cada uma. Release sem a
-    # 0051 → skipped. Erro ou diferença → a validação recusa (plano_validation_ok).
-    rc, fat, err = remote(['ops/57_faturamento_check.py'] + WAIT, '03b-faturamento-nova-x-anterior', out)
-    summary['faturamento'] = fat or {'rc': rc, 'error': err}
-    # Plano de Voo com gravação (cópia descartável), as cinco empresas, Gestor/Vendedor com e sem vínculo.
-    summary['browser'] = smoke_retry(['--plano', '--plano-write', '--hml', '--shots', f'plano-{dt.date.today():%Y%m%d}'],
-                                     '04-navegador-plano-de-voo', out)
-    summary['regression'] = smoke_retry(['--hml'], '05-navegador-regressao', out)
-    # Estoque (o gráfico da 2154e45 vem junto nesta release): mesmo teste do retorno das validações do estoque.
-    summary['stock'] = smoke_retry(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
-                                   '05b-navegador-estoque', out)
-    prod = production_release(out)
-    summary['rollbackRelease'] = prod
-    # A 0051 troca funções que já existem e a release anterior não a desfaz: o teste de retorno também passa
-    # pelo 58 (devolve as funções de antes e apaga a linha da migração), como o retorno da produção faria.
-    rc, undo, err = remote(['ops/58_desfazer_0051.py', release, prod, '--db=biomie_v2_hml'],
-                           '05c-retorno-desfaz-0051', out)
-    summary['rollbackUndo0051'] = undo or {'rc': rc, 'error': err}
-    rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '06-retorno-subida', out)
-    summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
-                             if back else {'rc': rc, 'error': err})
-    if back:
-        summary['rollbackRegression'] = smoke_retry(['--hml'], '07-retorno-navegador-regressao', out)
-    rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
-    summary['down'] = {'rc': rc}
-    return done()
+
+    def stop(reason):
+        """Saída antecipada depois de mexer na cópia: desliga a homologação ANTES de registrar. A cópia não pode
+        ficar ligada: a fila seguinte e o portão do MAG AI (para se houver biomie-hml rodando) contam com ela
+        desligada. Até 05/11 a subida que falhava saía sem o down."""
+        rc, _, _ = remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
+        summary['down'] = {'rc': rc, 'early': True}
+        return done(reason)
+
+    try:
+        rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
+        summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+        if not refresh:
+            return stop('a cópia nova da produção falhou')
+        photo_before = photo(out, '02c-foto-da-copia-antes', copy=True)
+        rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
+        summary['up'] = ({k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up
+                         else {'rc': rc, 'error': err})
+        if not up:
+            return stop('a homologação não subiu')
+        # A 0050 só acrescenta: os números de antes (faturamento, sales_kpis, estoque, curvas) não podem mudar.
+        summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
+        rc, check, err = remote(['ops/56_plano_voo_check.py'] + WAIT, '03-conferencia-e-tempos', out)
+        summary['check'] = check or {'rc': rc, 'error': err}
+        # Faturamento (0051): definição nova × anterior na cópia, linha a linha, e o tempo de cada uma. Release sem
+        # a 0051 → skipped. Erro ou diferença → a validação recusa (plano_validation_ok).
+        rc, fat, err = remote(['ops/57_faturamento_check.py'] + WAIT, '03b-faturamento-nova-x-anterior', out)
+        summary['faturamento'] = fat or {'rc': rc, 'error': err}
+        # Plano de Voo com gravação (cópia descartável), as cinco empresas, Gestor/Vendedor com e sem vínculo.
+        summary['browser'] = smoke_retry(['--plano', '--plano-write', '--hml', '--shots',
+                                          f'plano-{dt.date.today():%Y%m%d}'], '04-navegador-plano-de-voo', out)
+        summary['regression'] = smoke_retry(['--hml'], '05-navegador-regressao', out)
+        # Estoque (o gráfico da 2154e45 vem junto nesta release): mesmo teste do retorno das validações do estoque.
+        summary['stock'] = smoke_retry(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
+                                       '05b-navegador-estoque', out)
+        prod = production_release(out)
+        summary['rollbackRelease'] = prod
+        # A 0051 troca funções que já existem e a release anterior não a desfaz: o teste de retorno também passa
+        # pelo 58 (devolve as funções de antes e apaga a linha da migração), como o retorno da produção faria.
+        rc, undo, err = remote(['ops/58_desfazer_0051.py', release, prod, '--db=biomie_v2_hml'],
+                               '05c-retorno-desfaz-0051', out)
+        summary['rollbackUndo0051'] = undo or {'rc': rc, 'error': err}
+        rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '06-retorno-subida', out)
+        summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
+                                 if back else {'rc': rc, 'error': err})
+        if back:
+            summary['rollbackRegression'] = smoke_retry(['--hml'], '07-retorno-navegador-regressao', out)
+        rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
+        summary['down'] = {'rc': rc}
+        return done()
+    except BaseException as e:
+        # Exceção no meio (tempo esgotado de um passo, rede, Ctrl-C): desliga a cópia, registra e repassa.
+        try:
+            rc, _, _ = remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
+            summary['down'] = {'rc': rc, 'early': True}
+        except BaseException as e2:  # noqa: BLE001
+            summary['down'] = {'error': f'{type(e2).__name__}: {e2}'[:300]}
+        done(f'exceção na homologação: {type(e).__name__}: {e}'[:500])
+        raise
 
 
 def plano_validation_ok(release):
