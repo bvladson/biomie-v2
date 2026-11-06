@@ -166,6 +166,17 @@ def remote(args, name, outdir, timeout=5 * 3600):
     return p.returncode, data, p.stderr.strip()[-600:]
 
 
+def homolog_down(out, summary, name='99-homologacao-down', early=True):
+    """Desliga a homologação (41_homolog.py down) e registra em summary['down']. Nunca levanta exceção: quem chama
+    já está saindo por outra falha. A cópia não pode ficar ligada: a fila seguinte e o portão do MAG AI (para se
+    houver biomie-hml rodando) contam com ela desligada."""
+    try:
+        rc, _, _ = remote(['ops/41_homolog.py', 'down'], name, out, timeout=30 * 60)
+        summary['down'] = {'rc': rc, 'early': early}
+    except BaseException as error:  # noqa: BLE001
+        summary['down'] = {'early': early, 'error': f'{type(error).__name__}: {error}'[:300]}
+
+
 def matriz(release, rounds):
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-matriz'
     out.mkdir(parents=True, exist_ok=True)
@@ -208,17 +219,25 @@ def matriz_teste(release, rounds):
     out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-matriz-preparo'
     out.mkdir(parents=True, exist_ok=True)
     summary = {'release': release, 'started': dt.datetime.now().isoformat(timespec='seconds')}
-    remote(['ops/41_homolog.py', 'down'], '01a-homologacao-down', out)
-    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '01b-copia-nova', out)
-    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
-    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out) if refresh else (1, None, '')
-    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
-    if up:
-        matriz(release, rounds)
-    rc, _, _ = remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
-    summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
-    (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
-    print(json.dumps(summary, indent=1, ensure_ascii=False))
+    try:
+        remote(['ops/41_homolog.py', 'down'], '01a-homologacao-down', out)
+        rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '01b-copia-nova', out)
+        summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+        rc, up, err = (remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out) if refresh
+                       else (1, None, ''))
+        summary['up'] = ({k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up
+                         else {'rc': rc, 'error': err})
+        if up:
+            matriz(release, rounds)
+    except BaseException as error:
+        summary['stopped'] = f'exceção no teste: {type(error).__name__}: {error}'[:500]
+        raise
+    finally:
+        # Sempre desliga, também quando uma rodada levanta exceção (até 06/11 a cópia ficava ligada).
+        homolog_down(out, summary, early='stopped' in summary)
+        summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+        (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+        print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
 def sales_kpis(release):
@@ -264,69 +283,85 @@ def intel(release, suppliers=False):
                                        if not v.get('ok')}}
     if not (tests or {}).get('all_ok'):
         return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
-    remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
-    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
-    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
-    if not refresh:
-        return done('a cópia nova da produção falhou')
-    # Foto dos números da cópia (= a produção de agora) ANTES das migrações da release; a de depois da
-    # subida tem de ser igual (estoque, curvas, faturamento, sales_kpis e painel do Estoque).
-    photo_before = photo(out, '02c-foto-da-copia-antes', copy=True) if suppliers else None
-    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
-    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
-    if not up:
-        return done('a homologação não subiu')
-    if suppliers:
-        summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
-    rc, mode, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '03-estoque-liberado-na-copia', out)
-    summary['stockMode'] = {'rc': rc, 'error': None if rc == 0 else err}
-    if suppliers:
-        # Empresa por empresa, cada uma só na janela livre da sua chave (03/11: pular tudo por uma chave ocupada
-        # deixou a homologação sem leitura do Omie); prazo total de 90 min.
-        rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '90'] + WAIT, '03b-fornecedores-do-omie', out)
-        summary['suppliersLoad'] = (
-            {k: load.get(k) for k in ('complete', 'notLoaded', 'companies', 'after')} if load
-            else {'rc': rc, 'error': err})
-    rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '04-prazo-hipotetico', out)
-    summary['hypotheticalLeadTime'] = seed or {'rc': rc, 'error': err}
-    rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '05-motor', out)
-    if engine:
-        events = [json.loads(line) for line in (engine.get('stdout') or '').splitlines() if line.startswith('{')]
-        summary['engine'] = {'exit': engine.get('exit'), 'buildSeconds': engine.get('buildSeconds'),
-                             'runSeconds': engine.get('runSeconds'),
-                             'events': [e for e in events if e.get('event') in ('intel_published', 'intel_failed',
-                                                                                 'intel_skipped', 'intel_company')]}
-    else:
-        summary['engine'] = {'rc': rc, 'error': err}
-    if not engine or engine.get('exit') != 0:
-        return done('o motor não publicou')
-    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '06-conferencia', out)
-    summary['check'] = check or {'rc': rc, 'error': err}
-    started = dt.datetime.now().isoformat(timespec='seconds')
-    p = subprocess.run([sys.executable, str(BASE / 'ops' / '29_smoke.py'), '--stock', '--stock-mode', 'on',
-                        '--curves-readonly', '--intel', '--hml', '--shots', f'intel5-{dt.date.today():%Y%m%d}']
-                       + (['--suppliers'] if suppliers else []) + WAIT,
-                       capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=4 * 3600,
-                       env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
-    (out / '07-navegador.txt').write_text(f'# {started} rc={p.returncode}\n{p.stdout}\n--stderr--\n{p.stderr}',
-                                         encoding='utf-8')
-    summary['browser'] = browser_result(p)
-    if suppliers:
-        prod = production_release(out)
-        # Depois da ativação (30/10) a produção já roda esta release: o retorno testado é o da anterior.
-        if prod == release:
-            prod = PREVIOUS_RELEASE
-        summary['rollbackRelease'] = prod
-        rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '07b-retorno-subida', out)
-        summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
-                                 if back else {'rc': rc, 'error': err})
-        if back:
-            summary['rollbackRegression'] = smoke(['--hml'], '07c-retorno-navegador-regressao', out)
-            summary['rollbackStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
-                                             '07d-retorno-navegador-estoque', out)
-    rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
-    summary['down'] = {'rc': rc}
-    return done()
+
+    def stop(reason):
+        """Saída antecipada depois de mexer na cópia: desliga a homologação ANTES de registrar. Até 06/11 a cópia
+        nova, a subida ou o motor que falhavam saíam sem o down e a cópia podia ficar ligada."""
+        homolog_down(out, summary)
+        return done(reason)
+
+    try:
+        remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
+        rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
+        summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+        if not refresh:
+            return stop('a cópia nova da produção falhou')
+        # Foto dos números da cópia (= a produção de agora) ANTES das migrações da release; a de depois da
+        # subida tem de ser igual (estoque, curvas, faturamento, sales_kpis e painel do Estoque).
+        photo_before = photo(out, '02c-foto-da-copia-antes', copy=True) if suppliers else None
+        rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '02-homologacao-up', out)
+        summary['up'] = ({k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up
+                         else {'rc': rc, 'error': err})
+        if not up:
+            return stop('a homologação não subiu')
+        if suppliers:
+            summary['photoCopy'] = compare_photos(photo_before, photo(out, '02d-foto-da-copia-depois', copy=True))
+        rc, mode, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '03-estoque-liberado-na-copia',
+                               out)
+        summary['stockMode'] = {'rc': rc, 'error': None if rc == 0 else err}
+        if suppliers:
+            # Empresa por empresa, cada uma só na janela livre da sua chave (03/11: pular tudo por uma chave ocupada
+            # deixou a homologação sem leitura do Omie); prazo total de 90 min.
+            rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '90'] + WAIT, '03b-fornecedores-do-omie',
+                                   out)
+            summary['suppliersLoad'] = (
+                {k: load.get(k) for k in ('complete', 'notLoaded', 'companies', 'after')} if load
+                else {'rc': rc, 'error': err})
+        rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '04-prazo-hipotetico', out)
+        summary['hypotheticalLeadTime'] = seed or {'rc': rc, 'error': err}
+        rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '05-motor', out)
+        if engine:
+            events = [json.loads(line) for line in (engine.get('stdout') or '').splitlines() if line.startswith('{')]
+            summary['engine'] = {'exit': engine.get('exit'), 'buildSeconds': engine.get('buildSeconds'),
+                                 'runSeconds': engine.get('runSeconds'),
+                                 'events': [e for e in events if e.get('event') in (
+                                     'intel_published', 'intel_failed', 'intel_skipped', 'intel_company')]}
+        else:
+            summary['engine'] = {'rc': rc, 'error': err}
+        if not engine or engine.get('exit') != 0:
+            return stop('o motor não publicou')
+        rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '06-conferencia', out)
+        summary['check'] = check or {'rc': rc, 'error': err}
+        started = dt.datetime.now().isoformat(timespec='seconds')
+        p = subprocess.run([sys.executable, str(BASE / 'ops' / '29_smoke.py'), '--stock', '--stock-mode', 'on',
+                            '--curves-readonly', '--intel', '--hml', '--shots', f'intel5-{dt.date.today():%Y%m%d}']
+                           + (['--suppliers'] if suppliers else []) + WAIT,
+                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=4 * 3600,
+                           env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
+        (out / '07-navegador.txt').write_text(f'# {started} rc={p.returncode}\n{p.stdout}\n--stderr--\n{p.stderr}',
+                                             encoding='utf-8')
+        summary['browser'] = browser_result(p)
+        if suppliers:
+            prod = production_release(out)
+            # Depois da ativação (30/10) a produção já roda esta release: o retorno testado é o da anterior.
+            if prod == release:
+                prod = PREVIOUS_RELEASE
+            summary['rollbackRelease'] = prod
+            rc, back, err = remote(['ops/41_homolog.py', 'up', prod] + WAIT, '07b-retorno-subida', out)
+            summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')}
+                                     if back else {'rc': rc, 'error': err})
+            if back:
+                summary['rollbackRegression'] = smoke(['--hml'], '07c-retorno-navegador-regressao', out)
+                summary['rollbackStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
+                                                 '07d-retorno-navegador-estoque', out)
+        rc, down, err = remote(['ops/41_homolog.py', 'down'], '08-homologacao-down', out)
+        summary['down'] = {'rc': rc}
+        return done()
+    except BaseException as error:
+        # Exceção no meio (tempo esgotado de um passo, rede, Ctrl-C): desliga a cópia, registra e repassa.
+        homolog_down(out, summary)
+        done(f'exceção na homologação: {type(error).__name__}: {error}'[:500])
+        raise
 
 
 def production_release(out):
@@ -631,56 +666,64 @@ def trem(release):
     def done(reason=None):
         if reason:
             summary['stopped'] = reason
-        remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
+        homolog_down(out, summary, early=bool(reason))
         summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
         (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
         print(json.dumps(summary, indent=1, ensure_ascii=False))
 
-    rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
-    summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
-                          'migrations': (tests or {}).get('migrations_applied'),
-                          'suites': {k: ('pulada' if v.get('skipped') else v.get('ok'))
-                                     for k, v in (tests or {}).get('suites', {}).items()},
-                          'failures': {k: v.get('error') for k, v in (tests or {}).get('suites', {}).items()
-                                       if not v.get('ok')},
-                          'rollbackScripts': (tests or {}).get('rollback_scripts')}
-    if not (tests or {}).get('all_ok'):
-        return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
-    remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
-    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
-    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
-    if not refresh:
-        return done('a cópia nova da produção falhou')
-    rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '03-subida-do-trem', out)
-    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
-    if not up:
-        return done('o trem não subiu')
-    rc, _, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '04-estoque-liberado-na-copia', out)
-    rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '30'] + WAIT, '05-fornecedores-do-omie', out)
-    summary['suppliersLoad'] = (
-        {k: load.get(k) for k in ('exit', 'skipped', 'conflicts', 'after')} if load else {'rc': rc, 'error': err})
-    rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '06-prazo-de-teste', out)
-    summary['testLeadTime'] = seed or {'rc': rc, 'error': err}
-    rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '07-motor', out)
-    summary['engine'] = {'exit': (engine or {}).get('exit'), 'runSeconds': (engine or {}).get('runSeconds'),
-                         'error': None if engine else err}
-    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '08-conferencia', out)
-    summary['check'] = {k: (check or {}).get(k) for k in ('allOk', 'phasesOk', 'phase5')} if check else {'rc': rc, 'error': err}
-    rc, cmp, err = remote(['ops/48_hml_vs_prod.py'] + WAIT, '09-copia-x-producao', out)
-    summary['vsProduction'] = cmp or {'rc': rc, 'error': err}
-    summary['browserRegression'] = smoke(['--hml'], '10-navegador-regressao', out)
-    summary['browserStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel', '--suppliers', '--hml',
-                                     '--shots', f'trem-{dt.date.today():%Y%m%d}'], '11-navegador-estoque', out)
-    # Retorno: a release da produção sobe sobre o banco com as migrações novas (o executor ignora as que não
-    # conhece) e as telas de hoje continuam funcionando.
-    summary['production'] = production_release(out)
-    rc, back, err = remote(['ops/41_homolog.py', 'up', summary['production']] + WAIT, '12-retorno-subida', out)
-    summary['rollbackUp'] = {k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if back else {'rc': rc, 'error': err}
-    if back:
-        summary['rollbackRegression'] = smoke(['--hml'], '13-retorno-navegador-regressao', out)
-        summary['rollbackStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
-                                         '14-retorno-navegador-estoque', out)
-    return done()
+    try:
+        rc, tests, err = remote(['ops/22_test_database.py', release] + WAIT, '01-testes-do-banco', out)
+        summary['dbTests'] = {'rc': rc, 'allOk': (tests or {}).get('all_ok'), 'error': None if tests else err,
+                              'migrations': (tests or {}).get('migrations_applied'),
+                              'suites': {k: ('pulada' if v.get('skipped') else v.get('ok'))
+                                         for k, v in (tests or {}).get('suites', {}).items()},
+                              'failures': {k: v.get('error') for k, v in (tests or {}).get('suites', {}).items()
+                                           if not v.get('ok')},
+                              'rollbackScripts': (tests or {}).get('rollback_scripts')}
+        if not (tests or {}).get('all_ok'):
+            return done('suítes do banco não passaram: a homologação não sobe com teste falhando')
+        remote(['ops/41_homolog.py', 'down'], '02a-homologacao-down', out)
+        rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '02b-copia-nova', out)
+        summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+        if not refresh:
+            return done('a cópia nova da produção falhou')
+        rc, up, err = remote(['ops/41_homolog.py', 'up', release] + WAIT, '03-subida-do-trem', out)
+        summary['up'] = ({k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up
+                         else {'rc': rc, 'error': err})
+        if not up:
+            return done('o trem não subiu')
+        rc, _, err = remote(['ops/40_stock.py', '--db=biomie_v2_hml', 'mode', 'on'], '04-estoque-liberado-na-copia', out)
+        rc, load, err = remote(['ops/41_homolog.py', 'suppliers-load', '30'] + WAIT, '05-fornecedores-do-omie', out)
+        summary['suppliersLoad'] = (
+            {k: load.get(k) for k in ('exit', 'skipped', 'conflicts', 'after')} if load else {'rc': rc, 'error': err})
+        rc, seed, err = remote(['ops/47_hml_replenishment_seed.py', '30'] + WAIT, '06-prazo-de-teste', out)
+        summary['testLeadTime'] = seed or {'rc': rc, 'error': err}
+        rc, engine, err = remote(['ops/41_homolog.py', 'intel-run'] + WAIT, '07-motor', out)
+        summary['engine'] = {'exit': (engine or {}).get('exit'), 'runSeconds': (engine or {}).get('runSeconds'),
+                             'error': None if engine else err}
+        rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '08-conferencia', out)
+        summary['check'] = ({k: (check or {}).get(k) for k in ('allOk', 'phasesOk', 'phase5')} if check
+                            else {'rc': rc, 'error': err})
+        rc, cmp, err = remote(['ops/48_hml_vs_prod.py'] + WAIT, '09-copia-x-producao', out)
+        summary['vsProduction'] = cmp or {'rc': rc, 'error': err}
+        summary['browserRegression'] = smoke(['--hml'], '10-navegador-regressao', out)
+        summary['browserStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--intel', '--suppliers',
+                                         '--hml', '--shots', f'trem-{dt.date.today():%Y%m%d}'], '11-navegador-estoque', out)
+        # Retorno: a release da produção sobe sobre o banco com as migrações novas (o executor ignora as que não
+        # conhece) e as telas de hoje continuam funcionando.
+        summary['production'] = production_release(out)
+        rc, back, err = remote(['ops/41_homolog.py', 'up', summary['production']] + WAIT, '12-retorno-subida', out)
+        summary['rollbackUp'] = ({k: back.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if back
+                                 else {'rc': rc, 'error': err})
+        if back:
+            summary['rollbackRegression'] = smoke(['--hml'], '13-retorno-navegador-regressao', out)
+            summary['rollbackStock'] = smoke(['--stock', '--stock-mode', 'on', '--curves-readonly', '--hml'],
+                                             '14-retorno-navegador-estoque', out)
+        return done()
+    except BaseException as error:
+        # Exceção no meio: o done() desliga a cópia (homolog_down nunca levanta), registra e a exceção segue.
+        done(f'exceção no trem: {type(error).__name__}: {error}'[:500])
+        raise
 
 
 def runner_bytes():
@@ -716,8 +759,7 @@ def intel_diaria_copia(release=None):
     def done(reason=None):
         if reason:
             summary['stopped'] = reason
-        rc, _, _ = remote(['ops/41_homolog.py', 'down'], '99-homologacao-down', out)
-        summary['down'] = {'rc': rc}
+        homolog_down(out, summary, early=bool(reason))
         test, check, runner = summary.get('test') or {}, summary.get('check') or {}, summary.get('runner') or {}
         summary['ok'] = bool(not summary.get('stopped') and runner.get('ok') and test.get('allOk')
                              and test.get('runnerSha256') == runner.get('local') and check.get('allOk'))
@@ -725,26 +767,33 @@ def intel_diaria_copia(release=None):
         (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
         print(json.dumps(summary, indent=1, ensure_ascii=False))
 
-    summary['release'] = release or production_release(out)
-    remote(['ops/41_homolog.py', 'down'], '01a-homologacao-down', out)
-    rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '01b-copia-nova', out)
-    summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
-    if not refresh:
-        return done('a cópia nova da produção falhou')
-    rc, up, err = remote(['ops/41_homolog.py', 'up', summary['release']] + WAIT, '02-homologacao-up', out)
-    summary['up'] = {k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up else {'rc': rc, 'error': err}
-    if not up:
-        return done('a homologação não subiu')
-    summary['runner'] = upload_runner(out, '03-rotina-enviada')
-    if not summary['runner']['ok']:
-        return done('a rotina não chegou inteira ao servidor')
-    rc, test, err = remote(['ops/53_intel_diaria_teste.py'] + WAIT, '04-teste-da-rotina', out, timeout=3 * 3600)
-    summary['test'] = ({k: test.get(k) for k in ('allOk', 'failed', 'checks', 'runnerSha256', 'cron', 'engineSeconds',
-                                                  'timeline', 'history')} if test else {'rc': rc, 'error': err})
-    rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '05-conferencia', out)
-    summary['check'] = ({k: check.get(k) for k in ('allOk', 'phasesOk', 'notes', 'companies')}
-                        if check else {'rc': rc, 'error': err})
-    return done()
+    try:
+        summary['release'] = release or production_release(out)
+        remote(['ops/41_homolog.py', 'down'], '01a-homologacao-down', out)
+        rc, refresh, err = remote(['ops/41_homolog.py', 'db-refresh'] + WAIT, '01b-copia-nova', out)
+        summary['dbRefresh'] = refresh or {'rc': rc, 'error': err}
+        if not refresh:
+            return done('a cópia nova da produção falhou')
+        rc, up, err = remote(['ops/41_homolog.py', 'up', summary['release']] + WAIT, '02-homologacao-up', out)
+        summary['up'] = ({k: up.get(k) for k in ('migrations', 'login_page', 'seconds', 'image')} if up
+                         else {'rc': rc, 'error': err})
+        if not up:
+            return done('a homologação não subiu')
+        summary['runner'] = upload_runner(out, '03-rotina-enviada')
+        if not summary['runner']['ok']:
+            return done('a rotina não chegou inteira ao servidor')
+        rc, test, err = remote(['ops/53_intel_diaria_teste.py'] + WAIT, '04-teste-da-rotina', out, timeout=3 * 3600)
+        summary['test'] = ({k: test.get(k) for k in ('allOk', 'failed', 'checks', 'runnerSha256', 'cron',
+                                                      'engineSeconds', 'timeline', 'history')}
+                           if test else {'rc': rc, 'error': err})
+        rc, check, err = remote(['ops/43_intel_check.py', 'biomie_v2_hml'] + WAIT, '05-conferencia', out)
+        summary['check'] = ({k: check.get(k) for k in ('allOk', 'phasesOk', 'notes', 'companies')}
+                            if check else {'rc': rc, 'error': err})
+        return done()
+    except BaseException as error:
+        # Exceção no meio: o done() desliga a cópia (homolog_down nunca levanta), registra e a exceção segue.
+        done(f'exceção na análise diária da cópia: {type(error).__name__}: {error}'[:500])
+        raise
 
 
 def intel_diaria_ok():
