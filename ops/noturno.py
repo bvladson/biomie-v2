@@ -35,6 +35,10 @@ ops/logs/noturno/<data>-<tarefa>/ (um arquivo por passo + resumo.json). Nada aqu
                                                        # exclusão das cópias SEM cifra, só com todos os portões
     python ops/noturno.py legado-passo1                # (autorização de 04/11/2026) desativação, passo 1: tarefas
                                                        # restantes do legado comentadas (nada é apagado)
+    python ops/noturno.py legado-passo2                # (mesma autorização) passo 2: biomie-python.service parado
+                                                       # e fora do boot, com portões (nada é apagado)
+    Opções de horário (qualquer tarefa): --comecar-ate=HH:MM (se a vez na fila chegar depois, desiste sem fazer
+    nada) e --ate=HH:MM (nenhum passo pesado começa depois; o passo 2 do legado também respeita).
     python ops/noturno.py plano <release>              # PLANO DE VOO (0050) na homologação: suítes, cópia nova,
                                                        # foto antes/depois das migrações, conferência antigo ×
                                                        # novo e tempos (56), navegador com gravação na cópia,
@@ -1055,6 +1059,45 @@ def legado_passo1():
     print(json.dumps(summary, indent=1, ensure_ascii=False))
 
 
+def legado_passo2():
+    """Desativação controlada do BIomie antigo, passo 2 (frase 1 de 04/11/2026, passos 1–6): para e tira do boot o
+    biomie-python.service (127.0.0.1:8001) com 54_legado.py parar-python, só com os portões (passo 1 feito, nenhuma
+    requisição em 24 h, nenhuma conexão, nenhuma rota do nginx, nenhum código do legado chamando). Nada é apagado.
+    Mesma janela do passo 1 (fora do expediente, minutos :05–:12/:35–:42) e o prazo da noite (--ate), se houver."""
+    import janela_testes
+    out = LOGS / 'noturno' / f'{dt.date.today():%Y%m%d}-legado-passo2'
+    out.mkdir(parents=True, exist_ok=True)
+    summary = {'started': dt.datetime.now().isoformat(timespec='seconds')}
+    limit = janela_testes.night_limit()
+    deadline = time.time() + 6 * 3600
+    while True:
+        if limit is not None and time.time() >= limit.timestamp():
+            summary['stopped'] = f'prazo da noite ({limit:%d/%m %H:%M}) passou: fica para outra noite (nada mudou)'
+            break
+        busy = night_slot()
+        if not (5 <= dt.datetime.now().minute % 30 <= 12):
+            busy.append('fora dos minutos :05–:12 / :35–:42')
+        if not busy:
+            break
+        if time.time() > deadline:
+            summary['stopped'] = 'sem horário livre em 6 h: ' + '; '.join(busy)
+            break
+        time.sleep(60)
+    if 'stopped' not in summary:
+        rc, before, err = remote(['ops/54_legado.py', 'status'], '00-situacao-antes', out)
+        summary['before'] = (before or {}).get('pythonService') or {'rc': rc, 'error': err}
+        rc, stop, err = remote(['ops/54_legado.py', 'parar-python'], '01-parar-python', out)
+        summary['stop'] = stop or {'rc': rc, 'error': err}
+        if not (stop or {}).get('ok'):
+            summary['stopped'] = (stop or {}).get('reason') or f'o passo 2 não terminou (rc={rc})'
+        rc, after, err = remote(['ops/54_legado.py', 'status'], '02-situacao-depois', out)
+        summary['after'] = (after or {}).get('pythonService') or {'rc': rc, 'error': err}
+    summary['rollback'] = 'python ops/remote.py ops/54_legado.py desfazer-parar-python'
+    summary['finished'] = dt.datetime.now().isoformat(timespec='seconds')
+    (out / 'resumo.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False), encoding='utf-8')
+    print(json.dumps(summary, indent=1, ensure_ascii=False))
+
+
 def smoke_retry(args, name, out):
     """Teste de navegador com UMA nova tentativa um minuto depois (túnel, rede); a 1ª fica registrada."""
     first = smoke(args, name, out)
@@ -1384,7 +1427,7 @@ if __name__ == '__main__':
     lock = night_lock(queue_hours) if task in ('matriz', 'sales-kpis', 'intel', 'intel-fornecedores', 'banco', 'trem',
                                     'ativar', 'intel-diaria-copia', 'intel-diaria-ativar', 'legado-backups',
                                     'matriz-teste', 'legado-restauracao', 'legado-exclusao',
-                                    'legado-passo1', 'plano', 'ativar-plano') else None
+                                    'legado-passo1', 'legado-passo2', 'plano', 'ativar-plano') else None
     if start_by is not None and dt.datetime.now(janela_testes.TZ) > start_by:
         raise SystemExit(f'{task}: a vez na fila chegou às {dt.datetime.now(janela_testes.TZ):%H:%M}, depois do '
                          f'--comecar-ate ({start_by:%d/%m %H:%M}); fica para outra noite (nada foi feito).')
@@ -1410,6 +1453,8 @@ if __name__ == '__main__':
         legado_exclusao(int(sys.argv[2]), int(sys.argv[3]))
     elif task == 'legado-passo1':
         legado_passo1()
+    elif task == 'legado-passo2':
+        legado_passo2()
     elif task == 'legado-backups':
         legado_backups()
     elif task == 'legado-restauracao':

@@ -112,5 +112,63 @@ p = subprocess.run([sys.executable, str(ROOT / 'ops' / 'noturno.py'), 'tarefa-in
 case('--ate: avisa o prazo e segue para a tarefa', f'nenhum passo pesado começa depois de' in p.stderr
      and 'Trabalhos noturnos' in p.stderr, p.stderr[-300:])
 
+# 4. legado-passo2 (servidor simulado): prazo, parada e portão fechado.
+import json  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+
+
+class FakeDatetime(dt.datetime):
+    fixed = None
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.fixed if cls.fixed is not None else dt.datetime.now(tz)
+
+
+class FakeDt:
+    datetime, date, time, timedelta, timezone = FakeDatetime, dt.date, dt.time, dt.timedelta, dt.timezone
+
+
+tmp = pathlib.Path(tempfile.mkdtemp())
+real_dt, real_sleep = noturno.dt, noturno.time.sleep
+try:
+    noturno.LOGS = tmp
+    (tmp / 'noturno').mkdir()
+    noturno.dt = FakeDt
+    noturno.time.sleep = lambda s: None
+    noturno.night_slot = lambda: []
+    FakeDatetime.fixed = dt.datetime(2026, 11, 6, 19, 7)  # minuto :07, dentro de :05–:12
+    folder = tmp / 'noturno' / f'{dt.date.today():%Y%m%d}-legado-passo2'
+
+    def run_passo2(stop_answer, limit=None):
+        calls = []
+
+        def remote(args, name, out, timeout=0):
+            calls.append(' '.join(args[:2]))
+            if args[1] == 'status':
+                return 0, {'pythonService': {'active': 'active', 'enabled': 'enabled', 'listening': True}}, ''
+            return 0, stop_answer, ''
+        noturno.remote = remote
+        if limit is None:
+            os.environ.pop(janela_testes.LIMIT_ENV, None)
+        else:
+            os.environ[janela_testes.LIMIT_ENV] = limit.isoformat()
+        noturno.legado_passo2()
+        return calls, json.loads((folder / 'resumo.json').read_text(encoding='utf-8'))
+
+    calls, s = run_passo2({'ok': True}, limit=dt.datetime.now(TZ) - dt.timedelta(minutes=1))
+    case('passo 2 com prazo vencido: nada é chamado', not calls and 'prazo da noite' in (s.get('stopped') or ''), str(s))
+    calls, s = run_passo2({'ok': True, 'changed': True})
+    case('passo 2 na janela: status, parar-python, status', calls == ['ops/54_legado.py status', 'ops/54_legado.py parar-python',
+                                                                     'ops/54_legado.py status'] and not s.get('stopped')
+         and 'desfazer-parar-python' in s['rollback'], str(calls) + ' ' + str(s.get('stopped')))
+    calls, s = run_passo2({'ok': False, 'changed': False, 'reason': 'portão do passo 2 não passou: nada mudou'})
+    case('passo 2 com portão fechado: registra o motivo', 'portão do passo 2' in (s.get('stopped') or ''), str(s.get('stopped')))
+finally:
+    noturno.dt, noturno.time.sleep = real_dt, real_sleep
+    os.environ.pop(janela_testes.LIMIT_ENV, None)
+    shutil.rmtree(tmp, ignore_errors=True)
+
 print(f"{sum(ok for _, ok in results)}/{len(results)} casos")
 sys.exit(0 if all(ok for _, ok in results) else 1)

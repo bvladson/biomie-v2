@@ -37,6 +37,18 @@ recuperação e os controles financeiros". Banco, arquivos e volumes do legado c
     python ops/remote.py ops/54_legado.py parar-tarefas              # passo 1 da desativação (nada é apagado)
     python ops/remote.py ops/54_legado.py desfazer-parar-tarefas     # religa as tarefas do passo 1
     python ops/remote.py ops/54_legado.py gravacoes [desde-iso]      # só leitura: tabelas do banco antigo gravadas
+    python ops/remote.py ops/54_legado.py parar-python               # passo 2: biomie-python.service parado e fora
+                                                                     # do boot (nada é apagado)
+    python ops/remote.py ops/54_legado.py desfazer-parar-python      # religa (systemctl enable --now)
+    python ops/remote.py ops/54_legado.py portao-python              # só leitura: os portões do passo 2 agora
+
+parar-python: só com TODOS os portões: passo 1 feito (nenhuma tarefa do legado ativa), nenhuma requisição ao
+uvicorn nas últimas 24 h (journal do serviço; o uvicorn registra cada requisição), nenhuma conexão aberta na porta
+8001, nenhuma rota do nginx para ela e nenhum código do legado chamando 127.0.0.1:8001/localhost:8001. Grava o
+registro em /var/backups/biomie-v2/legado/passo2-python-<data>.json. /opt/biomie-python fica como está.
+
+gravacoes: <desde-iso> é a hora do SERVIDOR (a "stoppedAtLocal" do passo 1). O update_time sai no relógio da sessão
+do MariaDB (o legado está em UTC, 3 h à frente): a hora é convertida antes de comparar.
 
 verificar-arquivos: para cada arquivo cifrado, sha256 local = o do manifesto, sha256 da cópia externa = o mesmo, e o
 arquivo decifrado em fluxo (com prioridade baixa) termina com "Dump completed" e tem as tabelas do manifesto; exige
@@ -90,6 +102,12 @@ DUMP_NAME = re.compile(r'biomie-\d{8}_\d{6}\.sql\.gz')
 # Última cópia diária com o antigo ainda como sistema oficial (o v2 entrou no ar em 19/10/2026, depois das 03:00).
 MARCO_SOURCE = 'biomie-20261019_030002.sql.gz'
 V2_BACKUP_STATE = BASE / 'ops' / 'backup-state.json'
+# Passo 2 da desativação: a API Python antiga (uvicorn app.main:app em 127.0.0.1:8001, usuário biomie).
+PYTHON_SERVICE = 'biomie-python.service'
+PYTHON_PORT = 8001
+HTTP_LINE = re.compile(r'"(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) ')
+PORT_REF = rf'(127\.0\.0\.1|localhost):{PYTHON_PORT}([^0-9]|$)'
+LEGACY_CODE = pathlib.Path('/var/www/biomie/live')
 
 
 def now():
@@ -254,6 +272,7 @@ def status():
         'mariadb': run(['mysql', '-N', '-e', "select count(*), round(sum(data_length + index_length) / 1048576) "
                         f"from information_schema.tables where table_schema = '{DB}' and table_type = 'BASE TABLE'"],
                        check=False).stdout.strip(),
+        'pythonService': python_service(),
     }
     try:
         cfg = offsite_cfg()
@@ -822,19 +841,113 @@ def undo_stop_jobs():
     return out
 
 
+def db_clock_offset():
+    """Relógio da sessão do MariaDB menos o UTC (o legado está em UTC: zero)."""
+    out = run(['mariadb', '-N', '-e', 'select timestampdiff(second, utc_timestamp(), now())'], check=False).stdout.strip()
+    try:
+        return dt.timedelta(seconds=int(out))
+    except ValueError:
+        raise SystemExit('não consegui ler o relógio do MariaDB: nada comparado')
+
+
 def writes_since(since=None):
     if since and not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', since):
         raise SystemExit('desde: AAAA-MM-DDTHH:MM:SS (hora do servidor)')
-    rows = legacy_writes(since.replace('T', ' ') if since else None)
-    return {'since': since, 'tables': len(rows), 'writes': rows[:40], 'connections': legacy_connections(),
+    since_db = None
+    if since:
+        # update_time sai no relógio da sessão do MariaDB (UTC no legado). Até 05/11 a hora local da parada era
+        # comparada direto e entravam 3 h de gravações de ANTES da parada; agora é convertida.
+        local = dt.datetime.fromisoformat(since).astimezone()  # hora do servidor
+        since_db = (local.astimezone(dt.timezone.utc).replace(tzinfo=None) + db_clock_offset()).strftime(
+            '%Y-%m-%d %H:%M:%S')
+    rows = legacy_writes(since_db)
+    return {'since': since, 'sinceDb': since_db, 'tables': len(rows), 'writes': rows[:40],
+            'connections': legacy_connections(),
             'activeJobs': {p.name: len(cron_lines(p.read_text())) for p in (LEGACY_CRON, CAPACITY_CRON) if p.exists()}}
+
+
+def python_service():
+    """Situação do biomie-python.service: ativo, no boot e escutando na porta."""
+    return {'active': run(['systemctl', 'is-active', PYTHON_SERVICE], check=False).stdout.strip(),
+            'enabled': run(['systemctl', 'is-enabled', PYTHON_SERVICE], check=False).stdout.strip(),
+            'listening': bool(run(['ss', '-Hltn', f'( sport = :{PYTHON_PORT} )'], check=False).stdout.strip())}
+
+
+def python_gates():
+    """Portões do passo 2: ninguém usa a API Python antiga. Devolve (portões, evidências)."""
+    journal = lambda *extra: [l for l in run(['journalctl', '-u', PYTHON_SERVICE, '-o', 'cat', '--no-pager', *extra],  # noqa: E731
+                                             check=False, timeout=120).stdout.splitlines()
+                              if l.strip() and not l.startswith('-- ')]
+    day, kept = journal('--since', '24 hours ago'), journal()
+    connections = [l for l in run(['ss', '-Htn', 'state', 'established',
+                                   f'( sport = :{PYTHON_PORT} or dport = :{PYTHON_PORT} )'], check=False).stdout.splitlines()
+                   if l.strip()]
+    nginx = run(['grep', '-rlE', PORT_REF, '/etc/nginx'], check=False).stdout.split()
+    code = run(['grep', '-rIlE', '--exclude-dir=vendor', '--exclude-dir=node_modules', PORT_REF, str(LEGACY_CODE)],
+               check=False, timeout=300).stdout.split()
+    cron = LEGACY_CRON.read_text() if LEGACY_CRON.exists() else ''
+    capacity = CAPACITY_CRON.read_text() if CAPACITY_CRON.exists() else ''
+    oldest = run(['sh', '-c', 'journalctl --no-pager -o short-iso | head -1'], check=False).stdout.strip()
+    gates = {'step1Done': STEP1_MARKER in cron and not cron_lines(cron) and not cron_lines(capacity),
+             'noRequests24h': not any(HTTP_LINE.search(l) for l in day),
+             'noConnections': not connections,
+             'noNginxRoute': not nginx,
+             'noLegacyCodeCaller': not code}
+    evidence = {'requests24h': sum(bool(HTTP_LINE.search(l)) for l in day), 'journalLines24h': len(day),
+                'requestsInJournal': sum(bool(HTTP_LINE.search(l)) for l in kept), 'journalLines': len(kept),
+                'journalOldest': oldest[:40], 'connections': connections[:5], 'nginxFiles': nginx[:10],
+                'legacyCodeFiles': code[:10]}
+    return gates, evidence
+
+
+def python_gate_status():
+    """Só leitura: os portões do passo 2 agora, sem mudar nada."""
+    gates, evidence = python_gates()
+    return {'wouldStop': all(gates.values()), 'gates': gates, 'evidence': evidence, 'service': python_service()}
+
+
+def stop_python():
+    """Passo 2 da desativação: para o biomie-python.service e tira do boot (nada é apagado)."""
+    gates, evidence = python_gates()
+    before = python_service()
+    if not all(gates.values()):
+        return {'ok': False, 'changed': False, 'reason': 'portão do passo 2 não passou: nada mudou',
+                'failedGates': [k for k, v in gates.items() if not v], 'gates': gates, 'evidence': evidence,
+                'service': before}
+    stopped_at = now()
+    run(['systemctl', 'stop', PYTHON_SERVICE], timeout=120)
+    run(['systemctl', 'disable', PYTHON_SERVICE], timeout=60)
+    after = python_service()
+    ok = after['active'] != 'active' and after['enabled'] == 'disabled' and not after['listening']
+    ARCHIVE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    record = ARCHIVE_DIR / f'passo2-python-{stamp()}.json'
+    record.write_text(json.dumps({'stoppedAtUtc': stopped_at.isoformat(), 'gates': gates, 'evidence': evidence,
+                                  'before': before, 'after': after}, indent=1, default=str))
+    os.chmod(record, 0o600)
+    return {'ok': ok, 'changed': True, 'stoppedAtUtc': stopped_at.isoformat(), 'gates': gates, 'evidence': evidence,
+            'before': before, 'after': after, 'record': str(record),
+            'rollback': 'python ops/remote.py ops/54_legado.py desfazer-parar-python'}
+
+
+def undo_stop_python():
+    """Desfaz o passo 2: religa o biomie-python.service e volta ao boot; espera a porta abrir (até 30 s)."""
+    run(['systemctl', 'enable', '--now', PYTHON_SERVICE], timeout=120)
+    state = python_service()
+    for _ in range(15):
+        if state['active'] == 'active' and state['listening']:
+            break
+        subprocess.run(['sleep', '2'])
+        state = python_service()
+    return {'ok': state['active'] == 'active' and state['enabled'] == 'enabled' and state['listening'],
+            'service': state}
 
 
 COMMANDS = {'status': status, 'backup-v2': backup_v2, 'arquivo-cifrado': archive, 'parar-texto-puro': stop_plaintext,
             'desfazer-parar-texto-puro': undo_stop, 'desfazer-backup-v2': undo_backup_v2,
             'testar-restauracao': restore_test, 'verificar-arquivos': verify_archives,
             'cifrar-marco': encrypt_milestone, 'excluir-texto-puro': delete_plaintext, 'parar-tarefas': stop_jobs,
-            'desfazer-parar-tarefas': undo_stop_jobs, 'gravacoes': writes_since}
+            'desfazer-parar-tarefas': undo_stop_jobs, 'gravacoes': writes_since, 'parar-python': stop_python,
+            'desfazer-parar-python': undo_stop_python, 'portao-python': python_gate_status}
 WITH_ARGS = ('cifrar-marco', 'excluir-texto-puro', 'gravacoes')
 
 if __name__ == '__main__':
