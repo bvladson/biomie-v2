@@ -232,16 +232,25 @@ def suppliers_undo_sql(slug, confirm):
                                  end='commit' if confirm else 'rollback')
 
 
+def psql_result(stdout):
+    """O JSON que o psql -At devolve, mesmo ocupando várias linhas: o json_agg de linhas põe uma quebra de linha
+    entre os itens, e ler só uma linha quebrou o 07a da validação de 06/11 (no ensaio; nada mudou). Corta só em
+    quebra de linha de verdade (split, não splitlines: nome com separador de linha Unicode fica inteiro)."""
+    lines = stdout.split('\n')
+    start = next((i for i, l in enumerate(lines) if l.startswith('{')), None)
+    if start is None:
+        raise SystemExit('desfazer: sem resultado do banco')
+    value, _ = json.JSONDecoder().raw_decode('\n'.join(lines[start:]))
+    return value
+
+
 def suppliers_undo_run(slug, confirm):
     p = subprocess.run(COMPOSE + ['exec', '-T', 'db', 'psql', '-X', '-q', '-U', 'postgres', '-d', DB, '-At',
                                   '-v', 'ON_ERROR_STOP=1', '-f', '-'],
                        input=suppliers_undo_sql(slug, confirm), capture_output=True, text=True, timeout=900)
     if p.returncode:
         raise SystemExit('postgres: ' + p.stderr[-800:])
-    line = next((l for l in reversed(p.stdout.splitlines()) if l.startswith('{')), None)
-    if line is None:
-        raise SystemExit('desfazer: sem resultado do banco')
-    return json.loads(line)
+    return psql_result(p.stdout)
 
 
 def suppliers_undo(slug, confirm):

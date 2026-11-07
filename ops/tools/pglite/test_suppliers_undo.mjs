@@ -1,7 +1,8 @@
 // Teste LOCAL do SQL de `40_stock.py suppliers-undo` (PGlite, todas as migrações da release): importação simulada
 // em duas empresas → ensaio (rollback) não muda nada → desfazer de UMA empresa apaga só o que é só do Omie e mantém
 // prazos, fornecedor principal e vínculos manuais → repetir não faz nada → recusa com importação aberta, com a
-// importação diária ligada e com empresa inexistente.
+// importação diária ligada e com empresa inexistente. Também lê a saída crua do psql (várias linhas: json_agg de
+// linhas) com o psql_result do próprio script, que quebrou o 07a da validação de 06/11 quando lia uma linha só.
 // Uso: node test_suppliers_undo.mjs <source> <40_stock.py>
 import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
@@ -11,6 +12,15 @@ import { setup } from './setup.mjs';
 const [src, script] = process.argv.slice(2);
 const render = (slug, confirm) => execFileSync('python', [script, 'suppliers-undo-sql', slug ?? '-', ...(confirm ? ['--confirmar'] : [])],
   { encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+// O leitor da saída do psql (psql_result) do próprio 40_stock.py, sozinho (o resto do script roda na VPS).
+const pyParse = (stdout) => execFileSync('python', ['-c', `
+import ast, json, pathlib, sys
+tree = ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'psql_result')
+ns = {'json': json}
+exec(compile(ast.Module(body=[fn], type_ignores=[]), 'psql_result', 'exec'), ns)
+sys.stdout.write(json.dumps(ns['psql_result'](sys.stdin.read())))`, script],
+  { input: stdout, encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
 let failed = 0;
 const check = (label, cond, detail) => { if (!cond) failed++; console.log(`${cond ? 'OK  ' : 'FAIL'} ${label}${cond ? '' : ' → ' + JSON.stringify(detail)}`); };
 
@@ -70,6 +80,25 @@ check('ensaio: A apaga 1 fornecedor (S1) e mantém 3 (vínculo manual, prazo, pr
 check('ensaio: nada do Omie sobra e dados das pessoas intactos (A e B)', trial.companies.every((c) => c.leftFromOmie === 0 && c.userDataIntact), trial.companies);
 check('ensaio: cópia traz as linhas que sairiam', trial.backup.links.length === 6 && trial.backup.suppliers.length === 5, [trial.backup.links.length, trial.backup.suppliers.length]);
 check('ensaio: banco igual depois (rollback)', JSON.stringify(await snap()) === JSON.stringify(before), await snap());
+
+// 1b. Saída crua do psql -At (07a de 06/11): json sem conversão no PGlite = o texto que o psql imprime, linha a linha.
+const rawResults = await db.exec(render(null, false), { parsers: { 114: (v) => v } });
+const psqlOut = rawResults.filter((r) => r.rows?.length)
+  .map((r) => r.rows.map((row) => r.fields.map((f) => row[f.name] ?? '').join('|')).join('\n') + '\n').join('');
+check('psql: o resultado ocupa várias linhas (json_agg de linhas)', psqlOut.trim().split('\n').length > 1, psqlOut.slice(0, 300));
+let oldFails = false;
+try { JSON.parse([...psqlOut.split('\n')].reverse().find((l) => l.startsWith('{'))); } catch { oldFails = true; }
+check('psql: o leitor antigo (uma linha só) quebra como no 07a', oldFails, null);
+const parsed = JSON.parse(pyParse(psqlOut));
+check('psql: psql_result junta as linhas e devolve o mesmo ensaio', JSON.stringify(parsed) === JSON.stringify(trial), parsed);
+const LS = String.fromCharCode(0x2028);
+const odd = JSON.parse(pyParse(`{"links" : [{"name":"S${LS}1"}, \n {"name":"S2"}]}\nROLLBACK\n`));
+check('psql: separador de linha Unicode num nome e linha a mais no fim não atrapalham',
+  odd.links.length === 2 && odd.links[0].name === `S${LS}1`, odd);
+let emptyRefused = false;
+try { pyParse('\n'); } catch (e) { emptyRefused = String(e.stderr || e.message).includes('sem resultado do banco'); }
+check('psql: sem resultado → erro claro', emptyRefused, null);
+check('psql: banco igual depois do ensaio cru (rollback)', JSON.stringify(await snap()) === JSON.stringify(before), await snap());
 
 // 2. Desfazer só a empresa A.
 const real = await run('empresa-a', true);

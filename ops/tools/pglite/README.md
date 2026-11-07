@@ -15,7 +15,9 @@ Precisa de `npm i @electric-sql/pglite@0.5.8` nesta pasta (fica fora do `package
   fica igual ao de antes da 0051, reaplica e roda a suíte de equivalência.
 - `node test_suppliers_undo.mjs <source> ../../40_stock.py` — ensaio do SQL do `40_stock.py suppliers-undo` (desfazer
   da importação de fornecedores): ensaio sem mudança, desfazer de uma empresa só, prazos/principal/vínculos manuais
-  intactos, repetição sem efeito e recusas (importação aberta, diária ligada, empresa inexistente).
+  intactos, repetição sem efeito e recusas (importação aberta, diária ligada, empresa inexistente). Também passa a
+  saída crua do psql (várias linhas, como o json_agg de linhas imprime) pelo `psql_result` do script: ler uma linha
+  só quebrou o 07a da validação de 06/11.
 - `node test43_diag.mjs <source> ../../43_intel_check.py` — ensaio do diagnóstico de unidades da conferência 43:
   venda de produto fora da leitura de estoque aparece em unitsDiff (o critério da conferência não muda).
 - `python ../test_noturno_plano.py <worktree>` — fluxo de decisão de noturno.plano/ativar_plano com o servidor
