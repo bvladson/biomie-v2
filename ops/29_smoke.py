@@ -12,6 +12,11 @@
     ... --stock --intel | --intel-empty   # Inteligência (0044): painel, card = lista, gaveta do
                                         # produto, Pareto, celular e vendedor sem custo (só leitura);
                                         # --intel-empty = a tela avisa que ainda não há análise
+    python ops/29_smoke.py --ai [--ai-mode off|on]
+                                        # Assistente MAG AI (0052): balão escondido (off) ou, com a
+                                        # chave ligada (on), visível só para os perfis liberados;
+                                        # sem gateway no ambiente a resposta é "indisponível" com os
+                                        # números da tela (nada chama IA de verdade)
     ... --hml                           # na HOMOLOGAÇÃO (41_homolog.py): túnel local 3150, contas
                                         # criadas e apagadas só lá; a produção não é tocada
 
@@ -115,6 +120,11 @@ STOCK_MODE = '--stock' in sys.argv
 STOCK_EXPECTED = sys.argv[sys.argv.index('--stock-mode') + 1] if '--stock-mode' in sys.argv else 'off'
 if STOCK_EXPECTED not in ('off', 'pilot', 'on'):
     raise SystemExit('invalid --stock-mode')
+# --ai [--ai-mode off|on]: assistente MAG AI (0052) com as contas padrão (Super admin e VIEWER).
+AI_MODE = '--ai' in sys.argv
+AI_EXPECTED = sys.argv[sys.argv.index('--ai-mode') + 1] if '--ai-mode' in sys.argv else 'off'
+if AI_EXPECTED not in ('off', 'on'):
+    raise SystemExit('invalid --ai-mode')
 accounts = [
     {'label': 'super', 'email': f'smoke-super-{stamp}@biomie.invalid', 'password': secrets.token_urlsafe(24),
      'role': 'SUPER_ADMIN', 'fullName': 'Smoke Super'},
@@ -150,7 +160,8 @@ try:
            'BIOMIE_STOCK_CURVES': 'ro' if '--curves-readonly' in sys.argv else '1' if '--curves' in sys.argv else '0',
            'BIOMIE_STOCK_INTEL': '1' if '--intel' in sys.argv else 'empty' if '--intel-empty' in sys.argv else '0',
            # Fornecedores e prazos (0048/0049): página, ficha do fornecedor e filtro por fornecedor; só leitura.
-           'BIOMIE_STOCK_SUPPLIERS': '1' if '--suppliers' in sys.argv else '0'}
+           'BIOMIE_STOCK_SUPPLIERS': '1' if '--suppliers' in sys.argv else '0',
+           'BIOMIE_AI_EXPECT': AI_EXPECTED}
     # --shots <prefix>: full-page screenshots of every admin screen (visual comparison).
     if '--shots' in sys.argv:
         env['BIOMIE_SMOKE_SHOT_PREFIX'] = sys.argv[sys.argv.index('--shots') + 1]
@@ -186,11 +197,12 @@ try:
     report['mode'] = ('homologação (127.0.0.1:3150 via túnel)' if HML_MODE else
                       f'pre-cutover (private web 127.0.0.1:{port} via tunnel)' if tunnel else 'public site')
     (BASE / 'ops' / 'logs').mkdir(exist_ok=True)
-    script = 'stock-smoke.cjs' if STOCK_MODE else 'admin-smoke.cjs' if ADMIN_MODE else 'smoke.cjs'
+    script = ('stock-smoke.cjs' if STOCK_MODE else 'admin-smoke.cjs' if ADMIN_MODE else
+              'assistant-smoke.cjs' if AI_MODE else 'smoke.cjs')
     p = subprocess.run(['node', str(BASE / 'ops/browser' / script)], cwd=BASE / 'ops/browser', env=env,
                        capture_output=True, text=True, timeout=900)
     try:
-        start = p.stdout.index('{' if ADMIN_MODE or STOCK_MODE else '[')
+        start = p.stdout.index('{' if ADMIN_MODE or STOCK_MODE or AI_MODE else '[')
         report['browser'] = json.loads(redact(p.stdout[start:]))
     except ValueError:
         report['browser_error'] = redact((p.stderr or p.stdout)[-1500:])
