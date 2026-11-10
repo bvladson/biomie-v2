@@ -67,6 +67,18 @@ report['commit'] = meta['commit']
 # 1. Release pointers and configuration from the release itself.
 run(STACKCTL + ['set', f'RELEASE_ID={SHORT}', f'SOURCE_DIR={REL}', f"BIOMIE_GIT_COMMIT={meta['commit']}"])
 shutil.copy2(REL / 'deploy/vps/compose.yml', BASE / 'compose.yml')
+
+# 1b. Rede do assistente MAG AI: o compose referencia mag-ai_biomie (external). Sem o MAG AI
+# instalado, criamos a rede vazia com as mesmas opções (interna, ponte sem endereço do servidor)
+# para o BIOMIE nunca deixar de subir por causa da IA.
+if subprocess.run(['docker', 'network', 'inspect', 'mag-ai_biomie'], capture_output=True).returncode:
+    run(['docker', 'network', 'create', '--internal',
+         '-o', 'com.docker.network.bridge.inhibit_ipv4=true',
+         '--label', 'br.com.mag.projeto=mag-ai', 'mag-ai_biomie'])
+    report['mag_ai_network'] = 'criada vazia (MAG AI ausente)'
+else:
+    report['mag_ai_network'] = 'existente'
+
 run(STACKCTL + ['render-gateway'])
 run(STACKCTL + ['check'])
 
