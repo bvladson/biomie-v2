@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 import { FilterBar } from "@/components/layout/FilterBar";
 import { CoverageBanner } from "@/components/layout/CoverageBanner";
 import { GlobalFloatingTableScroll } from "@/components/layout/GlobalFloatingTableScroll";
+import { AssistantBalloon } from "@/components/ai/AssistantBalloon";
 import { globalFiltersSchema } from "@/domain/filters";
 import { appContextQuery } from "@/lib/queries";
 import { useGlobalFilters } from "@/hooks/use-filters";
@@ -77,6 +78,7 @@ function ShellLayout() {
           {resolved && <CoverageBanner />}
         </header>
         {resolved ? <Outlet /> : <NoCompany />}
+        {resolved && <AssistantBalloon />}
       </SidebarInset>
     </SidebarProvider>
   );

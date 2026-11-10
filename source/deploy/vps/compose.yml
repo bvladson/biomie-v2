@@ -123,11 +123,18 @@ services:
       OMIE_KEY_METHOD_PER_MINUTE: 10
       OMIE_MAX_CONCURRENT: 1
       OMIE_CIRCUIT_OPEN_MS: 1800000
+      # Assistente MAG AI (Fase 4): sem as duas variáveis o balão fica oculto e nada é chamado.
+      # A chave vem do stack.env (nunca do repositório); só o web fala com o gateway.
+      MAG_AI_URL: ${MAG_AI_URL:-}
+      MAG_AI_KEY: ${MAG_AI_KEY:-}
       NODE_OPTIONS: --max-old-space-size=1024
     init: true
     stop_grace_period: 45s
     mem_limit: 1536m
     cpus: 1.0
+    # Rede interna do MAG AI (criada pelo mag-ai.sh; o 21_activate_release cria vazia se faltar,
+    # para o BIOMIE nunca deixar de subir por causa da IA). Só o web entra; o worker não usa IA.
+    networks: [default, magai]
     logging: *logging
   worker:
     image: biomie-v2-web:${RELEASE_ID}
@@ -137,6 +144,8 @@ services:
     environment:
       <<: *app_environment
       BIOMIE_PROCESS_ROLE: worker
+      MAG_AI_URL: ""
+      MAG_AI_KEY: ""
       # Conservative: the legacy BIomie shares the same IP and Omie applications.
       OMIE_GLOBAL_PER_MINUTE: ${OMIE_WORKER_GLOBAL_PER_MINUTE:-90}
       OMIE_KEY_METHOD_PER_MINUTE: ${OMIE_WORKER_KEY_METHOD_PER_MINUTE:-30}
@@ -185,3 +194,8 @@ services:
     logging: *logging
 volumes:
   postgres_data:
+networks:
+  default: {}
+  magai:
+    name: mag-ai_biomie
+    external: true

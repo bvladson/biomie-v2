@@ -30,6 +30,7 @@ import {
 } from "@/domain/finance";
 import { useState } from "react";
 import { TeamsTab } from "@/components/admin/TeamsTab";
+import { AssistantTab } from "@/components/admin/AssistantTab";
 import { AdminNav } from "@/admin/components/AdminSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -499,6 +500,7 @@ function AdminPage() {
             <TabsTrigger value="flightplan">Plano de Voo</TabsTrigger>
             <TabsTrigger value="teams">Equipes</TabsTrigger>
             <TabsTrigger value="jobs">Jobs</TabsTrigger>
+            <TabsTrigger value="assistant">Assistente (IA)</TabsTrigger>
             <TabsTrigger value="audit">Auditoria</TabsTrigger>
           </TabsList>
         </div>
@@ -520,6 +522,9 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="jobs" className="panel mt-4">
           <JobsTab />
+        </TabsContent>
+        <TabsContent value="assistant" className="panel mt-4">
+          <AssistantTab />
         </TabsContent>
         <TabsContent value="audit" className="panel mt-4">
           <MovedNotice to="/admin/auditoria">
