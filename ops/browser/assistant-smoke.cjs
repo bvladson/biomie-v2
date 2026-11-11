@@ -39,8 +39,18 @@ async function open(browser, width = 1440) {
     if (/Content Security Policy|Refused to/i.test(text)) problems.csp.push(redact(text).slice(0, 200));
     else if (m.type() === 'error') problems.errors.push(redact(text).slice(0, 200));
   });
-  page.on('response', (r) => {
-    if (r.status() >= 500) problems.serverFailures.push({ path: new URL(r.url()).pathname, status: r.status() });
+  page.on('response', async (r) => {
+    if (r.status() < 400 || r.request().method() === 'GET') return;
+    let body = '';
+    try { body = (await r.text()).replace(/\s+/g, ' ').slice(0, 400); } catch { body = '(corpo ilegível)'; }
+    problems.serverFailures.push({ path: new URL(r.url()).pathname, status: r.status(), body: redact(body) });
+  });
+  page.on('requestfailed', (req) => {
+    if (req.method() === 'GET') return;
+    problems.serverFailures.push({
+      path: new URL(req.url()).pathname,
+      status: 'SEM RESPOSTA: ' + ((req.failure() && req.failure().errorText) || '?'),
+    });
   });
   return { context, page };
 }
