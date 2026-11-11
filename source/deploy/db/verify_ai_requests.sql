@@ -135,11 +135,18 @@ begin
 end $$;
 reset role;
 
--- 7. Retenção agendada e metadados sem texto (a tabela não tem coluna de pergunta/resposta).
+-- 7. Retenção de 90 dias aplicada a cada registro novo (sem pg_cron) e metadados sem texto.
+insert into private.ai_requests (user_id, company_id, intent, status, created_at)
+  values (current_setting('ia.su')::uuid, current_setting('ia.ca')::uuid, 'ritmo_plano', 'ok',
+          now() - interval '91 days');
+select set_config('request.jwt.claims', jsonb_build_object('sub', current_setting('ia.su'), 'role', 'authenticated')::text, true);
+set local role authenticated;
+select public.ai_request_log(current_setting('ia.ca')::uuid, 'ritmo_plano', 'ok', 'm', 1, 1, 1, 1, 0);
+reset role;
 do $$
 begin
-  if (select count(*) from cron.job where jobname = 'biomie-ai-requests-retencao') <> 1 then
-    raise exception 'FALHOU: retenção não agendada'; end if;
+  if exists (select 1 from private.ai_requests where created_at < now() - interval '90 days') then
+    raise exception 'FALHOU: registro antigo sobreviveu à retenção'; end if;
   if exists (
     select 1 from information_schema.columns
     where table_schema = 'private' and table_name = 'ai_requests'

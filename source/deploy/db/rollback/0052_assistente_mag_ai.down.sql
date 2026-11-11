@@ -1,9 +1,7 @@
--- Desfaz a 0052_assistente_mag_ai: tira as funções do assistente, a retenção agendada, a tabela de
--- metadados e a chave ai_assistant; my_features() volta exatamente como na 0041.
+-- Desfaz a 0052_assistente_mag_ai: tira as funções do assistente, a tabela de metadados e a chave
+-- ai_assistant; my_features() volta exatamente como na 0041.
 -- A 0052 é só acréscimo: reativar a release anterior já basta para a tela; este arquivo limpa o banco.
 -- Rodar com psql -1 (uma transação).
-
-select cron.unschedule(jobid) from cron.job where jobname = 'biomie-ai-requests-retencao';
 
 create or replace function public.my_features() returns text[]
 language sql stable as $$ select stock_internal.features() $$;

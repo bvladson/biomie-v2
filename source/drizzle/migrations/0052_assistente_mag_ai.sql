@@ -3,7 +3,7 @@
 -- (mag-ai/docs/fase2-plano.md §6):
 --   - chave `ai_assistant` no metric_config, DESLIGADA por padrão, começando só com SUPER_ADMIN;
 --   - registro de pedidos SÓ COM METADADOS (nunca o texto da pergunta nem da resposta) em
---     private.ai_requests, retenção de 90 dias;
+--     private.ai_requests; retenção de 90 dias aplicada a cada registro novo (a VPS não tem pg_cron);
 --   - a IA nunca acessa o banco; o modelo não escolhe a intenção (regras no servidor).
 -- Só acréscimos: a release anterior ignora tudo daqui (volta = ativar a release anterior).
 
@@ -105,6 +105,9 @@ begin
   if v_user is null then raise exception 'ai::Sessão necessária.'; end if;
   if not public.ai_assistant_enabled_for_me() then raise exception 'ai::Assistente desligado.'; end if;
   if not public.can_access_company(v_user, p_company) then raise exception 'ai::Sem acesso a esta empresa.'; end if;
+  -- Retenção de 90 dias aqui mesmo: a VPS não tem pg_cron (a 0003 é trocada no deploy) e a tabela é
+  -- pequena (limite de 300 pedidos/dia); o índice ai_requests_created torna a limpeza imediata.
+  delete from private.ai_requests where created_at < now() - interval '90 days';
   insert into private.ai_requests
       (user_id, company_id, intent, status, model, queue_ms, total_ms, prompt_tokens, output_tokens, flagged_count)
     values (v_user, p_company, p_intent, p_status, left(coalesce(p_model, ''), 60),
@@ -165,13 +168,7 @@ begin
                         from (select intent, count(*) as n from q group by intent) i)));
 end $$;
 
--- ============ 3. Retenção de 90 dias (mesmo padrão da 0003) ============
-select cron.unschedule(jobid) from cron.job where jobname = 'biomie-ai-requests-retencao';
-select cron.schedule('biomie-ai-requests-retencao', '41 6 * * *', $cmd$
-  delete from private.ai_requests where created_at < now() - interval '90 days'
-$cmd$);
-
--- ============ 4. Permissões ============
+-- ============ 3. Permissões ============
 revoke all on function public.ai_assistant_config(), public.ai_assistant_enabled_for_me(),
   public.ai_assistant_set(boolean, text[]),
   public.ai_request_log(uuid, text, text, text, integer, integer, integer, integer, integer),

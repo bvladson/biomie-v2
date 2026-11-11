@@ -16,7 +16,8 @@ MAG (MAG AI: Ollama `qwen3.5:0.8b-q8_0` atrás de um gateway interno na VPS). Se
    e entra um texto-modelo com os próprios fatos.
 4. **Registro só de metadados** em `private.ai_requests` (usuário, empresa, intenção, status, tempos,
    tokens, avaliação útil/não útil). Nunca o texto da pergunta nem da resposta. Retenção de 90 dias
-   (pg_cron `biomie-ai-requests-retencao`).
+   aplicada a cada registro novo, dentro de `ai_request_log` (a VPS não tem pg_cron: o deploy troca a
+   0003 por uma versão sem ele).
 5. **Liberação por etapas** pela chave `ai_assistant` no `metric_config` (desligada por padrão):
    SUPER_ADMIN (piloto) → ADMIN/GESTOR → VENDEDOR, cada etapa com aprovação. Admin › "Assistente (IA)".
 
