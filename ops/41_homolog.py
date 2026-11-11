@@ -367,6 +367,9 @@ def up(short):
     rendered = run(['python3', str(release / 'scripts/render-vps-migrations.py')])
     psql('set statement_timeout = 0;\n' + rendered)  # migrações não param no limite de 5 min da cópia
     neutralize()
+    # O PostgREST da cópia pode estar no ar desde antes destas migrações: recarrega o esquema para as
+    # funções novas existirem no caminho do app (mesma linha que a ativação usa na produção).
+    psql("notify pgrst, 'reload schema';")
     migrations = psql('select count(*) || \' / \' || max(name) from private.vps_schema_migrations;')
     # 2. Configurações da homologação (gateway com as chaves próprias e o "nginx público").
     write_private(HML / 'gateway.conf', gateway_conf(release, env))
