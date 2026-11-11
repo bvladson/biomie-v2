@@ -114,12 +114,11 @@ function AnswerBlock({ item, onRate }: { item: ChatItem; onRate: (useful: boolea
 
 export function AssistantBalloon() {
   const { data: ctx } = useSuspenseQuery(appContextQuery());
-  const { company } = useGlobalFilters();
+  const { resolved } = useGlobalFilters();
   const askFn = useServerFn(aiAsk);
   const availabilityFn = useServerFn(aiAvailability);
   const rateFn = useServerFn(aiRate);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const search = useRouterState({ select: (s) => s.location.search as Record<string, unknown> });
 
   const [open, setOpen] = useState(false);
   const [availability, setAvailability] = useState<AiAvailability | null>(null);
@@ -145,16 +144,17 @@ export function AssistantBalloon() {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [items, busy, stage]);
 
-  if (!enabled || !company) return null;
+  if (!enabled || !resolved) return null;
 
+  // Os mesmos filtros resolvidos que as telas usam (AnalyticsQuery), menos a empresa (vai à parte).
   const filters = {
-    ...(typeof search["period"] === "string" ? { period: search["period"] } : {}),
-    ...(typeof search["channel"] === "string" ? { channel: search["channel"] } : {}),
-    ...(typeof search["branch"] === "string" ? { branch: search["branch"] } : {}),
-    ...(typeof search["seller"] === "string" ? { seller: search["seller"] } : {}),
-    ...(typeof search["state"] === "string" ? { state: search["state"] } : {}),
-    ...(typeof search["city"] === "string" ? { city: search["city"] } : {}),
-    ...(typeof search["category"] === "string" ? { category: search["category"] } : {}),
+    ...(resolved.period ? { period: resolved.period } : {}),
+    ...(resolved.channel ? { channel: resolved.channel } : {}),
+    ...(resolved.branch ? { branch: resolved.branch } : {}),
+    ...(resolved.seller ? { seller: resolved.seller } : {}),
+    ...(resolved.state ? { state: resolved.state } : {}),
+    ...(resolved.city ? { city: resolved.city } : {}),
+    ...(resolved.category ? { category: resolved.category } : {}),
   };
 
   const ask = async (text: string, intent?: AiIntent) => {
@@ -171,7 +171,7 @@ export function AssistantBalloon() {
     try {
       const answer = await askFn({
         data: {
-          companyId: company,
+          companyId: resolved.company,
           topic,
           question: q,
           ...(intent ? { intent } : {}),
