@@ -180,9 +180,15 @@ export function AssistantBalloon() {
       });
       setItems((prev) => prev.map((it, i) => (i === prev.length - 1 ? { ...it, answer } : it)));
     } catch (error) {
-      const message =
-        error instanceof Error && /ai::([\s\S]+)/.exec(error.message)?.[1]
-          ? /ai::([\s\S]+)/.exec(error.message)![1]!
+      // Mostra a causa real (e registra no console): esconder o erro atrás de um texto genérico
+      // custou um ciclo inteiro de diagnóstico na homologação de 11/11.
+      const raw = error instanceof Error ? error.message : String(error);
+      console.error("[assistente] pergunta falhou:", raw);
+      const coded = /ai::([\s\S]+)/.exec(raw)?.[1];
+      const message = coded
+        ? coded
+        : raw
+          ? `Não consegui responder agora (erro técnico: ${raw.slice(0, 240)}). Os números continuam na tela.`
           : "Não foi possível falar com o assistente agora. Os números continuam na tela.";
       setItems((prev) =>
         prev.map((it, i) =>
