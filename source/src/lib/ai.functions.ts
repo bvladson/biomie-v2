@@ -109,7 +109,7 @@ export const aiAvailability = createServerFn({ method: "GET" })
 
 export const aiAsk = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((raw: unknown) => askSchema.parse(raw))
+  .inputValidator((raw: unknown) => askSchema.parse(raw))
   .handler(async ({ context, data }): Promise<AiAnswer> => {
     noStore();
     const started = Date.now();
@@ -236,7 +236,7 @@ export const aiAsk = createServerFn({ method: "POST" })
 
 export const aiRate = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((raw: unknown) =>
+  .inputValidator((raw: unknown) =>
     z.object({ requestId: uuid, useful: z.boolean().nullable() }).strict().parse(raw),
   )
   .handler(async ({ context, data }) => {
@@ -272,7 +272,7 @@ export const aiAdminGet = createServerFn({ method: "GET" })
 
 export const aiAdminSet = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((raw: unknown) =>
+  .inputValidator((raw: unknown) =>
     z
       .object({ enabled: z.boolean(), roles: z.array(z.string().max(20)).min(1).max(8) })
       .strict()
