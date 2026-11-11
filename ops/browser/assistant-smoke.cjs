@@ -57,6 +57,27 @@ async function login(page, label) {
 
 const balloon = (page) => page.getByRole('button', { name: /assistente BIOMIE/i });
 
+// Em falha de espera, devolve o que o balão mostrou de verdade (evidência do erro real).
+async function lastAnswer(page) {
+  try {
+    const dialog = page.getByRole('dialog', { name: 'Assistente BIOMIE' });
+    const blocks = dialog.locator('div.rounded-lg');
+    const n = await blocks.count();
+    if (!n) return '(nenhuma resposta renderizada)';
+    return (await blocks.nth(n - 1).innerText()).replace(/\s+/g, ' ').slice(0, 400);
+  } catch (e) {
+    return '(sem leitura: ' + String(e.message).slice(0, 80) + ')';
+  }
+}
+
+async function waitOrExplain(page, locator, timeout) {
+  try {
+    await locator.waitFor({ timeout });
+  } catch {
+    throw new Error('não apareceu; balão mostrou: ' + (await lastAnswer(page)));
+  }
+}
+
 async function balloonVisible(page) {
   // O menu carregado garante que o contexto (features) já chegou.
   await page.getByRole('link', { name: 'Cockpit', exact: true }).first().waitFor({ timeout: 45000 });
@@ -88,9 +109,10 @@ async function balloonVisible(page) {
       });
       await step('super: sugestão responde com os fatos', async () => {
         await sup.page.getByRole('button', { name: 'Explicar esta tela' }).click();
-        await sup.page.getByText('A explicação automática está indisponível agora').waitFor({ timeout: 90000 });
+        await waitOrExplain(sup.page,
+          sup.page.getByText('A explicação automática está indisponível agora'), 90000);
         const dialog = sup.page.getByRole('dialog', { name: 'Assistente BIOMIE' });
-        await dialog.getByText(/Números usados \(\d+\)/).first().waitFor({ timeout: 15000 });
+        await waitOrExplain(sup.page, dialog.getByText(/Números usados \(\d+\)/).first(), 15000);
       });
       await step('super: números usados abrem com FATOS', async () => {
         const dialog = sup.page.getByRole('dialog', { name: 'Assistente BIOMIE' });
@@ -101,7 +123,7 @@ async function balloonVisible(page) {
         const dialog = sup.page.getByRole('dialog', { name: 'Assistente BIOMIE' });
         await dialog.getByLabel('Pergunta ao assistente').fill('qual a previsão do tempo amanhã?');
         await dialog.getByLabel('Pergunta ao assistente').press('Enter');
-        await dialog.getByText('Ainda não sei responder isso').waitFor({ timeout: 60000 });
+        await waitOrExplain(sup.page, dialog.getByText('Ainda não sei responder isso'), 60000);
       });
       await step('super: tela do estoque muda as sugestões', async () => {
         await sup.page.goto(base + '/estoque');
