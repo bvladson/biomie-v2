@@ -21,13 +21,27 @@ const RULES: { intent: AiIntent; test: RegExp }[] = [
     test: /parad|encalhad|sem giro|baixo giro|obsolet|obsolesc|excesso|curva [abc]|capital (parado|em estoque)|estoque/,
   },
   {
-    intent: "comparacao_periodos",
-    test: /compar|anterior|ano passado|mes passado|cresc|caiu|queda|variacao|evolu/,
+    // O que ACONTECEU: evolução dos meses fechados.
+    intent: "historico_meses",
+    test: /histori|evolu|mes a mes|ultimos \d* ?meses|o que aconteceu|como foi [oa]/,
   },
   {
-    // "previsão" sozinha NÃO basta ("previsão do tempo" fica fora do catálogo).
+    // O que VAI ACONTECER: previsões do motor (nunca do modelo).
+    intent: "previsao_mes",
+    test: /previs|projec|estimat|cenario|vai (dar|fechar|bater)|vamos fechar|quanto fecha|o que (vai acontecer|acontecera)/,
+  },
+  {
+    // Passado → agora → futuro numa leitura só.
+    intent: "tendencia",
+    test: /tendenci|panorama|passado.{0,20}futuro|visao completa/,
+  },
+  {
+    intent: "comparacao_periodos",
+    test: /compar|anterior|ano passado|mes passado|cresc|caiu|queda|variacao/,
+  },
+  {
     intent: "ritmo_plano",
-    test: /\bmeta\b|\britmo\b|plano de voo|falta (para|pra)|bater|atingi|carteira|previsao d[oe] (mes|ano|faturamento|vendas)/,
+    test: /\bmeta\b|\britmo\b|plano de voo|falta (para|pra)|bater|atingi|carteira/,
   },
   { intent: "explicar_tela", test: /\b(explic|resum[ao]|analis|visao geral|panorama)/ },
   {
@@ -36,9 +50,13 @@ const RULES: { intent: AiIntent; test: RegExp }[] = [
   },
 ];
 
+/** Perguntas claramente de fora (clima etc.) nunca entram no catálogo, mesmo citando "previsão". */
+const FORA = /previsao do tempo|\bclima\b|\bchuva\b|\btempo amanha\b/;
+
 /** Decide a intenção pela pergunta; sem regra casada, devolve null (fora do catálogo). */
 export function routeIntent(question: string, _topic: AiTopic): AiIntent | null {
   const q = normalize(question);
+  if (FORA.test(q)) return null;
   for (const rule of RULES) if (rule.test.test(q)) return rule.intent;
   return null;
 }
@@ -74,8 +92,8 @@ export function suggestionsFor(topic: AiTopic): { label: string; intent: AiInten
   if (topic === "plano") {
     return [
       ...base,
+      { label: "Qual a previsão do mês?", intent: "previsao_mes" },
       { label: "Vamos bater a meta?", intent: "ritmo_plano" },
-      { label: "Comparar com o mês anterior", intent: "comparacao_periodos" },
     ];
   }
   if (topic === "clientes") {
@@ -94,11 +112,11 @@ export function suggestionsFor(topic: AiTopic): { label: string; intent: AiInten
   }
   return [
     ...base,
-    { label: "Como está o faturamento?", intent: "faturamento_periodo" },
-    { label: "Vamos bater a meta?", intent: "ritmo_plano" },
+    { label: "Qual a previsão do mês?", intent: "previsao_mes" },
+    { label: "Tendência: passado → futuro", intent: "tendencia" },
   ];
 }
 
 /** Resposta fixa para pergunta fora do catálogo (sem chamar a IA). */
 export const CATALOG_TEXT =
-  "Ainda não sei responder isso. Posso ajudar com: faturamento do período, comparação com o mês ou o ano anterior, ritmo e meta do Plano de Voo, ranking de vendedores, clientes ou produtos, estoque parado e oportunidades entre empresas. Toque numa sugestão ou reformule a pergunta.";
+  "Ainda não sei responder isso. Posso ajudar com: faturamento do período, previsões do mês (ritmo, provável e otimista), evolução dos últimos meses, tendência (passado → agora → futuro), comparação com o mês ou o ano anterior, ritmo e meta do Plano de Voo, ranking de vendedores, clientes ou produtos, estoque parado e oportunidades entre empresas. Toque numa sugestão ou reformule a pergunta.";

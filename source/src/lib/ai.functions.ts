@@ -188,8 +188,10 @@ export const aiAsk = createServerFn({ method: "POST" })
       };
     }
 
-    // Chips chegam com a intenção marcada e pedem explicação corrida; pergunta digitada pede resposta direta.
-    const explain = intent === "explicar_tela" || data.intent !== undefined;
+    // Chips chegam com a intenção marcada e pedem explicação corrida; pergunta digitada pede resposta
+    // direta. A tendência (passado → agora → futuro) sempre pede a leitura corrida, um pouco maior.
+    const explain =
+      intent === "explicar_tela" || intent === "tendencia" || data.intent !== undefined;
     const task = explain ? ("explicar" as const) : ("responder" as const);
     const result = await magAiChat({
       task,

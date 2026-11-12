@@ -10,13 +10,16 @@ import type { AiFilters, AiIntent, AiTopic } from "./contract";
 import {
   breakdownFacts,
   comparisonFacts,
+  forecastFacts,
   headerLine,
+  historyFacts,
   opportunityFacts,
   overviewFacts,
   planFacts,
   revenueFacts,
   sellersFacts,
   stockFacts,
+  trendFacts,
 } from "./facts-format";
 
 type Db = SupabaseClient<Database>;
@@ -165,17 +168,19 @@ export async function buildFacts(
   // Demais intenções saem do Plano de Voo do mês (uma leitura só, com metas e conclusões).
   const { plan, month, asOf } = await planFor(db, userId, companyId, filters);
   const periodLabel = periodLabelOf(month);
-  const body =
-    intent === "ritmo_plano"
-      ? planFacts(plan)
-      : intent === "faturamento_periodo"
-        ? revenueFacts(plan)
-        : intent === "comparacao_periodos"
-          ? comparisonFacts(plan)
-          : intent === "ranking_vendedores" ||
-              (intent === "explicar_tela" && topic === "vendedores")
-            ? sellersFacts(plan)
-            : overviewFacts(plan);
+  const PLAN_PACKS: Partial<Record<AiIntent, (p: typeof plan) => string[]>> = {
+    ritmo_plano: planFacts,
+    previsao_mes: forecastFacts,
+    historico_meses: historyFacts,
+    tendencia: trendFacts,
+    faturamento_periodo: revenueFacts,
+    comparacao_periodos: comparisonFacts,
+    ranking_vendedores: sellersFacts,
+  };
+  const pack =
+    PLAN_PACKS[intent] ??
+    (intent === "explicar_tela" && topic === "vendedores" ? sellersFacts : overviewFacts);
+  const body = pack(plan);
   return {
     lines: [headerLine(name, periodLabel, asOf), ...clampFacts(body)],
     companyName: name,

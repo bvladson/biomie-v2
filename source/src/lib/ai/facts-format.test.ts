@@ -5,12 +5,15 @@ import { numbersOf, verifyAnswer } from "./verify";
 import {
   breakdownFacts,
   comparisonFacts,
+  forecastFacts,
   headerLine,
+  historyFacts,
   opportunityFacts,
   planFacts,
   revenueFacts,
   sellersFacts,
   stockFacts,
+  trendFacts,
 } from "./facts-format";
 
 const seller = (
@@ -57,8 +60,8 @@ const PLAN = {
     requiredDailyPace: 7530,
     gapUnreachable: false,
     runRateForecast: 515437,
-    forecastBase: null,
-    forecastProbable: null,
+    forecastBase: 492350,
+    forecastProbable: 472350,
     forecastCommit: null,
     portfolio: 80000,
     portfolioWeighted: 60000,
@@ -93,6 +96,26 @@ const PLAN = {
     seller("Bruno", 90000, 120000, "RISK"),
     seller("Carla", 60000, 80000, "ON_TRACK"),
   ],
+  query: { companyId: "c", month: "2026-11" },
+  weeks: [
+    {
+      index: 2,
+      start: "2026-11-09",
+      end: "2026-11-15",
+      workdays: 5,
+      target: 110000,
+      realized: 60000,
+      previousMonthSameWeek: null,
+      status: "ON_TRACK",
+      current: true,
+    },
+  ],
+  months: [
+    { month: "2026-08", target: 400000, realized: 380000, workdaysRemaining: 0 },
+    { month: "2026-09", target: 400000, realized: 389120, workdaysRemaining: 0 },
+    { month: "2026-10", target: 450000, realized: 460000, workdaysRemaining: 0 },
+    { month: "2026-11", target: 450000, realized: 412350, workdaysRemaining: 5 },
+  ],
 } as unknown as FlightPlan;
 
 describe("pacotes de fatos do Plano de Voo", () => {
@@ -120,6 +143,33 @@ describe("pacotes de fatos do Plano de Voo", () => {
     expect(text).toContain("1º Ana: R$ 158.900");
     expect(text).toContain("Em risco de não bater a meta: Bruno");
     expect(text).toContain("38,5%");
+  });
+
+  it("previsão: três cenários com a conclusão fechada e o ritmo necessário", () => {
+    const text = forecastFacts(PLAN).join("\n");
+    expect(text).toContain(
+      "Previsão no ritmo atual: R$ 515.437 — meta batida com sobra de R$ 65.437",
+    );
+    expect(text).toContain("Previsão provável (com a carteira ponderada): R$ 472.350");
+    expect(text).toContain("Previsão otimista (toda a carteira entra): R$ 492.350");
+    expect(text).toContain("o ritmo atual já basta");
+    expect(text).toContain("Semana atual (09/11/2026–15/11/2026): R$ 60.000 de R$ 110.000");
+  });
+
+  it("história: meses fechados com atingimento e a variação do último", () => {
+    const text = historyFacts(PLAN).join("\n");
+    expect(text).toContain("set/2026: R$ 389.120");
+    expect(text).toContain("out/2026: R$ 460.000 (meta R$ 450.000 — batida)");
+    expect(text).toContain("R$ 460.000 vs R$ 389.120 (variação +18,2%)");
+    expect(text).toContain("Mesmo corte do ano anterior");
+  });
+
+  it("tendência: passado, agora e futuro marcados", () => {
+    const text = trendFacts(PLAN).join("\n");
+    expect(text).toContain("PASSADO — out/2026: R$ 460.000");
+    expect(text).toContain("AGORA — mês atual: R$ 412.350 de R$ 450.000 de meta (91,6%)");
+    expect(text).toContain("FUTURO — previsão no ritmo atual: R$ 515.437");
+    expect(text).toContain("FUTURO — ritmo necessário por dia útil");
   });
 
   it("uma resposta que copia os fatos passa na trava", () => {

@@ -223,6 +223,129 @@ export function opportunityFacts(rows: Opportunity[], total: number): string[] {
   return lines;
 }
 
+const MES_PT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const mesLabel = (ym: string) => {
+  const [y, mo] = ym.split("-").map(Number);
+  return `${MES_PT[(mo ?? 1) - 1]}/${y}`;
+};
+
+/** Conclusão de um cenário de previsão contra a meta (o BIOMIE fecha a conta; a IA só repete). */
+function cenario(nome: string, valor: number | null, target: number | null): string | null {
+  if (valor == null) return null;
+  if (target == null) return `${nome}: ${m(valor)}`;
+  const diff = valor - target;
+  return `${nome}: ${m(valor)} — ${diff >= 0 ? `meta batida com sobra de ${m(diff)}` : `faltariam ${m(-diff)}`}`;
+}
+
+/** O QUE VAI ACONTECER: as previsões do mês já calculadas pelo motor do Plano de Voo. */
+export function forecastFacts(plan: FlightPlan): string[] {
+  const s = plan.summary;
+  const lines: string[] = [];
+  if (s.target != null)
+    lines.push(`Meta do mês: ${m(s.target)}; realizado até agora: ${m(s.realized)}`);
+  else lines.push(`Realizado até agora: ${m(s.realized)} (meta do mês não definida)`);
+  for (const linha of [
+    cenario("Previsão no ritmo atual", s.runRateForecast, s.target),
+    cenario("Previsão provável (com a carteira ponderada)", s.forecastProbable, s.target),
+    cenario("Previsão otimista (toda a carteira entra)", s.forecastBase, s.target),
+  ])
+    if (linha) lines.push(linha);
+  if (s.forecastCommit != null)
+    lines.push(`Compromissos assumidos pelos vendedores: ${m(s.forecastCommit)}`);
+  lines.push(`Restam ${i(s.workdaysRemaining)} dias úteis no mês`);
+  if (s.currentDailyPace != null && s.requiredDailyPace != null) {
+    const acel =
+      s.currentDailyPace > 0 && s.requiredDailyPace > s.currentDailyPace
+        ? ` — precisa acelerar ${p(s.requiredDailyPace / s.currentDailyPace - 1)}`
+        : s.requiredDailyPace <= s.currentDailyPace
+          ? " — o ritmo atual já basta"
+          : "";
+    lines.push(
+      `Ritmo por dia útil: atual ${m(s.currentDailyPace)}, necessário ${m(s.requiredDailyPace)}${acel}`,
+    );
+  }
+  if (s.gapUnreachable)
+    lines.push("Aviso do motor: no ritmo possível, a meta deste mês está fora de alcance");
+  const semana = plan.weeks?.find((w) => w.current);
+  if (semana && semana.target != null)
+    lines.push(
+      `Semana atual (${dmy(semana.start)}–${dmy(semana.end)}): ${m(semana.realized ?? 0)} de ${m(semana.target)}`,
+    );
+  if (s.status) lines.push(`Situação do plano: ${STATUS_PT[s.status]}`);
+  return lines;
+}
+
+/** O QUE ACONTECEU: meses fechados do ano do plano, com atingimento e tendência (contas do BIOMIE). */
+export function historyFacts(plan: FlightPlan): string[] {
+  const atual = plan.query.month;
+  const fechados = (plan.months ?? [])
+    .filter((row) => row.month < atual && row.realized > 0)
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  const lines: string[] = [];
+  if (fechados.length === 0) {
+    lines.push("Ainda não há meses fechados com venda no ano deste plano.");
+  } else {
+    for (const row of fechados.slice(-6)) {
+      const alvo =
+        row.target != null
+          ? ` (meta ${m(row.target)} — ${row.realized >= row.target ? "batida" : `${p(row.realized / row.target)} atingido`})`
+          : "";
+      lines.push(`${mesLabel(row.month)}: ${m(row.realized)}${alvo}`);
+    }
+    if (fechados.length >= 2) {
+      const ultimo = fechados[fechados.length - 1]!;
+      const anterior = fechados[fechados.length - 2]!;
+      lines.push(
+        `Último mês fechado contra o anterior: ${m(ultimo.realized)} vs ${m(anterior.realized)} (variação ${delta(ultimo.realized, anterior.realized)})`,
+      );
+    }
+  }
+  const c = plan.indicators.comparison;
+  lines.push(`Mês atual até agora: ${m(plan.summary.realized)}`);
+  lines.push(
+    `Mesmo corte do ano anterior: ${m(c.previousYearSameCut)} (variação ${delta(plan.summary.realized, c.previousYearSameCut)})`,
+  );
+  lines.push(`Média dos últimos 3 meses (mesmo corte): ${m(c.last3MonthsAvg)}`);
+  return lines;
+}
+
+/** TENDÊNCIA: o que aconteceu → o que está acontecendo → o que vai acontecer, numa leitura só. */
+export function trendFacts(plan: FlightPlan): string[] {
+  const s = plan.summary;
+  const c = plan.indicators.comparison;
+  const atual = plan.query.month;
+  const fechados = (plan.months ?? [])
+    .filter((row) => row.month < atual && row.realized > 0)
+    .sort((a, b) => (a.month < b.month ? -1 : 1))
+    .slice(-3);
+  const lines: string[] = [];
+  for (const row of fechados) lines.push(`PASSADO — ${mesLabel(row.month)}: ${m(row.realized)}`);
+  lines.push(
+    `PASSADO — mesmo corte do ano anterior: ${m(c.previousYearSameCut)} (variação ${delta(s.realized, c.previousYearSameCut)})`,
+  );
+  lines.push(
+    `AGORA — mês atual: ${m(s.realized)}${s.target != null ? ` de ${m(s.target)} de meta (${p(s.attainment)})` : ""}`,
+  );
+  if (s.idealToday != null && s.deviation != null)
+    lines.push(
+      `AGORA — contra o ideal do dia: ${s.deviation >= 0 ? "adiantado" : "atrasado"} ${m(Math.abs(s.deviation))}`,
+    );
+  if (s.status) lines.push(`AGORA — situação do plano: ${STATUS_PT[s.status]}`);
+  const fut1 = cenario("FUTURO — previsão no ritmo atual", s.runRateForecast, s.target);
+  const fut2 = cenario(
+    "FUTURO — previsão provável (carteira ponderada)",
+    s.forecastProbable,
+    s.target,
+  );
+  if (fut1) lines.push(fut1);
+  if (fut2) lines.push(fut2);
+  if (s.requiredDailyPace != null)
+    lines.push(
+      `FUTURO — ritmo necessário por dia útil até o fim do mês: ${m(s.requiredDailyPace)} (restam ${i(s.workdaysRemaining)} dias úteis)`,
+    );
+  return lines;
+}
+
 /** Visão geral (tela sem pacote próprio): ritmo + faturamento resumidos. */
 export function overviewFacts(plan: FlightPlan): string[] {
   const seen = new Set<string>();

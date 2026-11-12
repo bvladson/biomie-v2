@@ -30,6 +30,19 @@ describe("routeIntent (regras fixas, sem modelo)", () => {
   it("explicação", () => {
     expect(routeIntent("me explica essa tela", "vendas")).toBe("explicar_tela");
   });
+  it("previsões do motor (o que vai acontecer)", () => {
+    expect(routeIntent("qual a previsão do mês?", "plano")).toBe("previsao_mes");
+    expect(routeIntent("como vamos fechar novembro?", "vendas")).toBe("previsao_mes");
+    expect(routeIntent("o que vai acontecer com as vendas?", "geral")).toBe("previsao_mes");
+  });
+  it("história (o que aconteceu)", () => {
+    expect(routeIntent("o que aconteceu nos últimos meses?", "geral")).toBe("historico_meses");
+    expect(routeIntent("evolução das vendas mês a mês", "vendas")).toBe("historico_meses");
+  });
+  it("tendência (passado → futuro)", () => {
+    expect(routeIntent("qual a tendência?", "geral")).toBe("tendencia");
+    expect(routeIntent("me dá o panorama do passado e do futuro", "plano")).toBe("tendencia");
+  });
   it("fora do catálogo devolve null (a previsão do tempo da Fase 3)", () => {
     expect(routeIntent("qual a previsão do tempo amanhã?", "geral")).toBeNull();
     expect(routeIntent("ola, tudo bem?", "geral")).toBeNull();
