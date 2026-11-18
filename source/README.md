@@ -25,7 +25,7 @@ Drizzle para as migrations · Python no motor de inteligência · Docker na VPS.
 
 As regras de arquitetura que o código precisa obedecer — autorização por RLS, agregação em
 funções `SECURITY INVOKER`, origem única de cada métrica, `data_as_of` como única fonte de
-"hoje" — estão em [`AGENTS.md`](AGENTS.md).
+"hoje" — estão em [`ARQUITETURA.md`](ARQUITETURA.md).
 
 ## Rodar localmente
 
