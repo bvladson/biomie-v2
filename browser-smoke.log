@@ -1,6 +1,0 @@
-NAVIGATED /auth
-NAVIGATED /auth
-FILLED true true
-AUTH_RESPONSE 200 /_serverFn/ae8d44a4e8341974c9f9cef5c97ffef9a056eaf0193fa58d5c2e77674142dbf4
-CONSOLE_ERROR Access to fetch at 'https://biomie.magmoveiscorporativos.com.br/supabase/auth/v1/user' from origin 'http://127.0.0.1:33130' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.
-CONSOLE_ERROR Failed to load resource: net::ERR_FAILED

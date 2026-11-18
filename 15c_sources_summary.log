@@ -1,8 +1,0 @@
-UNIQUE_OMIE_APPLICATIONS 5 configured 5
-COMPANIES [{"id": 1, "slug": "MAG_FILIAL", "active": 1}, {"id": 2, "slug": "EXPERT", "active": 1}, {"id": 3, "slug": "UNI_DESIGN", "active": 1}, {"id": 4, "slug": "MAG_MATRIZ", "active": 1}, {"id": 5, "slug": "ERGOOFFICE", "active": 1}]
-MAG_FILIAL {'biomie_vendedores_omie': 37, 'biomie_clientes_dim': 1822, 'biomie_notas_fiscais_canonicas': 2532, 'biomie_notas_fiscais_itens_canonicos': 4321, 'biomie_pedidos_canonicos': 493, 'biomie_titulos_financeiros_canonicos': 9213}
-EXPERT {'biomie_vendedores_omie': 38, 'biomie_clientes_dim': 41, 'biomie_notas_fiscais_canonicas': 114, 'biomie_notas_fiscais_itens_canonicos': 195, 'biomie_pedidos_canonicos': 29, 'biomie_titulos_financeiros_canonicos': 130}
-UNI_DESIGN {'biomie_vendedores_omie': 38, 'biomie_clientes_dim': 34, 'biomie_notas_fiscais_canonicas': 108, 'biomie_notas_fiscais_itens_canonicos': 201, 'biomie_pedidos_canonicos': 67, 'biomie_titulos_financeiros_canonicos': 349}
-MAG_MATRIZ {'biomie_vendedores_omie': 38, 'biomie_clientes_dim': 3, 'biomie_notas_fiscais_canonicas': 1, 'biomie_notas_fiscais_itens_canonicos': 1, 'biomie_pedidos_canonicos': 0, 'biomie_titulos_financeiros_canonicos': 3}
-ERGOOFFICE {'biomie_vendedores_omie': 38, 'biomie_clientes_dim': 82, 'biomie_notas_fiscais_canonicas': 337, 'biomie_notas_fiscais_itens_canonicos': 585, 'biomie_pedidos_canonicos': 2, 'biomie_titulos_financeiros_canonicos': 351}
-

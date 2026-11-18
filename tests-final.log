@@ -1,9 +1,0 @@
-
- RUN  v4.1.11 C:/Users/VLADSON/Downloads/biomie-v2-deploy-20261019/source
-
-
- Test Files  24 passed (24)
-      Tests  150 passed (150)
-   Start at  10:49:14
-   Duration  19.94s (transform 2.04s, setup 5.52s, import 4.46s, tests 69.50s, environment 12.65s)
-

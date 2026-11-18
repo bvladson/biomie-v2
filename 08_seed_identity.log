@@ -1,2 +1,0 @@
-{"companies": 5, "credentials": 5, "users": 3, "password_hashes_preserved": 3, "role_counts": {"SUPER_ADMIN": 1, "GESTOR": 1, "VIEWER": 1}, "bcrypt_2y_login_test": "passed", "smoke_account": "temporary; removed after acceptance", "legacy_import": "identities and own configurations only; no passwords disclosed"}
-
