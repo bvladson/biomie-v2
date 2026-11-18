@@ -85,7 +85,7 @@ PREVIOUS_RELEASE = 'cb9aeeb06539'
 RUNNER_LOCAL = BASE / 'ops' / 'intel_diaria.py'
 RUNNER_REMOTE = '/opt/biomie-v2/bin/intel_diaria.py'
 SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=yes',
-       '-i', str(pathlib.Path.home() / '.ssh/hostinger_srv1851839_ed25519'), 'root@179.197.238.57']
+       '-i', str(pathlib.Path.home() / '.ssh/id_ed25519_vps'), 'root@203.0.113.10']
 
 
 def _held(path):
