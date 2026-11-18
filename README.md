@@ -88,3 +88,11 @@ O endereço real da VPS foi trocado pelo IP de documentação `203.0.113.10` (RF
 identificador da instância por `srv-vps`. Foram removidos os logs de instalação (continham
 metas de faturamento da empresa) e as capturas de tela do cockpit (continham a lista nominal
 da equipe de vendas). Nenhuma credencial foi versionada em nenhum momento.
+
+---
+
+## Autoria
+
+Projeto meu — concepção, arquitetura, implementação, implantação e operação em produção.
+Durante o desenvolvimento usei assistentes de IA (Codex e Claude) como ferramenta de apoio;
+a condução e as decisões técnicas são minhas.
