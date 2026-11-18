@@ -31,15 +31,34 @@ export interface FactsBundle {
   asOf: string;
 }
 
-/** O contexto do modelo é 2.048 tokens: os fatos ficam em no máximo 14 linhas / ~2.400 caracteres. */
-export function clampFacts(lines: string[]): string[] {
+/**
+ * O contexto do modelo rápido é 2.048 tokens: os fatos ficam em no máximo 14 linhas / ~2.400
+ * caracteres. A análise profunda roda com 4.096 e aceita mais (o gateway corta em 4.500 caracteres
+ * de entrada, contando a pergunta e as instruções).
+ */
+export function clampFacts(lines: string[], deep = false): string[] {
+  const maxLines = deep ? 34 : 14;
+  const maxChars = deep ? 3600 : 2400;
   const out: string[] = [];
   let size = 0;
   for (const line of lines) {
-    if (out.length >= 14 || size + line.length > 2400) break;
+    if (out.length >= maxLines || size + line.length > maxChars) break;
     out.push(line);
     size += line.length + 1;
   }
+  return out;
+}
+
+/** Junta pacotes sem repetir linha (a tendência e o ritmo compartilham algumas). */
+function merge(...packs: string[][]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const pack of packs)
+    for (const line of pack) {
+      if (seen.has(line)) continue;
+      seen.add(line);
+      out.push(line);
+    }
   return out;
 }
 
@@ -104,7 +123,11 @@ function analyticsQuery(
   } as AnalyticsQuery;
 }
 
-/** Monta os fatos de uma intenção do catálogo. Erros das funções de leitura sobem como estão (mensagens amigáveis). */
+/**
+ * Monta os fatos de uma intenção do catálogo. Erros das funções de leitura sobem como estão
+ * (mensagens amigáveis). Com `deep`, a ANÁLISE PROFUNDA recebe mais contexto: no estoque entram as
+ * oportunidades, e no comercial entram tendência, ritmo, indicadores e o ranking de vendedores.
+ */
 export async function buildFacts(
   db: Db,
   userId: string,
@@ -112,17 +135,27 @@ export async function buildFacts(
   topic: AiTopic,
   companyId: string,
   filters: AiFilters,
+  deep = false,
 ): Promise<FactsBundle> {
   const name = await companyName(db, companyId);
 
   if (intent === "estoque_parado" || (intent === "explicar_tela" && topic === "estoque")) {
     const intel = await import("@/lib/repositories/stock-intel.repository.server");
-    const [ov, asOf] = await Promise.all([intel.overview(db, companyId), dataAsOf(db, companyId)]);
+    const [ov, asOf, ops] = await Promise.all([
+      intel.overview(db, companyId),
+      dataAsOf(db, companyId),
+      deep
+        ? intel.opportunities(db, { companyId, page: 1 }).catch(() => null)
+        : Promise.resolve(null),
+    ]);
     const periodLabel = "estoque de hoje";
+    const body = ops
+      ? merge(stockFacts(ov), opportunityFacts(ops.rows, ops.total))
+      : stockFacts(ov);
     return {
       lines: [
         headerLine(name, periodLabel, ov.status.runs[0]?.asOf ?? asOf),
-        ...clampFacts(stockFacts(ov)),
+        ...clampFacts(body, deep),
       ],
       companyName: name,
       periodLabel,
@@ -132,16 +165,17 @@ export async function buildFacts(
 
   if (intent === "oportunidades_estoque") {
     const intel = await import("@/lib/repositories/stock-intel.repository.server");
-    const [ops, asOf] = await Promise.all([
+    const [ops, asOf, ov] = await Promise.all([
       intel.opportunities(db, { companyId, page: 1 }),
       dataAsOf(db, companyId),
+      deep ? intel.overview(db, companyId).catch(() => null) : Promise.resolve(null),
     ]);
     const periodLabel = "estoque de hoje";
+    const body = ov
+      ? merge(opportunityFacts(ops.rows, ops.total), stockFacts(ov))
+      : opportunityFacts(ops.rows, ops.total);
     return {
-      lines: [
-        headerLine(name, periodLabel, asOf),
-        ...clampFacts(opportunityFacts(ops.rows, ops.total)),
-      ],
+      lines: [headerLine(name, periodLabel, asOf), ...clampFacts(body, deep)],
       companyName: name,
       periodLabel,
       asOf,
@@ -154,11 +188,24 @@ export async function buildFacts(
     const dim = intent === "ranking_clientes" ? ("customer" as const) : ("product" as const);
     const q = analyticsQuery(companyId, filters, asOf.slice(0, 7));
     const b = await sales.getSalesBreakdown(db, q, dim);
+    const body = breakdownFacts(dim, b.rows, b.total);
+    if (deep) {
+      // Ranking + contexto do mês: dá para ligar a concentração ao ritmo e à meta.
+      const extra = await planFor(db, userId, companyId, filters).catch(() => null);
+      if (extra) {
+        return {
+          lines: [
+            headerLine(name, periodLabelOf(q.period), asOf),
+            ...clampFacts(merge(body, trendFacts(extra.plan)), true),
+          ],
+          companyName: name,
+          periodLabel: periodLabelOf(q.period),
+          asOf,
+        };
+      }
+    }
     return {
-      lines: [
-        headerLine(name, periodLabelOf(q.period), asOf),
-        ...clampFacts(breakdownFacts(dim, b.rows, b.total)),
-      ],
+      lines: [headerLine(name, periodLabelOf(q.period), asOf), ...clampFacts(body, deep)],
       companyName: name,
       periodLabel: periodLabelOf(q.period),
       asOf,
@@ -180,9 +227,12 @@ export async function buildFacts(
   const pack =
     PLAN_PACKS[intent] ??
     (intent === "explicar_tela" && topic === "vendedores" ? sellersFacts : overviewFacts);
-  const body = pack(plan);
+  // Na análise profunda o assunto pedido vem primeiro e o resto do mês entra como contexto.
+  const body = deep
+    ? merge(pack(plan), trendFacts(plan), planFacts(plan), revenueFacts(plan), sellersFacts(plan))
+    : pack(plan);
   return {
-    lines: [headerLine(name, periodLabel, asOf), ...clampFacts(body)],
+    lines: [headerLine(name, periodLabel, asOf), ...clampFacts(body, deep)],
     companyName: name,
     periodLabel,
     asOf,

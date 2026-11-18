@@ -49,6 +49,7 @@ const askSchema = z
     question: z.string().trim().min(2).max(280),
     intent: z.enum(AI_INTENTS).optional(),
     filters: filters.optional(),
+    deep: z.boolean().optional(),
   })
   .strict();
 
@@ -74,6 +75,22 @@ const SYSTEM_RESPONDER = [
   "Se o dado pedido não estiver nos fatos, responda apenas: Não tenho esse dado nesta tela.",
 ].join(" ");
 
+/**
+ * Análise profunda (segundo modelo, com raciocínio). Aqui ele PODE interpretar, apontar causas
+ * prováveis e sugerir ação — mas continua proibido de inventar número: o que não estiver nos fatos
+ * é marcado na tela (verify.markAnswer), e o BI segue sendo a única fonte dos valores.
+ */
+const SYSTEM_ANALISAR = [
+  "Você é o analista comercial do BIOMIE, o BI da MAG Móveis Corporativos. Pense antes de responder e escreva em português do Brasil.",
+  "Os FATOS abaixo foram calculados pelo BIOMIE e são a única fonte de números: copie cada valor exatamente como está escrito e nunca crie, some ou estime outro.",
+  "Sua contribuição é a leitura: o que aconteceu, o que está acontecendo, o que tende a acontecer, por quê, e o que fazer.",
+  "Estruture a resposta em três partes curtas, nesta ordem e com estes títulos: Leitura, Causas prováveis, O que fazer.",
+  "Em Causas prováveis diga que são hipóteses a confirmar e aponte onde conferir no BIOMIE (tela ou filtro).",
+  "Em O que fazer dê no máximo três ações concretas, cada uma ligada a um número dos fatos.",
+  "Se algo não estiver nos fatos, diga que o dado não está nesta tela em vez de supor o valor.",
+  "No máximo 12 linhas no total, sem repetir os fatos em lista.",
+].join(" ");
+
 const SYSTEM_EXPLICAR = [
   "Você é o assistente do BIOMIE, o BI comercial da MAG. Explique a situação em 3 a 5 frases simples, para um gestor com pressa, em português do Brasil.",
   "Use somente os FATOS fornecidos e copie os números exatamente como estão escritos.",
@@ -81,7 +98,11 @@ const SYSTEM_EXPLICAR = [
   "As conclusões (meta batida, variações, quanto falta) já estão prontas nos fatos; repita-as como estão.",
 ].join(" ");
 
-const FRIENDLY: Record<Exclude<AiAnswerStatus, "ok" | "descartada" | "fora_catalogo">, string> = {
+/** Mensagens de falha (os status "ok", "marcada", "descartada" e "fora_catalogo" têm texto próprio). */
+const FRIENDLY: Record<
+  Exclude<AiAnswerStatus, "ok" | "descartada" | "marcada" | "fora_catalogo">,
+  string
+> = {
   indisponivel: "A explicação automática está indisponível agora. Os números continuam na tela.",
   ocupado: "A IA está ocupada com outro pedido. Tente de novo em instantes.",
   limite: "A IA atingiu o limite de pedidos por agora. Tente de novo em alguns minutos.",
@@ -99,11 +120,14 @@ export const aiAvailability = createServerFn({ method: "GET" })
     const { magAiConfig, magAiHealth } = await import("./ai/mag-ai.server");
     if (!magAiConfig()) return { enabled, reachable: "off", firstUseSlow: false };
     const health = await magAiHealth();
-    if (!health) return { enabled, reachable: "degraded", firstUseSlow: true };
+    if (!health) {
+      return { enabled, reachable: "degraded", firstUseSlow: true, deepAvailable: false };
+    }
     return {
       enabled,
       reachable: health.status === "ok" ? "ok" : "degraded",
       firstUseSlow: !health.modelLoaded,
+      deepAvailable: health.deep,
     };
   });
 
@@ -171,6 +195,7 @@ export const aiAsk = createServerFn({ method: "POST" })
       data.topic,
       data.companyId,
       cleanFilters(data.filters),
+      data.deep === true,
     );
 
     const { magAiChat, magAiConfig } = await import("./ai/mag-ai.server");
@@ -188,16 +213,21 @@ export const aiAsk = createServerFn({ method: "POST" })
       };
     }
 
-    // Chips chegam com a intenção marcada e pedem explicação corrida; pergunta digitada pede resposta
-    // direta. A tendência (passado → agora → futuro) sempre pede a leitura corrida, um pouco maior.
+    // Análise profunda: segundo modelo, com raciocínio. Chips chegam com a intenção marcada e pedem
+    // explicação corrida; pergunta digitada pede resposta direta. A tendência sempre pede a corrida.
+    const deep = data.deep === true;
     const explain =
       intent === "explicar_tela" || intent === "tendencia" || data.intent !== undefined;
-    const task = explain ? ("explicar" as const) : ("responder" as const);
+    const task = deep
+      ? ("analisar" as const)
+      : explain
+        ? ("explicar" as const)
+        : ("responder" as const);
     const result = await magAiChat({
       task,
-      system: explain ? SYSTEM_EXPLICAR : SYSTEM_RESPONDER,
+      system: deep ? SYSTEM_ANALISAR : explain ? SYSTEM_EXPLICAR : SYSTEM_RESPONDER,
       user: `${bundle.lines.join("\n")}\n\nPERGUNTA: ${data.question}`,
-      maxTokens: explain ? 260 : 220,
+      maxTokens: deep ? 880 : explain ? 260 : 220,
     });
 
     if (!result.ok) {
@@ -214,9 +244,11 @@ export const aiAsk = createServerFn({ method: "POST" })
       };
     }
 
-    const { verifyAnswer, fallbackText } = await import("./ai/verify");
+    const { verifyAnswer, fallbackText, markAnswer } = await import("./ai/verify");
     const check = verifyAnswer(result.content, bundle.lines);
-    const status: AiAnswerStatus = check.ok ? "ok" : "descartada";
+    // Resposta rápida com número estranho é DESCARTADA (entram os fatos). Na análise profunda o
+    // raciocínio é o produto: o texto fica, com os valores não conferidos marcados na tela.
+    const status: AiAnswerStatus = check.ok ? "ok" : deep ? "marcada" : "descartada";
     const requestId = await log(intent, status, {
       model: result.model,
       queueMs: result.queueMs,
@@ -226,13 +258,18 @@ export const aiAsk = createServerFn({ method: "POST" })
     });
     return {
       status,
-      text: check.ok ? result.content : fallbackText(bundle.lines),
+      text: check.ok
+        ? result.content
+        : deep
+          ? markAnswer(result.content, check.flagged)
+          : fallbackText(bundle.lines),
       facts: bundle.lines,
       requestId,
       intent,
       model: result.model || null,
       totalMs: Date.now() - started,
       flagged: check.flagged.length,
+      mode: deep ? "profunda" : "rapida",
     };
   });
 

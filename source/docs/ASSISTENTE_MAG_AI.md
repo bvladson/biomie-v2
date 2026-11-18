@@ -36,6 +36,37 @@ MAG (MAG AI: Ollama `qwen3.5:0.8b-q8_0` atrás de um gateway interno na VPS). Se
 | admin | `src/components/admin/AssistantTab.tsx` |
 | banco | `drizzle/migrations/0052_assistente_mag_ai.sql` (+ rollback e suíte `verify_ai_requests.sql`) |
 
+## Análise profunda (18/11/2026)
+
+Segundo caminho no mesmo balão, com um **segundo modelo local de raciocínio** (DeepSeek-R1 compacto),
+escolhido pelo botão "Análise profunda". Nada sai do servidor em nenhum dos dois modos.
+
+| | Resposta rápida | Análise profunda |
+|---|---|---|
+| modelo | `MAG_AI_MODEL` (qwen3.5 0.8b) | `MAG_AI_MODEL_ANALISE` (deepseek-r1 1.5b) |
+| tarefa no gateway | explicar / responder | `analisar` (`think: true`, contexto 4096) |
+| fatos | o pacote da intenção (até 14 linhas) | pacote + tendência + ritmo + indicadores + vendedores (até 34) |
+| tempo | 9 a 14 s | 1 a 2 min |
+| número fora dos fatos | resposta DESCARTADA (entram os fatos) | texto MARCADO com ⚠ e aviso (status `marcada`) |
+| formato | 1 a 4 frases | Leitura / Causas prováveis / O que fazer |
+
+Por que marcar em vez de descartar: na análise o raciocínio é o produto. Descartar tudo por um
+arredondamento devolveria uma ferramenta inútil; marcar deixa o texto legível e mostra exatamente o
+que não foi conferido contra o BI. Os números oficiais seguem sendo os das telas.
+
+O botão só aparece quando o gateway responde `analise: "on"` no `/v1/health` — ou seja, quando o
+segundo modelo está instalado. Sem ele, a tarefa `analisar` é recusada (`task_not_allowed`) e o balão
+continua só com o modo rápido.
+
+Instalação do segundo modelo (projeto `mag-ai`, na VPS):
+
+    bash ops/mag-ai.sh preparar-analise      # compose novo, gateway 0.2.0, tarefa liberada no apps.json
+    bash ops/mag-ai.sh modelo-analise        # baixa pela rede temporária e REGISTRA o manifesto
+    bash ops/mag-ai.sh subir && bash ops/mag-ai.sh testar
+
+Para desligar só a análise profunda: tirar `MAG_AI_MODEL_ANALISE` do `/opt/mag-ai/.env` e subir o
+gateway de novo. O botão desaparece; o modo rápido não é afetado.
+
 ## Limites herdados do gateway (aplicação `biomie`)
 
 6 pedidos/min, 300/dia, 4.500 caracteres de entrada, 400 tokens de saída, 60 s de prazo, fila 2.

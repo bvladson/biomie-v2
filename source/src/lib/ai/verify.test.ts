@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fallbackText, numbersOf, readingsOf, verifyAnswer } from "./verify";
+import { fallbackText, markAnswer, numbersOf, readingsOf, verifyAnswer } from "./verify";
 
 const FACTS = [
   "FATOS — MAG Filial, Novembro / 2026, dados de 10/11/2026:",
@@ -62,5 +62,30 @@ describe("verifyAnswer", () => {
     const text = fallbackText(FACTS);
     expect(text).toContain("resposta segura");
     expect(text).toContain("R$ 412.350");
+  });
+});
+
+describe("markAnswer (análise profunda: marca em vez de descartar)", () => {
+  it("marca só o número estranho e mantém o texto do raciocínio", () => {
+    const resposta =
+      "Leitura: faturamos R$ 412.350, 91,6% da meta. Causas prováveis: a margem de 10,2% caiu.";
+    const check = verifyAnswer(resposta, FACTS);
+    const marcado = markAnswer(resposta, check.flagged);
+    expect(marcado).toContain("10,2 ⚠");
+    expect(marcado).toContain("R$ 412.350,"); // o número conferido fica intacto
+    expect(marcado).not.toContain("412.350 ⚠");
+    expect(marcado).toContain("não foram conferidos");
+  });
+
+  it("sem número estranho devolve o texto igual, sem aviso", () => {
+    const resposta = "Leitura: R$ 412.350 de R$ 450.000.";
+    expect(markAnswer(resposta, [])).toBe(resposta);
+  });
+
+  it("marcar o valor maior não marca o número menor que existe dentro dele", () => {
+    const marcado = markAnswer("Soma de R$ 862.350 e de 350 unidades.", ["862.350"]);
+    expect(marcado).toContain("862.350 ⚠");
+    expect(marcado).toContain("350 unidades"); // não virou "350 ⚠ unidades"
+    expect((marcado.match(/⚠/g) ?? []).length).toBe(2); // 1 marca + a nota final
   });
 });

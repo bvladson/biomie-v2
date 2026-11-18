@@ -41,11 +41,14 @@ export interface AiAskInput {
   question: string;
   intent?: AiIntent;
   filters?: AiFilters;
+  /** Análise profunda: segundo modelo, com raciocínio, mais fatos e resposta mais longa. */
+  deep?: boolean;
 }
 
 export type AiAnswerStatus =
   | "ok"
-  | "descartada" // número fora dos fatos: entra o texto-modelo com os fatos
+  | "descartada" // resposta rápida com número fora dos fatos: entra o texto-modelo com os fatos
+  | "marcada" // análise profunda com número fora dos fatos: o texto vem com os trechos marcados
   | "fora_catalogo"
   | "indisponivel"
   | "ocupado"
@@ -61,13 +64,17 @@ export interface AiAnswer {
   intent: AiIntent | null;
   model: string | null;
   totalMs: number;
-  /** Quantos números a trava descartou (0 quando status "ok"). */
+  /** Quantos números a trava não encontrou nos fatos (0 quando status "ok"). */
   flagged: number;
+  /** Qual caminho respondeu: o modelo rápido ou o de raciocínio. */
+  mode?: "rapida" | "profunda";
 }
 
 export interface AiAvailability {
   /** Chave ai_assistant ligada para este usuário (o balão só aparece com a feature). */
   enabled: boolean;
+  /** Segundo modelo (raciocínio) disponível no gateway: libera o botão "Análise profunda". */
+  deepAvailable?: boolean;
   /** Gateway configurado e respondendo. "off" = sem configuração; a tela continua com os números. */
   reachable: "ok" | "degraded" | "off";
   /** Modelo descarregado: o primeiro pedido leva ~45 s. */

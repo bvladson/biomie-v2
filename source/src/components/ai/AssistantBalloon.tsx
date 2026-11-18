@@ -10,6 +10,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   AlertTriangle,
+  Brain,
   ChevronDown,
   Loader2,
   Send,
@@ -44,16 +45,35 @@ interface ChatItem {
 }
 
 const STAGES = ["Consultando os fatos…", "Redigindo com a IA local…", "Conferindo os números…"];
+const STAGES_DEEP = [
+  "Reunindo os fatos do período…",
+  "A IA está raciocinando (pode levar 1 a 2 minutos)…",
+  "Conferindo cada número contra o BI…",
+];
 
 function AnswerBlock({ item, onRate }: { item: ChatItem; onRate: (useful: boolean) => void }) {
   const a = item.answer;
   if (!a) return null;
-  const soft = a.status !== "ok" && a.status !== "descartada" && a.status !== "fora_catalogo";
+  const soft =
+    a.status !== "ok" &&
+    a.status !== "descartada" &&
+    a.status !== "marcada" &&
+    a.status !== "fora_catalogo";
   return (
     <div className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
+      {a.mode === "profunda" && (
+        <p className="mb-1 flex items-center gap-1 text-[11px] font-medium text-primary">
+          <Brain className="size-3" /> Análise profunda
+        </p>
+      )}
       {a.status === "descartada" && (
         <p className="mb-1 flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-500">
           <AlertTriangle className="size-3" /> Resposta da IA descartada pela conferência de números
+        </p>
+      )}
+      {a.status === "marcada" && (
+        <p className="mb-1 flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-500">
+          <AlertTriangle className="size-3" /> {a.flagged} valor(es) sem conferência, marcados com ⚠
         </p>
       )}
       <p className="whitespace-pre-wrap">{a.text}</p>
@@ -76,7 +96,7 @@ function AnswerBlock({ item, onRate }: { item: ChatItem; onRate: (useful: boolea
           </CollapsibleContent>
         </Collapsible>
       )}
-      {a.requestId && a.status === "ok" && (
+      {a.requestId && (a.status === "ok" || a.status === "marcada") && (
         <div className="mt-2 flex items-center gap-1">
           <span className="text-[11px] text-muted-foreground">Ajudou?</span>
           <button
@@ -127,6 +147,9 @@ export function AssistantBalloon() {
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState(0);
   const [slowHint, setSlowHint] = useState(false);
+  /** Modo escolhido pela pessoa: resposta rápida ou análise profunda (segundo modelo). */
+  const [deep, setDeep] = useState(false);
+  const [deepRunning, setDeepRunning] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const topic = topicOf(pathname);
@@ -157,16 +180,19 @@ export function AssistantBalloon() {
     ...(resolved.category ? { category: resolved.category } : {}),
   };
 
+  const deepOn = deep && availability?.deepAvailable === true;
+
   const ask = async (text: string, intent?: AiIntent) => {
     const q = text.trim();
     if (!q || busy) return;
     setQuestion("");
     setBusy(true);
+    setDeepRunning(deepOn);
     setStage(0);
     setSlowHint(false);
     setItems((prev) => [...prev, { question: q, answer: null, rated: null }]);
-    const t1 = setTimeout(() => setStage(1), 1800);
-    const t2 = setTimeout(() => setStage(2), 9000);
+    const t1 = setTimeout(() => setStage(1), deepOn ? 2500 : 1800);
+    const t2 = setTimeout(() => setStage(2), deepOn ? 45_000 : 9000);
     const t3 = setTimeout(() => setSlowHint(true), 7000);
     try {
       const answer = await askFn({
@@ -176,6 +202,7 @@ export function AssistantBalloon() {
           question: q,
           ...(intent ? { intent } : {}),
           filters,
+          ...(deepOn ? { deep: true } : {}),
         },
       });
       setItems((prev) => prev.map((it, i) => (i === prev.length - 1 ? { ...it, answer } : it)));
@@ -214,6 +241,7 @@ export function AssistantBalloon() {
       clearTimeout(t2);
       clearTimeout(t3);
       setBusy(false);
+      setDeepRunning(false);
       setSlowHint(false);
     }
   };
@@ -275,8 +303,9 @@ export function AssistantBalloon() {
                   <AnswerBlock item={item} onRate={(useful) => rate(i, useful)} />
                 ) : (
                   <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
-                    <Loader2 className="size-3.5 animate-spin" /> {STAGES[stage]}
-                    {slowHint && (availability?.firstUseSlow ?? true) && (
+                    <Loader2 className="size-3.5 animate-spin" />{" "}
+                    {(deepRunning ? STAGES_DEEP : STAGES)[stage]}
+                    {slowHint && !deepRunning && (availability?.firstUseSlow ?? true) && (
                       <span className="opacity-75">(primeiro uso: a IA carrega em até 1 min)</span>
                     )}
                   </div>
@@ -298,6 +327,28 @@ export function AssistantBalloon() {
               </button>
             ))}
           </div>
+
+          {availability?.deepAvailable && (
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <button
+                type="button"
+                aria-pressed={deep}
+                disabled={busy}
+                onClick={() => setDeep((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
+                  deep
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:border-primary/50 hover:text-foreground",
+                )}
+              >
+                <Brain className="size-3" /> Análise profunda
+              </button>
+              <span className="text-[11px] text-muted-foreground">
+                {deep ? "Pensa mais fundo; leva 1 a 2 min." : "Resposta rápida (9 a 14 s)."}
+              </span>
+            </div>
+          )}
 
           <form
             className="flex items-end gap-2 px-3 py-2.5"

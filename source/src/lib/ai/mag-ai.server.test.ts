@@ -112,7 +112,22 @@ describe("magAiHealth", () => {
       Promise.resolve(respond(200, { status: "ok", ollama: "up", model_loaded: false, queue: 0 })),
     );
     const { magAiHealth } = await fresh();
-    expect(await magAiHealth()).toEqual({ status: "ok", modelLoaded: false, queue: 0 });
+    expect(await magAiHealth()).toEqual({
+      status: "ok",
+      modelLoaded: false,
+      queue: 0,
+      deep: false,
+    });
+  });
+
+  it("analise 'on' no health libera o modo profundo", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        respond(200, { status: "ok", ollama: "up", model_loaded: true, queue: 0, analise: "on" }),
+      ),
+    );
+    const { magAiHealth } = await fresh();
+    expect(await magAiHealth()).toEqual({ status: "ok", modelLoaded: true, queue: 0, deep: true });
   });
 
   it("gateway fora do ar devolve null", async () => {

@@ -79,6 +79,23 @@ export function verifyAnswer(answer: string, factLines: string[]): VerifyResult 
   return { ok: flagged.length === 0, flagged };
 }
 
+/**
+ * Marca no texto os números que não estão nos fatos, em vez de descartar a resposta inteira.
+ * Usado na ANÁLISE PROFUNDA: o raciocínio continua legível e o leitor vê exatamente o que não foi
+ * conferido contra o BI. A resposta rápida continua sendo descartada (fallbackText).
+ */
+export function markAnswer(answer: string, flagged: string[]): string {
+  if (flagged.length === 0) return answer;
+  // Dos maiores para os menores, para "1.234,56" não ser marcado dentro de "1.234".
+  const alvos = [...new Set(flagged)].sort((a, b) => b.length - a.length);
+  let out = answer;
+  for (const token of alvos) {
+    const escapado = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`(?<![\\d,.⚠])${escapado}(?![\\d,.])`, "g"), `${token} ⚠`);
+  }
+  return `${out}\n\n⚠ Os valores marcados não foram conferidos contra os números do BI: trate-os como leitura da IA, não como dado oficial.`;
+}
+
 /** Texto-modelo quando a resposta é descartada: os mesmos fatos, sem redação da IA. */
 export function fallbackText(factLines: string[]): string {
   const shown = factLines.slice(0, 8);

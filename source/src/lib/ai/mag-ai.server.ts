@@ -3,7 +3,8 @@
 // Contrato do gateway (mag-ai/gateway): POST /v1/chat {task, messages, max_tokens, stream:false}
 // com Authorization: Bearer <chave>; GET /v1/health {status, ollama, model_loaded, queue}.
 
-export type MagAiTask = "explicar" | "resumir" | "responder" | "classificar";
+/** "analisar" usa o segundo modelo do gateway (raciocínio local); as outras usam o rápido. */
+export type MagAiTask = "explicar" | "resumir" | "responder" | "classificar" | "analisar";
 
 export interface MagAiOk {
   ok: true;
@@ -38,6 +39,8 @@ export interface MagAiHealth {
   status: string;
   modelLoaded: boolean;
   queue: number;
+  /** O gateway tem o segundo modelo (raciocínio) configurado? */
+  deep: boolean;
 }
 
 export async function magAiHealth(): Promise<MagAiHealth | null> {
@@ -46,11 +49,17 @@ export async function magAiHealth(): Promise<MagAiHealth | null> {
   try {
     const r = await fetch(`${cfg.url}/v1/health`, { signal: AbortSignal.timeout(2500) });
     if (!r.ok) return null;
-    const j = (await r.json()) as { status?: string; model_loaded?: boolean; queue?: number };
+    const j = (await r.json()) as {
+      status?: string;
+      model_loaded?: boolean;
+      queue?: number;
+      analise?: string;
+    };
     return {
       status: typeof j.status === "string" ? j.status : "degraded",
       modelLoaded: j.model_loaded === true,
       queue: Number(j.queue ?? 0),
+      deep: j.analise === "on",
     };
   } catch {
     return null;
@@ -95,7 +104,10 @@ export async function magAiChat(input: {
         ...(input.maxTokens ? { max_tokens: input.maxTokens } : {}),
         stream: false,
       }),
-      signal: AbortSignal.timeout(input.timeoutMs ?? 45_000),
+      // A análise profunda pensa passo a passo: prazo maior (o gateway limita a 200 s por pedido).
+      signal: AbortSignal.timeout(
+        input.timeoutMs ?? (input.task === "analisar" ? 180_000 : 45_000),
+      ),
     });
   } catch {
     breaker.failures += 1;
