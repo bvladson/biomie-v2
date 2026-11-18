@@ -1,4 +1,4 @@
-# BIOMIE v2 — Runbook de produção (VPS 179.197.238.57)
+# BIOMIE v2 — Runbook de produção (VPS 203.0.113.10)
 
 Este documento descreve como a v2 é implantada, operada e revertida. Os comandos
 rodam no PC de operação, na raiz da pasta de deploy, e chegam à VPS por SSH.
