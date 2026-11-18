@@ -17,7 +17,7 @@ import time
 BASE = pathlib.Path(__file__).resolve().parent.parent
 SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
        '-o', 'StrictHostKeyChecking=yes', '-o', 'ServerAliveInterval=30',
-       '-i', str(pathlib.Path.home() / '.ssh/hostinger_srv1851839_ed25519'), 'root@179.197.238.57']
+       '-i', str(pathlib.Path.home() / '.ssh/id_ed25519_vps'), 'root@203.0.113.10']
 
 REMOTE = r'''
 import json, pathlib, re, subprocess, sys, urllib.request, urllib.error, uuid
