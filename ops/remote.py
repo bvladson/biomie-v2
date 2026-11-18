@@ -14,8 +14,8 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 BASE = pathlib.Path(__file__).resolve().parent.parent
 SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=yes',
-       '-o', 'ServerAliveInterval=30', '-i', str(pathlib.Path.home() / '.ssh/hostinger_srv1851839_ed25519'),
-       'root@179.197.238.57']
+       '-o', 'ServerAliveInterval=30', '-i', str(pathlib.Path.home() / '.ssh/id_ed25519_vps'),
+       'root@203.0.113.10']
 script = pathlib.Path(sys.argv[1])
 args = ' '.join(shlex.quote(a) for a in sys.argv[2:])
 result = subprocess.run(SSH + ['python3 - ' + args], input=script.read_text(encoding='utf-8'),
