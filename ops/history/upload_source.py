@@ -8,7 +8,7 @@ with tarfile.open(archive,'w:gz') as tf:
         rel=path.relative_to(source)
         if any(part in excluded for part in rel.parts) or path.name.startswith('.env') or path.suffix in {'.log','.tsbuildinfo'}:continue
         if path.is_file():tf.add(path,arcname=str(rel).replace('\\','/'),recursive=False)
-SSH=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=15','-o','StrictHostKeyChecking=yes','-i',str(pathlib.Path.home()/'.ssh/hostinger_srv1851839_ed25519'),'root@179.197.238.57']
+SSH=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=15','-o','StrictHostKeyChecking=yes','-i',str(pathlib.Path.home()/'.ssh/id_ed25519_vps'),'root@203.0.113.10']
 script="import pathlib,sys,tarfile; p=pathlib.Path('/opt/biomie-v2/releases/20261019-source'); p.mkdir(parents=True,exist_ok=True); tf=tarfile.open(fileobj=sys.stdin.buffer,mode='r|gz'); tf.extractall(p,filter='data'); print('Source uploaded to',p)"
 import shlex
 with archive.open('rb') as f:
